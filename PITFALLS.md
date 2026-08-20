@@ -45,6 +45,15 @@ own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see
 then all six platform+arch combos are covered. Those tarballs also contain standalone executables
 (`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
 
+## P13 — Subagent spawn can fail on the host runtime, not on your prompt
+**Symptom:** `Agent` returns *"Failed to create teammate pane: Timed out waiting for the Orca runtime
+to respond"* or *"tmux: Timed out waiting for split pane handle"*. Nothing about the brief is wrong.
+**Cause:** the teammate pane is created through the host runtime / tmux; when that is busy or wedged,
+spawning fails regardless of the task.
+**Instead:** this is an environment failure, not a code failure (R072) — do not rewrite the brief.
+Retry once, then route around by doing the work in-session (R070) and record it here. Parallelism is
+an optimization; the tasks and gates are the contract, and they do not care who ran them.
+
 ## P12 — Two agents appending to PITFALLS.md at once produce duplicate numbers
 **Symptom:** the file contains two `## P4`, two `## P5`, two `## P6`, and cross-references become
 ambiguous.
