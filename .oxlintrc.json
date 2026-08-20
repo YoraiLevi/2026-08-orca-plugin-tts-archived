@@ -1,5 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
   "categories": { "correctness": "error", "suspicious": "warn" },
-  "env": { "node": true, "es2023": true }
+  "env": { "node": true, "es2023": true },
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**"]
 }

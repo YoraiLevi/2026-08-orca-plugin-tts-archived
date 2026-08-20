@@ -54,3 +54,6 @@ jobs:
 
       - name: Smoke test — the OS synthesizer produces real audio bytes
         run: node scripts/smoke-synth.mjs
+
+      - name: Smoke test — activate() registers every command the manifest declares
+        run: node scripts/smoke-activate.mjs

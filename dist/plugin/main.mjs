@@ -227,34 +227,74 @@ var ProviderRegistry = class {
 };
 
 // packages/plugin/src/adapter/index.ts
-function makeHost(ctx) {
-  const o = ctx.orca ?? {};
-  const safe = (fn, fallback) => (...args) => {
+function makeHost(orca) {
+  let registered = 0;
+  const log = (m) => {
     try {
-      return fn === void 0 ? fallback : fn(...args);
+      orca.log(m);
     } catch {
-      return fallback;
     }
   };
   return {
-    log: safe(o.log?.bind(o), void 0),
-    notify: safe(o.notify?.bind(o) ?? o.log?.bind(o), void 0),
-    storageGet: safe(o.storageGet?.bind(o), Promise.resolve(void 0)),
-    storageSet: safe(o.storageSet?.bind(o), Promise.resolve()),
-    onEvent: safe(o.onEvent?.bind(o), void 0),
-    registerCommand: safe(o.registerCommand?.bind(o), void 0)
+    log,
+    registeredCommands: () => registered,
+    notify(title, body) {
+      const params = { title: title.slice(0, 120) };
+      if (body !== void 0) params["body"] = body.slice(0, 1e3);
+      void Promise.resolve(orca.host.call("notifications.show", params)).catch(() => {
+        log(`notification suppressed: ${title}`);
+      });
+    },
+    async storageGet(key) {
+      try {
+        const r = await orca.host.call("storage.get", { key });
+        return r?.value;
+      } catch {
+        return void 0;
+      }
+    },
+    async storageSet(key, value) {
+      try {
+        await orca.host.call("storage.set", { key, value });
+      } catch {
+      }
+    },
+    onEvent(name, handler) {
+      try {
+        orca.events.on(name, handler);
+      } catch (err) {
+        log(`could not subscribe to ${name}: ${String(err)}`);
+      }
+    },
+    registerCommand(id, handler) {
+      try {
+        orca.commands.register(id, async () => {
+          try {
+            await handler();
+            return { ok: true };
+          } catch (err) {
+            log(`command ${id} failed: ${String(err)}`);
+            return { ok: false, error: String(err) };
+          }
+        });
+        registered++;
+      } catch (err) {
+        log(`could not register command ${id}: ${String(err)}`);
+      }
+    }
   };
 }
 function asAgentStatus(payload) {
   if (typeof payload !== "object" || payload === null) return null;
   const p = payload;
   if (typeof p["paneKey"] !== "string" || typeof p["state"] !== "string") return null;
-  return {
+  const out = {
     worktreeId: typeof p["worktreeId"] === "string" ? p["worktreeId"] : null,
     paneKey: p["paneKey"],
     state: p["state"],
     receivedAt: typeof p["receivedAt"] === "number" ? p["receivedAt"] : 0
   };
+  return typeof p["sessionId"] === "string" ? { ...out, sessionId: p["sessionId"] } : out;
 }
 function worktreePathFrom(worktreeId) {
   if (worktreeId === null) return null;
@@ -1184,66 +1224,94 @@ var HuddleController = class {
 };
 
 // packages/plugin/src/main.ts
-async function activate(ctx) {
-  const host = makeHost(ctx);
+function activate(orca) {
+  const host = makeHost(orca);
   host.log("read-aloud: activating");
   const registry = new ProviderRegistry();
   registry.register(new OsSynthProvider(), { preferred: true });
-  const resolved = await registry.resolve();
-  if (resolved === null) {
-    host.notify("Read Aloud: no speech engine is available on this system.");
-    host.log("read-aloud: no provider resolved; commands will report rather than stay silent");
-    return;
-  }
-  if (resolved.status.reason !== void 0) host.notify(`Read Aloud: ${resolved.status.reason}`);
   const sink = new SubprocessSink({ log: host.log });
-  const speech = new SpeechService({ provider: resolved.provider, sink, log: host.log });
-  const speakOrExplain = async (text, emptyMessage) => {
-    if (text.trim().length === 0) {
-      host.notify(emptyMessage);
+  let speech = null;
+  let engineError = null;
+  void registry.resolve().then((resolved) => {
+    if (resolved === null) {
+      engineError = "no speech engine is available on this system";
+      host.log(`read-aloud: ${engineError}`);
       return;
     }
-    speech.speak(text);
+    speech = new SpeechService({ provider: resolved.provider, sink, log: host.log });
+    host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`);
+    if (resolved.status.reason !== void 0) host.notify("Read Aloud", resolved.status.reason);
+  }).catch((err) => {
+    engineError = String(err);
+    host.log(`read-aloud: engine resolution failed: ${engineError}`);
+  });
+  const withSpeech = async (fn) => {
+    if (speech === null) {
+      host.notify("Read Aloud", engineError ?? "still starting up, try again in a moment");
+      return;
+    }
+    await fn(speech);
   };
   host.registerCommand("read-aloud.speak-clipboard", async () => {
-    if (speech.isSpeaking) {
-      await speech.stop();
-      return;
-    }
-    try {
-      const { text, truncated } = await readClipboard();
-      if (truncated) host.notify("Read Aloud: clipboard was long; reading the first part.");
-      await speakOrExplain(text, "Read Aloud: the clipboard is empty.");
-    } catch (err) {
-      if (err instanceof ClipboardUnavailableError) host.notify(`Read Aloud: ${err.message}`);
-      else host.notify("Read Aloud: could not read the clipboard.");
-    }
+    await withSpeech(async (s) => {
+      if (s.isSpeaking) {
+        await s.stop();
+        return;
+      }
+      try {
+        const { text, truncated } = await readClipboard();
+        if (text.trim().length === 0) {
+          host.notify("Read Aloud", "the clipboard is empty");
+          return;
+        }
+        if (truncated) host.notify("Read Aloud", "clipboard was long; reading the first part");
+        s.speak(text);
+      } catch (err) {
+        host.notify("Read Aloud", err instanceof ClipboardUnavailableError ? err.message : "could not read the clipboard");
+      }
+    });
   });
   host.registerCommand("read-aloud.stop", async () => {
-    await speech.stop();
+    await withSpeech(async (s) => {
+      await s.stop();
+    });
   });
   const huddle = new HuddleController({
-    speech,
+    speech: {
+      speak: (t) => {
+        speech?.speak(t);
+      },
+      stop: async () => {
+        await speech?.stop();
+      }
+    },
     log: host.log,
-    notify: host.notify,
-    onUnsupportedAgent: (name) => {
-      host.notify(`Read Aloud: huddle mode does not support ${name} \u2014 it has no transcript format we can read.`);
+    notify: (m) => {
+      host.notify("Read Aloud", m);
     }
   });
   host.registerCommand("read-aloud.toggle-huddle", () => {
     const on = huddle.toggle();
-    host.notify(`Read Aloud: huddle mode ${on ? "on" : "off"}`);
+    host.notify("Read Aloud", `huddle mode ${on ? "on" : "off"}`);
   });
   host.registerCommand("read-aloud.speak-last-reply", async () => {
-    const text = await huddle.lastReply();
-    await speakOrExplain(text ?? "", "Read Aloud: no agent reply to read yet.");
+    await withSpeech(async (s) => {
+      const text = await huddle.lastReply();
+      if (text === null) {
+        host.notify("Read Aloud", "no agent reply to read yet");
+        return;
+      }
+      s.speak(text);
+    });
   });
   host.onEvent("agent.status.changed", (payload) => {
     const status = asAgentStatus(payload);
     if (status === null) return;
     huddle.onAgentStatus(status, worktreePathFrom(status.worktreeId));
   });
-  host.log("read-aloud: ready");
+  const n = host.registeredCommands();
+  if (n < 4) host.log(`read-aloud: WARNING only ${n}/4 commands registered \u2014 host API mismatch?`);
+  host.log(`read-aloud: ready (${n} commands)`);
 }
 export {
   activate as default

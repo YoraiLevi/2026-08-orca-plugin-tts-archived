@@ -237,33 +237,51 @@ function isBoundaryAfter(next) {
 /**
  * `**bold**` and `~~strike~~` markers are deleted outright.
  *
- * Single `*` / `_` are deleted only when they WRAP a word, so `snake_case` and `a_b_c` survive.
+ * Single `*` / `_` are deleted only as a MATCHED PAIR that wraps a word, so `snake_case`,
+ * `a_b_c` and — critically — a leading-underscore identifier like `_flush_buffer` all survive.
  *
- * DELIBERATE DEVIATION from buzz: `__dunder__` is PRESERVED. buzz strips `__x__` as bold, but in
- * an agent that talks about code, `__init__` is overwhelmingly more common than `__bold__`, and
- * mangling an identifier is worse than reading two underscores.
+ * Pairing is the whole point. An earlier version stripped any underscore that merely *looked*
+ * like an opener, which silently turned `_private_method` into `private_method`: a lone opener
+ * with no partner. Python privates are everywhere in agent replies, so this mattered.
+ *
+ * DELIBERATE DEVIATION from buzz: `__dunder__` is PRESERVED. buzz strips `__x__` as bold, but it
+ * is lexically indistinguishable from a dunder, and mangling `__init__` is worse than reading two
+ * underscores in the rarer `__bold__`.
  */
 function stripMarkdownMarkers(src) {
     let s = src.split('**').join('');
     s = s.split('~~').join('');
-    let out = '';
-    for (let i = 0; i < s.length; i++) {
-        const ch = s[i];
-        if (ch !== '*' && ch !== '_') {
-            out += ch;
+    const chars = [...s];
+    const drop = new Set();
+    for (let i = 0; i < chars.length; i++) {
+        const ch = chars[i];
+        if (ch !== '*' && ch !== '_')
             continue;
+        if (drop.has(i))
+            continue;
+        if (ch === '_' && (chars[i + 1] === '_' || chars[i - 1] === '_'))
+            continue; // dunder
+        const opens = isBoundaryBefore(chars[i - 1]) && !isBoundaryAfter(chars[i + 1]);
+        if (!opens)
+            continue;
+        // Only strip if a matching closer exists before the next line break.
+        for (let j = i + 1; j < chars.length; j++) {
+            const c = chars[j];
+            if (c === '\n')
+                break;
+            if (c !== ch)
+                continue;
+            if (ch === '_' && (chars[j + 1] === '_' || chars[j - 1] === '_'))
+                continue;
+            const closes = !isBoundaryBefore(chars[j - 1]) && isBoundaryAfter(chars[j + 1]);
+            if (closes) {
+                drop.add(i);
+                drop.add(j);
+                break;
+            }
         }
-        if (ch === '_' && (s[i + 1] === '_' || s[i - 1] === '_')) {
-            out += ch;
-            continue;
-        } // dunder
-        const opens = isBoundaryBefore(s[i - 1]) && !isBoundaryAfter(s[i + 1]);
-        const closes = !isBoundaryBefore(s[i - 1]) && isBoundaryAfter(s[i + 1]);
-        if (opens || closes)
-            continue;
-        out += ch;
     }
-    return out;
+    return chars.filter((_, i) => !drop.has(i)).join('');
 }
 /* ---------------------------------------------------------------- stage 9 */
 function isEmoji(cp) {

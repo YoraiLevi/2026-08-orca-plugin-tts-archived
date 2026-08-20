@@ -6,6 +6,25 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P18 — Guessed host API names + a defensive adapter = silent no-op
+**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
+*"Could not run the plugin command."* The hotkey does nothing at all.
+**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
+`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
+`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
+`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
+**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
+robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
+Zero commands were registered and the plugin reported itself ready.
+**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
+the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
+fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
+in CI, asserting every manifest-declared command is actually registered.
+**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
+harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
+help either: they mocked the same invented shape they were written against. Only running the real
+artifact against the real contract catches this.
+
 ## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
 **Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
 "No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
@@ -34,6 +53,25 @@ Actions runner there is **no speech stack at all** (`actions/runner-images` has 
 **Instead:** one portable neural engine as the default on all platforms; OS-native only as a
 labelled fallback. And do not let "but macOS `say` is pretty good" argue for native-first — the same
 argument fails identically on the other two. Verified 2026-08-20.
+
+## P18 — Guessed host API names + a defensive adapter = silent no-op
+**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
+*"Could not run the plugin command."* The hotkey does nothing at all.
+**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
+`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
+`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
+`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
+**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
+robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
+Zero commands were registered and the plugin reported itself ready.
+**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
+the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
+fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
+in CI, asserting every manifest-declared command is actually registered.
+**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
+harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
+help either: they mocked the same invented shape they were written against. Only running the real
+artifact against the real contract catches this.
 
 ## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
 **Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
@@ -76,6 +114,25 @@ like a clean archive-free download path. But sherpa's own `tts-models` release t
 ONNX metadata *and* a `tokens.txt` the HF files do not carry.
 **Instead:** download sherpa's release assets, or convert and re-host the models yourself. Verified
 2026-08-20.
+
+## P18 — Guessed host API names + a defensive adapter = silent no-op
+**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
+*"Could not run the plugin command."* The hotkey does nothing at all.
+**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
+`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
+`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
+`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
+**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
+robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
+Zero commands were registered and the plugin reported itself ready.
+**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
+the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
+fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
+in CI, asserting every manifest-declared command is actually registered.
+**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
+harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
+help either: they mocked the same invented shape they were written against. Only running the real
+artifact against the real contract catches this.
 
 ## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
 **Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
@@ -129,6 +186,25 @@ pipeline, not only its units.
 not guaranteed on Windows.
 **Instead:** pure-JS `unbzip2-stream` (1.4.3, `gypfile: false`) piped into `tar-stream`. Verified:
 397 entries / 81 MB decoded in 4.7 s with no native build. Or re-host the models as `.tar.gz`.
+
+## P18 — Guessed host API names + a defensive adapter = silent no-op
+**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
+*"Could not run the plugin command."* The hotkey does nothing at all.
+**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
+`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
+`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
+`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
+**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
+robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
+Zero commands were registered and the plugin reported itself ready.
+**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
+the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
+fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
+in CI, asserting every manifest-declared command is actually registered.
+**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
+harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
+help either: they mocked the same invented shape they were written against. Only running the real
+artifact against the real contract catches this.
 
 ## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
 **Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
@@ -202,6 +278,25 @@ own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see
 `npm install` anyway (P5) and must fetch binaries itself, **source from GitHub releases, not npm** —
 then all six platform+arch combos are covered. Those tarballs also contain standalone executables
 (`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
+
+## P18 — Guessed host API names + a defensive adapter = silent no-op
+**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
+*"Could not run the plugin command."* The hotkey does nothing at all.
+**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
+`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
+`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
+`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
+**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
+robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
+Zero commands were registered and the plugin reported itself ready.
+**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
+the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
+fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
+in CI, asserting every manifest-declared command is actually registered.
+**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
+harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
+help either: they mocked the same invented shape they were written against. Only running the real
+artifact against the real contract catches this.
 
 ## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
 **Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,

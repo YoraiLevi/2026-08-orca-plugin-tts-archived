@@ -10,16 +10,19 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { SpeechService } from '../speech-service.js'
+/** Minimal port, so huddle can be tested without a synthesizer. */
+export interface SpeechPort {
+  speak(text: string): void
+  stop(): Promise<void>
+}
 import type { AgentStatusChanged } from '../adapter/index.js'
 import { decodeClaudeLine, type DecodedReply } from './decoders.js'
 
 export interface HuddleDeps {
-  readonly speech: SpeechService
+  readonly speech: SpeechPort
   readonly log: (m: string) => void
   readonly notify: (m: string) => void
-  readonly onUnsupportedAgent?: (name: string) => void
-  /** Override for tests. */
+    /** Override for tests. */
   readonly projectsDir?: string
 }
 

@@ -50,7 +50,14 @@ describe('T021f identifiers survive untouched', () => {
         { name: 'snake_case survives', input: 'the snake_case value', expect: 'the snake_case value' },
         { name: 'function with underscore survives', input: 'call foo_bar() twice', expect: 'call foo_bar() twice' },
         { name: 'dunder survives', input: 'use __init__ here', expect: 'use __init__ here' },
-        { name: 'multiple underscores survive', input: 'a_b_c_d stays', expect: 'a_b_c_d stays' }
+        { name: 'multiple underscores survive', input: 'a_b_c_d stays', expect: 'a_b_c_d stays' },
+        // Found by running the pipeline for real: a lone leading underscore was being stripped as an
+        // unmatched emphasis opener, turning every Python private method into a public-looking one.
+        { name: 'leading-underscore private survives', input: 'in _flush_buffer() now', expect: 'in _flush_buffer() now' },
+        { name: 'leading underscore on a bare word survives', input: 'the _private value', expect: 'the _private value' },
+        { name: 'unmatched trailing underscore survives', input: 'value_ here', expect: 'value_ here' },
+        { name: 'unmatched asterisk survives', input: 'a * b', expect: 'a * b' },
+        { name: 'emphasis does not pair across a line break', input: 'a _start\nend_ b', expect: 'a _start end_ b' }
     ]);
 });
 describe('T021g emoji', () => {
