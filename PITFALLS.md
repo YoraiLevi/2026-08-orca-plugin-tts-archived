@@ -6,6 +6,41 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P28 — Voice names do not port across platforms, and there is zero overlap
+**Symptom:** a persisted voice preference is meaningless on another machine, and a design sized on
+one platform collapses on another.
+**Cause:** macOS (`Samantha`), Windows (`Microsoft Zira Desktop`) and espeak-ng (`en-US+f3`) are
+three unrelated namespaces with no shared member. The counts are not comparable either: 41 usable
+voices on macOS, **2** on a stock Windows 11, and 0 through our own path on a stock Ubuntu desktop.
+Guaranteed-on-all-three is therefore **1**.
+**Instead:** persist an index or a seed into the host's runtime voice list, never a name. Size any
+speaker-differentiation design for **N = 1 and degrade upward**. The axes that are equal on every
+platform are the ones we generate ourselves — a synthesized earcon and a spoken call-sign — because
+they never consult the host. And cache the voice list: `say -v '?'` costs ~450 ms, which is the
+entire first-audio budget.
+**Source:** `docs/.research/q-round1-platform.md` Q31 · `docs/design/005-agent-identity.md`.
+
+## P27 — Parallel ORCA dev builds share one userData profile, so the CLI addresses the wrong app
+**Symptom:** `orca <cmd>` silently talks to whichever dev instance started last. Both windows work.
+Nothing errors. The failure is silent and it fails in the direction of looking correct.
+**Cause:** a git worktree separates the *code*; nothing separates the *state*. Every checkout
+resolves `userData` to the same `<appData>/orca-dev`. The dev single-instance lock is skipped on
+purpose (stablyai/orca#1419) so parallel worktree builds are possible at all, so instance B boots
+fully and takes over the shared profile — rewriting `orca-runtime.json` and the `cli/bin/orca` shim
+in place, while still exporting A's user-data path.
+**Instead:** give every worktree its own profile.
+`ORCA_DEV_USER_DATA_PATH="$HOME/Library/Application Support/orca-dev-$(basename "$(git rev-parse --show-toplevel)")" pnpm dev`
+Address each instance through its own `"$P/cli/bin/orca"` shim. Never create a global
+`/usr/local/bin/orca-dev` — it binds to whichever checkout installed it last. Each worktree needs
+its own `pnpm install` (native modules are per-checkout), and killing `pnpm dev` does **not** stop
+the app: target the Electron main process.
+**Verify by effect:** read `pid` in `<profile>/orca-runtime.json` before and after starting the
+second instance. Shared profile, the pid changes. Isolated, it does not. Equivalently, `grep
+'Replacing daemon'` in the second instance's log — one line means shared, zero means isolated.
+**Source:** the author's own write-up,
+https://gist.github.com/YoraiLevi/e171337e96dedd678769cdc0ba074bbd · upstream stablyai/orca#15647,
+fix in #15648.
+
 ## P26 — An option nobody can pass is invisible to every test you would think to write
 **Symptom:** `SynthesizeOptions.voice` and `.rate` were declared in core, implemented by
 `OsSynthProvider` on all three platforms, and covered by provider tests — and **no caller could
