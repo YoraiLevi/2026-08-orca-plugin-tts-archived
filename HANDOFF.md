@@ -85,7 +85,14 @@ voice input.
 | [#15639](https://github.com/stablyai/orca/issues/15639) | no session id on the event |
 | [#15640](https://github.com/stablyai/orca/pull/15640) | **PR** — projects `sessionId` |
 | [#15642](https://github.com/stablyai/orca/issues/15642) | keybindings dead in terminal focus |
-| [#15643](https://github.com/stablyai/orca/pull/15643) | **PR** — `storage.get` panel-callable, unblocks M13 |
+| [#15643](https://github.com/stablyai/orca/pull/15643) | **PR** — `storage.get` panel-callable |
+| [#15647](https://github.com/stablyai/orca/issues/15647) | parallel dev builds share one userData profile |
+| [#15648](https://github.com/stablyai/orca/pull/15648) | **PR** — per-worktree dev profile |
+| [#15655](https://github.com/stablyai/orca/issues/15655) | plugins cannot expose settings to the user |
+
+**None of these block us.** Checked 2026-08-21: all open, one day old, zero maintainer engagement.
+Design against today's API and treat any merge as a bonus. M13 was recorded as "blocked on #15643"
+and that was **wrong** — see below.
 
 ## Settled findings
 
@@ -109,13 +116,34 @@ voice input.
 - **Thinking blocks are flattened into text blocks** in ORCA's decoder. Filter at the raw JSONL
   level or huddle mode speaks the model's chain-of-thought aloud.
 
+## What the design rounds settled — 2026-08-21
+
+Full argument in `docs/design/000-round-ledger.md`; each row links to its document. Do not re-open
+these without new evidence.
+
+- **The panel is write-capable and read-blind.** `workspace.readContext` returns only `branch`,
+  `displayName` and opaque terminal ids; storage is refused in both directions. So the dashboard
+  is a **terminal TUI** (`orca-tts control`), and the panel is an honest control strip. M13 was
+  never blocked on upstream — the block was on *display*, not on *control*.
+- **A panel CAN act today**, via `terminal.sendText`. Exactly three host methods are panel-callable
+  and two of them mutate.
+- **Stop is pushed, never polled**, at p50 120 ms / p99 250 ms, failing CI above 400 ms. The panel
+  poll floor alone is 345 ms, so a polled Stop is double the budget by construction.
+- **The spoken channel is a ladder**: a structural classifier that needs no agent cooperation is the
+  floor and the deliverable; a `speak` fence is an enhancement on top. We never write to a user's
+  `CLAUDE.md`.
+- **Identity is `(callSign, earcon, voiceTuple)`, designed for N=1.** Voice-based identity
+  guaranteed on all three platforms is exactly **1** (macOS 66, stock Windows 6, stock Ubuntu 0–2).
+  The portable axes are the ones we generate. **Never speak hex.**
+- **Voice Lab plays in the browser**, not the server, and is also the settings UI — because ORCA's
+  settings capability renders nothing at all.
+
 ## Open decisions
 
-- **How an agent chooses what to speak** (M14). The biggest quality change available and a design
-  problem, not a coding one. `docs/.discussion/002-*` does not exist yet — write it before coding.
-- **Whether the spoken channel replaces or supplements the full reply**, and who decides.
 - **Identifier speech** — `_flush_buffer()` is spoken raw today. Settle in Voice Lab, not by guess.
 - **Deep path depth limit** — "in folder packages core src normalizer" may be too long to follow.
+- **Who arbitrates the audio stream.** Three designs now write into it — skip announcements,
+  tunable wording, and a spoken call-sign — and none of them summed the total overhead.
 - **Licence** stays MIT; revisit only if we ever bundle a GPL voice (we do not, and should not).
 
 ## What listening taught us that testing could not
