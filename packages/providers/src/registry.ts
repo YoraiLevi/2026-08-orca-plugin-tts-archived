@@ -4,6 +4,7 @@ import type { EngineStatus, TtsProvider } from '@orca-tts/core'
 export class ProviderRegistry {
   readonly #providers = new Map<string, TtsProvider>()
   #preferredId: string | null = null
+  #lastFailure: string | null = null
 
   register(p: TtsProvider, opts: { preferred?: boolean } = {}): void {
     this.#providers.set(p.id, p)
@@ -11,6 +12,12 @@ export class ProviderRegistry {
   }
 
   get(id: string): TtsProvider | undefined { return this.#providers.get(id) }
+
+  /**
+   * Why the last `resolve()` could not use a provider. Kept because discarding it is how a
+   * missing Linux binary turned into "no speech engine is available" with no way to act on it.
+   */
+  get lastFailure(): string | null { return this.#lastFailure }
   list(): readonly TtsProvider[] { return [...this.#providers.values()] }
 
   /**
@@ -24,6 +31,7 @@ export class ProviderRegistry {
       ...this.list().filter((p) => p.capabilities.offline).map((p) => p.id)
     ].filter((x): x is string => typeof x === 'string')
 
+    this.#lastFailure = null
     const seen = new Set<string>()
     let rung: 'preferred' | 'fallback' | 'floor' = 'preferred'
     for (const id of tryOrder) {
@@ -35,7 +43,7 @@ export class ProviderRegistry {
         await p.prepare()
       } catch (err) {
         rung = 'fallback'
-        void err
+        this.#lastFailure = err instanceof Error ? err.message : String(err)
         continue
       }
       const reason = rung === 'preferred'

@@ -19,7 +19,10 @@ export default function activate(orca: OrcaApi): void {
   host.log('read-aloud: activating')
 
   const registry = new ProviderRegistry()
-  registry.register(new OsSynthProvider(), { preferred: true })
+  // The provider talks to the user directly for detection failures and degraded rungs: on Linux
+  // the interesting failure ("espeak-ng is not installed") happens inside prepare(), far from any
+  // command the user pressed.
+  registry.register(new OsSynthProvider({ notify: (m) => { host.notify('Read Aloud', m) } }), { preferred: true })
 
   const sink = new SubprocessSink({ log: host.log })
   let droppedNotice: NodeJS.Timeout | null = null
@@ -30,8 +33,12 @@ export default function activate(orca: OrcaApi): void {
   // is never delayed behind a process spawn.
   void registry.resolve().then((resolved) => {
     if (resolved === null) {
-      engineError = 'no speech engine is available on this system'
-      host.log(`read-aloud: ${engineError}`)
+      const why = registry.lastFailure ?? 'no speech engine is available on this system'
+      engineError = why
+      host.log(`read-aloud: ${why}`)
+      // Never fail silently: a plugin that makes no sound and says nothing is indistinguishable
+      // from a plugin that is not installed.
+      host.notify('Read Aloud', why)
       return
     }
     speech = new SpeechService({
