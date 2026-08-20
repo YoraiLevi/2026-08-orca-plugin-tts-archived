@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { OsSynthProvider } from './index.js'
-import { runProviderContract } from '../contract.js'
+import { runProviderContract } from '../contract.js'  // test-only entry, never via the barrel
 
 // T045: the contract runs against the real OS synthesizer on whatever platform CI is on.
 runProviderContract('OsSynthProvider', () => new OsSynthProvider())
