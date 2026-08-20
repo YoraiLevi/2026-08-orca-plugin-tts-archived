@@ -86,7 +86,9 @@ before designing anything.** Our ORCA plugin is a *host* for that design, not a 
 
 ## Standing rules
 
-`RULES.md` at the repo root. Read it on spawn, with this file and `PITFALLS.md`.
+All 86 standing rules are `.specify/memory/constitution.md` **Part II**, numbered `R001`-`R086`.
+Part III is the autonomous operating protocol: the work loop, the five STOP conditions, and the
+resumption contract. Read it on spawn, with this file and `PITFALLS.md`.
 
 ## Where things live
 - `docs/.research/` — raw research artifacts (hot). Promote to `docs/` when settled.
