@@ -2,8 +2,20 @@
 
 > Things that bit us, or that we know will bite. Append; newest at top. Each entry:
 > **symptom → cause → what to do instead.**
+>
+> **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
+> take the next free number — concurrent agents have collided here before (see P12).
 
-## P6 — Kokoro is 16–25× slower than Piper on Apple Silicon, despite its reputation
+## P12 — Two agents appending to PITFALLS.md at once produce duplicate numbers
+**Symptom:** the file contains two `## P4`, two `## P5`, two `## P6`, and cross-references become
+ambiguous.
+**Cause:** parallel subagents each read the file, each took "the next number", and each wrote.
+Last-writer-wins on content, but numbers silently collide.
+**Instead:** grep for existing numbers immediately before writing, and prefer having the
+orchestrator merge subagent findings rather than letting subagents append to shared memory files
+directly. Renumbering after the fact is cheap only while the entries are still uncited.
+
+## P11 — Kokoro is 16–25× slower than Piper on Apple Silicon, despite its reputation
 **Symptom:** you pick the engine with the best voices-per-megabyte reputation and huddle mode stutters.
 **Cause:** measured on this machine (macOS 26.5, Node 26.7, `sherpa-onnx-node` 1.13.6, 2 threads,
 one sentence → ~2 s of audio): Piper amy-low **52–65 ms**, Pocket TTS int8 **210–278 ms**, Kokoro
@@ -12,7 +24,7 @@ FP32 **838–865 ms**, Kokoro int8 **1306–1358 ms**. Kokoro int8 is *slower* t
 **Instead:** default to Piper. Offer Kokoro as a quality option with its latency shown. Full table:
 `docs/.research/tts-engine-landscape.md`.
 
-## P5 — macOS `say` costs ~414 ms of process spawn before it makes a sound, and cannot be piped
+## P10 — macOS `say` costs ~414 ms of process spawn before it makes a sound, and cannot be piped
 **Symptom:** the "zero-install fallback" is the slowest path in the system.
 **Cause:** `say ""` — empty string, zero synthesis — measured min 414 ms / median 418 ms over 5 runs.
 That is 8× the entire Piper synthesis time. Separately, `say -o /dev/stdout` emits **no bytes**: the
@@ -20,7 +32,7 @@ CAF/WAVE writers need a seekable file.
 **Instead:** use `say` as the never-fails fallback and the first-run bridge while a model downloads,
 never as the low-latency path. For streaming on macOS you need `AVSpeechSynthesizer` in a sidecar.
 
-## P4 — No preinstalled macOS binary accepts streaming PCM on stdin
+## P9 — No preinstalled macOS binary accepts streaming PCM on stdin
 **Symptom:** the design assumes "pipe PCM to the system player" and there isn't one.
 **Cause:** `afplay -` → *"unknown argument: -"*; piping a file in → `AudioFileOpen failed ('typ?')`.
 `sox`/`play`/`mpv` are absent on a stock system. `ffplay` works (verified: streams raw PCM on
