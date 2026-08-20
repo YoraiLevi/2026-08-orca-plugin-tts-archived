@@ -41,8 +41,10 @@ and skill names can't contain dots.
 ## P2 — `/speckit-constitution` overwrites the constitution wholesale
 **Symptom:** hand-written principles vanish after re-running the command.
 **Cause:** the command regenerates `.specify/memory/constitution.md` from the template each run.
-**Instead:** treat that file as generated. Commit before running it. Keep the *reasons* behind
-principles in `docs/.discussion/`, not only in the constitution.
+**Instead:** **we hand-maintain `.specify/memory/constitution.md` and never run that command.**
+A banner at the top of the file says so. If you want it regenerated, copy the file aside first —
+v1.0.0 encodes the user's R1-R9 requirements and nine principles that took a full research phase
+to derive. Keep the *reasons* behind principles in `docs/.discussion/`, not only in the constitution.
 
 ## P1 — Search skills write to a repo-root `.research/`, not `docs/.research/`
 **Symptom:** untracked scrape JSON appears at the repo root and pollutes `git status`.
