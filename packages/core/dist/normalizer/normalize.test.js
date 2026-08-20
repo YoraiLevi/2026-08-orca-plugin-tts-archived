@@ -8,11 +8,11 @@ const run = (cases) => {
 describe('T021a fenced code blocks', () => {
     run([
         { name: 'fenced block becomes a spoken placeholder',
-            input: 'Before\n```js\nconst x = 1\n```\nAfter', expect: 'Before code block omitted After' },
+            input: 'Before\n```js\nconst x = 1\n```\nAfter', expect: 'Before. Here, a code block is omitted. After' },
         { name: 'tilde fence behaves the same',
-            input: 'Before\n~~~\nraw\n~~~\nAfter', expect: 'Before code block omitted After' },
+            input: 'Before\n~~~\nraw\n~~~\nAfter', expect: 'Before. Here, a code block is omitted. After' },
         { name: 'unclosed fence omits the remainder',
-            input: 'Before\n```js\nconst x = 1\nnever closed', expect: 'Before code block omitted' }
+            input: 'Before\n```js\nconst x = 1\nnever closed', expect: 'Before. Here, a code block is omitted.' }
     ]);
 });
 describe('T021b inline code', () => {
@@ -23,8 +23,8 @@ describe('T021b inline code', () => {
 });
 describe('T021c urls', () => {
     run([
-        { name: 'bare url becomes a placeholder', input: 'See https://example.com now', expect: 'See link omitted now' },
-        { name: 'sentence punctuation after a url is preserved', input: 'See https://example.com.', expect: 'See link omitted.' },
+        { name: 'bare url becomes a placeholder', input: 'See https://example.com now', expect: 'See a link to example dot com now' },
+        { name: 'sentence punctuation after a url is preserved', input: 'See https://example.com.', expect: 'See a link to example dot com.' },
         { name: 'markdown link keeps its label', input: 'See [the docs](https://example.com) now', expect: 'See the docs now' }
     ]);
 });
@@ -107,20 +107,20 @@ describe('T022c tables announced by row', () => {
     run([
         { name: 'table row is spoken as cells, separator row dropped',
             input: '| a | b |\n| --- | --- |\n| 1 | 2 |',
-            expect: 'a, b. one, two.' }
+            expect: 'Table. a, b. one. b, two.' }
     ]);
 });
 describe('T022d file paths', () => {
     run([
         { name: 'path is spoken as its basename with a locator by default',
-            input: 'edit src/core/main.ts now', expect: 'edit main.ts in src/core now' },
+            input: 'edit src/core/main.ts now', expect: 'edit the typescript file main, in src core, now' },
         { name: 'bare filename is left alone', input: 'edit main.ts now', expect: 'edit main.ts now' }
     ]);
 });
 describe('T023 tool noise produces nothing', () => {
     run([
-        { name: 'a message that is only a code block yields empty', input: '```\nls -la\n```', expect: 'code block omitted' },
-        { name: 'a message that is only a url yields a placeholder', input: 'https://example.com', expect: 'link omitted' }
+        { name: 'a message that is only a code block yields empty', input: '```\nls -la\n```', expect: 'Here, a code block is omitted.' },
+        { name: 'a message that is only a url yields a placeholder', input: 'https://example.com', expect: 'a link to example dot com' }
     ]);
 });
 describe('T024 no residual markdown metacharacters', () => {
@@ -151,4 +151,53 @@ describe('T026 options', () => {
     it('number expansion can be disabled', () => {
         expect(normalize('it took 42 tries', { expandNumbers: false })).toBe('it took 42 tries');
     });
+});
+/* ------------------------------------------------------------------------------------------
+ * Listening feedback, 2026-08-21. Every case below comes from a human hearing a real reply and
+ * saying what grated. None of these were catchable by reading the output.
+ * ---------------------------------------------------------------------------------------- */
+describe('L1 omissions are announced, not dropped in abruptly', () => {
+    run([
+        { name: 'a code block gets a lead-in and its own sentence',
+            input: 'Fix it:\n```js\nx()\n```\nDone.',
+            expect: 'Fix it: Here, a code block is omitted. Done.' },
+        { name: 'a link says where it goes instead of vanishing',
+            input: 'See https://github.com/YoraiLevi/orca-plugin-tts for details',
+            expect: 'See a link to github dot com for details' },
+        { name: 'link keeps sentence punctuation for the pause',
+            input: 'See https://example.com.', expect: 'See a link to example dot com.' }
+    ]);
+});
+describe('L2 units are spoken as words', () => {
+    run([
+        { name: 'milliseconds', input: 'it took 52 ms flat', expect: 'it took fifty two milliseconds flat' },
+        { name: 'seconds', input: 'waited 3 s here', expect: 'waited three seconds here' },
+        { name: 'megabytes', input: 'about 50 MB total', expect: 'about fifty megabytes total' },
+        { name: 'percent', input: 'at 30% used', expect: 'at thirty percent used' },
+        { name: 'a bare unit word is untouched', input: 'the ms field', expect: 'the ms field' }
+    ]);
+});
+describe('L3 tables pair each value with its header', () => {
+    run([
+        { name: 'header row labels every cell that follows',
+            input: '| Engine | Latency |\n| --- | --- |\n| Piper | fast |',
+            expect: 'Table. Engine, Latency. Piper. Latency, fast.' }
+    ]);
+});
+describe('L4 file paths are comprehensible', () => {
+    run([
+        { name: 'extension becomes a word and underscores become spaces',
+            input: 'see src/core/session_handler.py now',
+            expect: 'see the python file session handler, in src core, now' },
+        { name: 'typescript file', input: 'edit packages/core/index.ts here',
+            expect: 'edit the typescript file index, in packages core, here' },
+        { name: 'unknown extension still reads sensibly', input: 'open a/b/thing.xyz now',
+            expect: 'open the file thing dot xyz, in a b, now' }
+    ]);
+});
+describe('L5 keyboard symbols become words', () => {
+    run([
+        { name: 'command shift', input: 'press ⌘⇧S now', expect: 'press command shift S now' },
+        { name: 'option control', input: 'press ⌥⌃X now', expect: 'press option control X now' }
+    ]);
 });

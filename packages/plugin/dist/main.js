@@ -74,7 +74,8 @@ export default function activate(orca) {
     });
     const huddle = new HuddleController({
         speech: {
-            speak: (t) => { speech?.speak(t); },
+            // 'queue' is the whole point for huddle: replies must not cut each other off.
+            speak: (t, mode) => { speech?.speak(t, mode ?? 'queue'); },
             stop: async () => { await speech?.stop(); }
         },
         log: host.log,
@@ -92,7 +93,7 @@ export default function activate(orca) {
         // the one status channel that always works. The panel cannot be updated (no host->panel
         // channel, orca#15638) and a desktop notification is transient and easy to miss.
         if (speech !== null)
-            speech.speak(on ? 'Huddle mode on.' : 'Huddle mode off.');
+            speech.speak(on ? 'Huddle mode on.' : 'Huddle mode off.', 'replace');
     });
     host.registerCommand('read-aloud.status', async () => {
         await withSpeech((s) => {

@@ -367,8 +367,69 @@ async function readClipboard(opts = {}) {
 }
 
 // packages/core/src/normalizer/index.ts
-var CODE_PLACEHOLDER = " code block omitted ";
-var LINK_PLACEHOLDER = "link omitted";
+var EXTENSION_WORDS = {
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  jsx: "javascript",
+  py: "python",
+  rb: "ruby",
+  go: "go",
+  rs: "rust",
+  java: "java",
+  kt: "kotlin",
+  swift: "swift",
+  c: "C",
+  h: "header",
+  cpp: "C plus plus",
+  cs: "C sharp",
+  sh: "shell",
+  bash: "shell",
+  zsh: "shell",
+  md: "markdown",
+  json: "JSON",
+  jsonl: "JSON lines",
+  yml: "YAML",
+  yaml: "YAML",
+  toml: "TOML",
+  html: "HTML",
+  css: "CSS",
+  sql: "SQL",
+  txt: "text",
+  csv: "CSV",
+  xml: "XML",
+  lock: "lock"
+};
+var UNIT_WORDS = {
+  ms: ["millisecond", "milliseconds"],
+  s: ["second", "seconds"],
+  m: ["minute", "minutes"],
+  h: ["hour", "hours"],
+  kb: ["kilobyte", "kilobytes"],
+  mb: ["megabyte", "megabytes"],
+  gb: ["gigabyte", "gigabytes"],
+  tb: ["terabyte", "terabytes"],
+  hz: ["hertz", "hertz"],
+  khz: ["kilohertz", "kilohertz"],
+  px: ["pixel", "pixels"]
+};
+var KEY_GLYPHS = {
+  "\u2318": "command",
+  "\u21E7": "shift",
+  "\u2325": "option",
+  "\u2303": "control",
+  "\u23CE": "enter",
+  "\u232B": "delete",
+  "\u21E5": "tab",
+  "\u2423": "space",
+  "\u2191": "up",
+  "\u2193": "down",
+  "\u2190": "left",
+  "\u2192": "right"
+};
+var CODE_PLACEHOLDER = " . Here, a code block is omitted. ";
 function normalize(md, opts = {}) {
   const codeBlocks = opts.codeBlocks ?? "announce";
   const pathStyle = opts.pathStyle ?? "basename";
@@ -382,9 +443,14 @@ function normalize(md, opts = {}) {
   s = tablesToRows(s);
   if (pathStyle === "basename") s = speakFilePaths(s);
   s = stripMarkdownMarkers(s);
+  s = speakKeyGlyphs(s);
   s = stripEmoji(s);
-  if (doNumbers) s = expandNumbers(s);
+  if (doNumbers) {
+    s = expandUnits(s);
+    s = expandNumbers(s);
+  }
   s = collapseWhitespace(s);
+  s = tidyPunctuation(s);
   return s.length <= 1 ? "" : s;
 }
 function isFence(line) {
@@ -455,6 +521,12 @@ function expandMarkdownLinks(src) {
   }
   return out;
 }
+function linkPhrase(url) {
+  const afterScheme = url.replace(/^https?:\/\//, "");
+  const host = (afterScheme.split("/")[0] ?? "").replace(/^www\./, "");
+  if (host.length === 0) return "a link";
+  return `a link to ${host.split(".").join(" dot ")}`;
+}
 var URL_TERMINATORS = /* @__PURE__ */ new Set([")", "]", '"', "'", "<", ">"]);
 var TRAILING_PUNCT = /* @__PURE__ */ new Set([".", ",", "!", "?", ";", ":"]);
 function stripUrls(src) {
@@ -471,7 +543,7 @@ function stripUrls(src) {
       }
       let end = j;
       while (end > i && TRAILING_PUNCT.has(src[end - 1])) end--;
-      out += LINK_PLACEHOLDER;
+      out += linkPhrase(src.slice(i, end));
       i = end;
       continue;
     }
@@ -515,19 +587,40 @@ function isTableSeparator(cells) {
 }
 function tablesToRows(src) {
   const out = [];
+  let headers = null;
+  let inTable = false;
   for (const line of src.split("\n")) {
     const t = line.trim();
     if (!t.startsWith("|")) {
+      headers = null;
+      inTable = false;
       out.push(line);
       continue;
     }
     const cells = t.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
     if (isTableSeparator(cells)) continue;
-    out.push(endWithStop(cells.filter((c) => c.length > 0).join(", ")));
+    if (!inTable) {
+      inTable = true;
+      headers = cells;
+      out.push(endWithStop(`Table. ${cells.filter((c) => c.length > 0).join(", ")}`));
+      continue;
+    }
+    const first = cells[0] ?? "";
+    const rest = [];
+    for (let i = 1; i < cells.length; i++) {
+      const value = cells[i] ?? "";
+      if (value.length === 0) continue;
+      const header = headers?.[i];
+      rest.push(header !== void 0 && header.length > 0 ? `${header}, ${value}` : value);
+    }
+    out.push(endWithStop(rest.length === 0 ? first : `${first}. ${rest.join(". ")}`));
   }
   return out.join("\n");
 }
 var WORD_BREAK = /* @__PURE__ */ new Set([" ", "\n", "	"]);
+function humanise(text) {
+  return text.split("_").join(" ").split("-").join(" ");
+}
 function speakFilePaths(src) {
   const tokens = [];
   let cur = "";
@@ -545,8 +638,13 @@ function speakFilePaths(src) {
     const base = tok.slice(slash + 1);
     const dir = tok.slice(0, slash);
     if (base.length === 0 || dir.length === 0) return tok;
-    if (!base.includes(".")) return tok;
-    return `${base} in ${dir}`;
+    const dot = base.lastIndexOf(".");
+    if (dot <= 0) return tok;
+    const stem = humanise(base.slice(0, dot));
+    const ext = base.slice(dot + 1).toLowerCase();
+    const kind = EXTENSION_WORDS[ext];
+    const named = kind === void 0 ? `the file ${stem} dot ${ext}` : `the ${kind} file ${stem}`;
+    return `${named}, in ${humanise(dir.split("/").join(" "))},`;
   }).join("");
 }
 function isBoundaryBefore(prev) {
@@ -693,6 +791,59 @@ function expandNumbers(src) {
     i = j;
   }
   return out;
+}
+function expandUnits(src) {
+  let out = "";
+  let i = 0;
+  while (i < src.length) {
+    if (!isDigit(src[i])) {
+      out += src[i];
+      i++;
+      continue;
+    }
+    let j = i;
+    while (isDigit(src[j]) || src[j] === ".") j++;
+    const numeral = src.slice(i, j);
+    let k = j;
+    if (src[k] === " ") k++;
+    let u = k;
+    while (u < src.length && /[A-Za-z%°]/.test(src[u])) u++;
+    const unitRaw = src.slice(k, u);
+    const unit = unitRaw.toLowerCase();
+    const boundaryOk = u >= src.length || !/[A-Za-z0-9]/.test(src[u]);
+    if (boundaryOk && (unit === "%" || unitRaw === "%")) {
+      out += `${numeral} percent`;
+      i = u;
+      continue;
+    }
+    const words = UNIT_WORDS[unit];
+    if (boundaryOk && words !== void 0) {
+      const plural = Number(numeral) === 1 ? words[0] : words[1];
+      out += `${numeral} ${plural}`;
+      i = u;
+      continue;
+    }
+    out += numeral;
+    i = j;
+  }
+  return out;
+}
+function speakKeyGlyphs(src) {
+  let out = "";
+  for (const ch of src) {
+    const word = KEY_GLYPHS[ch];
+    out += word === void 0 ? ch : `${word} `;
+  }
+  return out;
+}
+function tidyPunctuation(src) {
+  let out = src.split(" .").join(".");
+  for (const lead of [":", ",", ";", ".", "!", "?"]) {
+    out = out.split(`${lead}.`).join(lead);
+  }
+  if (out.startsWith(". ")) out = out.slice(2);
+  if (out.startsWith(".")) out = out.slice(1);
+  return out.trim();
 }
 function collapseWhitespace(src) {
   let out = "";

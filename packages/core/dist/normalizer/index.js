@@ -11,8 +11,38 @@
  * Ported from block/buzz `preprocess_for_tts` (docs/.research/prior-art-buzz.md), plus the four
  * constructs buzz does not handle: headings, lists, tables, file paths.
  */
-const CODE_PLACEHOLDER = ' code block omitted ';
-const LINK_PLACEHOLDER = 'link omitted';
+/** Extensions worth naming aloud. A listener wants "the python file", not "dot p y". */
+const EXTENSION_WORDS = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    jsx: 'javascript', py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin',
+    swift: 'swift', c: 'C', h: 'header', cpp: 'C plus plus', cs: 'C sharp', sh: 'shell',
+    bash: 'shell', zsh: 'shell', md: 'markdown', json: 'JSON', jsonl: 'JSON lines',
+    yml: 'YAML', yaml: 'YAML', toml: 'TOML', html: 'HTML', css: 'CSS', sql: 'SQL',
+    txt: 'text', csv: 'CSV', xml: 'XML', lock: 'lock'
+};
+/** Units, so "52 ms" is heard rather than decoded. */
+const UNIT_WORDS = {
+    ms: ['millisecond', 'milliseconds'],
+    s: ['second', 'seconds'],
+    m: ['minute', 'minutes'],
+    h: ['hour', 'hours'],
+    kb: ['kilobyte', 'kilobytes'],
+    mb: ['megabyte', 'megabytes'],
+    gb: ['gigabyte', 'gigabytes'],
+    tb: ['terabyte', 'terabytes'],
+    hz: ['hertz', 'hertz'],
+    khz: ['kilohertz', 'kilohertz'],
+    px: ['pixel', 'pixels']
+};
+/** Keyboard glyphs go to the engine as garbage otherwise. */
+const KEY_GLYPHS = {
+    '\u2318': 'command', '\u21e7': 'shift', '\u2325': 'option', '\u2303': 'control',
+    '\u23ce': 'enter', '\u232b': 'delete', '\u21e5': 'tab', '\u2423': 'space',
+    '\u2191': 'up', '\u2193': 'down', '\u2190': 'left', '\u2192': 'right'
+};
+// A lead-in, not a bare label: a listener needs a beat of warning before the content vanishes.
+// Its own sentence, so the engine pauses either side of it.
+const CODE_PLACEHOLDER = ' . Here, a code block is omitted. ';
 export function normalize(md, opts = {}) {
     const codeBlocks = opts.codeBlocks ?? 'announce';
     const pathStyle = opts.pathStyle ?? 'basename';
@@ -27,10 +57,14 @@ export function normalize(md, opts = {}) {
     if (pathStyle === 'basename')
         s = speakFilePaths(s);
     s = stripMarkdownMarkers(s);
+    s = speakKeyGlyphs(s);
     s = stripEmoji(s);
-    if (doNumbers)
+    if (doNumbers) {
+        s = expandUnits(s);
         s = expandNumbers(s);
+    }
     s = collapseWhitespace(s);
+    s = tidyPunctuation(s);
     // "." or "," alone would be spoken as "period" / "comma". Say nothing instead.
     return s.length <= 1 ? '' : s;
 }
@@ -109,6 +143,14 @@ function expandMarkdownLinks(src) {
     }
     return out;
 }
+/** "a link to github dot com" beats "link omitted": the destination is usually the point. */
+function linkPhrase(url) {
+    const afterScheme = url.replace(/^https?:\/\//, '');
+    const host = (afterScheme.split('/')[0] ?? '').replace(/^www\./, '');
+    if (host.length === 0)
+        return 'a link';
+    return `a link to ${host.split('.').join(' dot ')}`;
+}
 const URL_TERMINATORS = new Set([')', ']', '"', "'", '<', '>']);
 const TRAILING_PUNCT = new Set(['.', ',', '!', '?', ';', ':']);
 function stripUrls(src) {
@@ -129,7 +171,7 @@ function stripUrls(src) {
             let end = j;
             while (end > i && TRAILING_PUNCT.has(src[end - 1]))
                 end--;
-            out += LINK_PLACEHOLDER;
+            out += linkPhrase(src.slice(i, end));
             i = end;
             continue;
         }
@@ -179,26 +221,56 @@ function listItemsToSentences(src) {
 function isTableSeparator(cells) {
     return cells.every((c) => c.length > 0 && /^[:\-\s]+$/.test(c));
 }
+/**
+ * Tables are announced by row, and every value is PAIRED WITH ITS HEADER.
+ * Reading bare cells is unusable aloud: by row three the listener has lost which column is which.
+ */
 function tablesToRows(src) {
     const out = [];
+    let headers = null;
+    let inTable = false;
     for (const line of src.split('\n')) {
         const t = line.trim();
         if (!t.startsWith('|')) {
+            headers = null;
+            inTable = false;
             out.push(line);
             continue;
         }
         const cells = t.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
         if (isTableSeparator(cells))
             continue; // `| --- | --- |` is layout, not content
-        out.push(endWithStop(cells.filter((c) => c.length > 0).join(', ')));
+        if (!inTable) {
+            inTable = true;
+            headers = cells;
+            out.push(endWithStop(`Table. ${cells.filter((c) => c.length > 0).join(', ')}`));
+            continue;
+        }
+        const first = cells[0] ?? '';
+        const rest = [];
+        for (let i = 1; i < cells.length; i++) {
+            const value = cells[i] ?? '';
+            if (value.length === 0)
+                continue;
+            const header = headers?.[i];
+            rest.push(header !== undefined && header.length > 0 ? `${header}, ${value}` : value);
+        }
+        out.push(endWithStop(rest.length === 0 ? first : `${first}. ${rest.join('. ')}`));
     }
     return out.join('\n');
 }
 /* ---------------------------------------------------------------- stage 7 */
 const WORD_BREAK = new Set([' ', '\n', '\t']);
+/** `session_handler` -> `session handler`. Identifiers read as words, not as spelling. */
+function humanise(text) {
+    return text.split('_').join(' ').split('-').join(' ');
+}
 /**
- * `src/core/main.ts` -> `main.ts in src/core`.
- * A listener wants to identify the file, not transcribe every separator.
+ * `src/core/session_handler.py` -> `the python file session handler, in src core`.
+ *
+ * Reading the path verbatim was reported as "made no sense whatsoever": separators, underscores
+ * and a spelled-out extension arrive as noise. Name the KIND of file, humanise the stem, and keep
+ * the directory as orientation rather than transcription.
  */
 function speakFilePaths(src) {
     const tokens = [];
@@ -222,9 +294,16 @@ function speakFilePaths(src) {
         const dir = tok.slice(0, slash);
         if (base.length === 0 || dir.length === 0)
             return tok;
-        if (!base.includes('.'))
+        const dot = base.lastIndexOf('.');
+        if (dot <= 0)
             return tok; // not a file reference
-        return `${base} in ${dir}`;
+        const stem = humanise(base.slice(0, dot));
+        const ext = base.slice(dot + 1).toLowerCase();
+        const kind = EXTENSION_WORDS[ext];
+        const named = kind === undefined
+            ? `the file ${stem} dot ${ext}`
+            : `the ${kind} file ${stem}`;
+        return `${named}, in ${humanise(dir.split('/').join(' '))},`;
     }).join('');
 }
 /* ---------------------------------------------------------------- stage 8 */
@@ -395,6 +474,72 @@ function expandNumbers(src) {
         i = j;
     }
     return out;
+}
+/** "52 ms" -> "52 milliseconds", before numbers become words. Only after a number. */
+function expandUnits(src) {
+    let out = '';
+    let i = 0;
+    while (i < src.length) {
+        if (!isDigit(src[i])) {
+            out += src[i];
+            i++;
+            continue;
+        }
+        let j = i;
+        while (isDigit(src[j]) || src[j] === '.')
+            j++;
+        const numeral = src.slice(i, j);
+        let k = j;
+        if (src[k] === ' ')
+            k++;
+        let u = k;
+        while (u < src.length && /[A-Za-z%°]/.test(src[u]))
+            u++;
+        const unitRaw = src.slice(k, u);
+        const unit = unitRaw.toLowerCase();
+        const boundaryOk = u >= src.length || !/[A-Za-z0-9]/.test(src[u]);
+        if (boundaryOk && (unit === '%' || unitRaw === '%')) {
+            out += `${numeral} percent`;
+            i = u;
+            continue;
+        }
+        const words = UNIT_WORDS[unit];
+        if (boundaryOk && words !== undefined) {
+            const plural = Number(numeral) === 1 ? words[0] : words[1];
+            out += `${numeral} ${plural}`;
+            i = u;
+            continue;
+        }
+        out += numeral;
+        i = j;
+    }
+    return out;
+}
+/** `⌘⇧S` -> `command shift S`. Otherwise the glyphs reach the engine as garbage. */
+function speakKeyGlyphs(src) {
+    let out = '';
+    for (const ch of src) {
+        const word = KEY_GLYPHS[ch];
+        out += word === undefined ? ch : `${word} `;
+    }
+    return out;
+}
+/**
+ * The lead-in placeholders start with a sentence break so the engine pauses before them. When the
+ * surrounding text already ended in punctuation that produces "Fix it: . Here," — a stutter.
+ * Collapse any doubled terminator down to the stronger one.
+ */
+function tidyPunctuation(src) {
+    // Runs AFTER whitespace collapse, so spacing is single and these rewrites are deterministic.
+    let out = src.split(' .').join('.'); // a space before a full stop is never wanted
+    for (const lead of [':', ',', ';', '.', '!', '?']) {
+        out = out.split(`${lead}.`).join(lead); // ":." -> ":" etc
+    }
+    if (out.startsWith('. '))
+        out = out.slice(2); // a leading break has nothing to separate
+    if (out.startsWith('.'))
+        out = out.slice(1);
+    return out.trim();
 }
 /* ---------------------------------------------------------------- stage 11 */
 function collapseWhitespace(src) {

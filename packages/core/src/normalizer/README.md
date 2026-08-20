@@ -35,6 +35,21 @@ Block constructs are handled while line structure still exists; whitespace colla
 | `3.14`, `5000000`, `#42` | unchanged | decimals and large numbers suit the engine; `#42` is a reference |
 | result of length ≤ 1 | "" | stops TTS saying "period" |
 
+## Written for the ear, not the eye
+
+Five changes made after a human listened to a real reply and said what grated. None were catchable
+by reading the output:
+
+| Complaint | Change |
+|---|---|
+| "the omission was abrupt, I didn't expect it" | placeholders became a lead-in in their own sentence: *"Here, a code block is omitted."* |
+| "the URL was abruptly surprising" | links say their destination: *"a link to github dot com"* |
+| "52 ms was odd to hear" | units expand: *"fifty two milliseconds"* |
+| "row reading was too quick, I can't tell what I'm hearing" | every cell is paired with its header: *"Piper. Latency, fifty two milliseconds."* |
+| "file paths made no sense whatsoever" | *"the python file session handler, in src core"* — name the kind, humanise the stem |
+
+Plus keyboard glyphs, which reached the engine as garbage: `⌘⇧S` → *"command shift S"*.
+
 ## Deliberate deviation from buzz
 
 buzz strips `__x__` as bold. We **preserve** it. `__x__` is lexically indistinguishable from a
