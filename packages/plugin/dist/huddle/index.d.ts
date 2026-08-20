@@ -1,7 +1,7 @@
 import type { AgentStatusChanged } from '../adapter/index.js';
 /** Minimal port, so huddle can be tested without a synthesizer. */
 export interface SpeechPort {
-    speak(text: string, mode?: 'replace' | 'queue'): void;
+    speak(text: string, mode?: 'replace' | 'queue', label?: string): void;
     stop(): Promise<void>;
 }
 export interface HuddleStore {
@@ -22,6 +22,8 @@ export interface HuddleDeps {
     /** Override for tests. */
     readonly projectsDir?: string;
 }
+/** "orca-plugin-tts, session 111693de" — enough to know whose words you are hearing. */
+export declare function sessionLabel(file: string): string;
 export declare class HuddleController {
     #private;
     constructor(deps: HuddleDeps);
@@ -32,4 +34,9 @@ export declare class HuddleController {
     /** The event is a hint: start (or extend) watching the transcript for this worktree. */
     onAgentStatus(status: AgentStatusChanged, worktreePath: string | null): void;
     dispose(): void;
+    /** Follow a different session, announcing the switch so the listener is never disoriented. */
+    switchTo(file: string): void;
+    /** Stop following any session; huddle stays on but silent until you pick one. */
+    unlock(): void;
+    get following(): string | null;
 }

@@ -40,6 +40,14 @@
       {
         "id": "read-aloud.status",
         "title": "Read Aloud: say status"
+      },
+      {
+        "id": "read-aloud.skip",
+        "title": "Read Aloud: skip this reply"
+      },
+      {
+        "id": "read-aloud.unfollow",
+        "title": "Read Aloud: stop following this session"
       }
     ],
     "events": [
@@ -66,6 +74,16 @@
       {
         "command": "read-aloud.status",
         "key": "mod+shift+u",
+        "when": "global"
+      },
+      {
+        "command": "read-aloud.skip",
+        "key": "mod+shift+k",
+        "when": "global"
+      },
+      {
+        "command": "read-aloud.unfollow",
+        "key": "mod+shift+l",
         "when": "global"
       }
     ]

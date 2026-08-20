@@ -33,9 +33,25 @@ plugin root. `dist/plugin` is three files and nothing else.
 | Speak clipboard | `Mod+Shift+S` | press again to stop |
 | Stop speaking | `Mod+Shift+X` | |
 | Toggle huddle mode | `Mod+Shift+H` | speaks agent replies as they land; says "huddle mode on/off" aloud |
-| Say status | `Mod+Shift+U` | speaks whether huddle mode is on — the reliable way to check |
+| Say status | `Mod+Shift+U` | says what is playing, which session, how many queued |
+| Skip this reply | `Mod+Shift+K` | abandon the current reply, move to the next |
+| Stop following | `Mod+Shift+L` | huddle stays on but goes quiet until a session is picked |
 
 Shortcuts are rebindable in the manifest.
+
+### Huddle follows one session at a time
+
+When huddle starts speaking it **locks onto that session** and stays there. It announces which one
+("Now reading from orca-plugin-tts, session 111693de") and will not switch on its own, because
+following whichever transcript was touched most recently means an unrelated busy agent hijacks your
+audio mid-reply.
+
+- `Mod+Shift+U` says which session it is following and what is queued.
+- `Mod+Shift+K` skips the current reply.
+- `Mod+Shift+L` stops following, so huddle goes quiet until a session speaks again.
+
+Enabling huddle never reads history — everything already on disk when a session is first seen is
+marked as heard, so only what arrives next is spoken.
 
 ### What happens if it is already speaking
 

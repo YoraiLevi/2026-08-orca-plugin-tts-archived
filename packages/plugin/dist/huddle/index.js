@@ -28,17 +28,25 @@ export const MAX_REMEMBERED_IDS = 300;
 /** The transcript flush lags the done event; keep watching this long after it. */
 export const WATCH_WINDOW_MS = 20_000;
 const DEBOUNCE_MS = 250;
+/** "orca-plugin-tts, session 111693de" — enough to know whose words you are hearing. */
+export function sessionLabel(file) {
+    const parts = file.split(/[/\\]/);
+    const name = (parts[parts.length - 1] ?? '').replace(/\.jsonl$/, '');
+    const project = (parts[parts.length - 2] ?? '').replace(/^-+/, '').split('-').slice(-3).join(' ');
+    return `${project}, session ${name.slice(0, 8)}`;
+}
 export class HuddleController {
     #deps;
     #enabled = false;
     #spoken = new Set();
     #lastReply = null;
     #warnedAmbiguous = false;
+    #locked = null; // the ONE session we are following
     #watcher = null;
     #watching = null;
     #stopTimer = null;
     #debounce = null;
-    #primed = false;
+    #primed = new Set(); // per FILE: a new session must be primed too, or it dumps its backlog
     constructor(deps) { this.#deps = deps; }
     get enabled() { return this.#enabled; }
     async restore() {
@@ -52,8 +60,8 @@ export class HuddleController {
         this.#enabled = !this.#enabled;
         void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled);
         if (this.#enabled) {
-            // Everything already on disk is history, not news: never dump the backlog on the user.
-            this.#primed = false;
+            this.#primed.clear(); // re-prime every session on enable; never dump a backlog
+            this.#locked = null;
         }
         else {
             this.#stopWatching();
@@ -77,19 +85,37 @@ export class HuddleController {
         void this.#ensureWatching(worktreePath);
     }
     dispose() { this.#stopWatching(); }
+    /** Follow a different session, announcing the switch so the listener is never disoriented. */
+    switchTo(file) {
+        this.#locked = file;
+        this.#deps.notify(`Now reading: ${sessionLabel(file)}`);
+        this.#deps.speech.speak(`Now reading from ${sessionLabel(file)}.`, 'replace');
+    }
+    /** Stop following any session; huddle stays on but silent until you pick one. */
+    unlock() {
+        this.#locked = null;
+        this.#stopWatching();
+    }
+    get following() { return this.#locked; }
     async #ensureWatching(worktreePath) {
-        const file = await this.#newestTranscript(worktreePath);
+        // Once we are following a session we STAY on it. Previously every event re-picked the
+        // most-recently-modified transcript, so a busy unrelated session stole the audio mid-reply.
+        const file = this.#locked ?? await this.#newestTranscript(worktreePath);
         if (file === null)
             return;
+        if (this.#locked === null) {
+            this.#locked = file;
+            this.#deps.log(`read-aloud: following ${file}`);
+        }
         if (this.#watching !== file) {
             this.#stopWatching();
             this.#watching = file;
             // Mark everything currently on disk as seen, so enabling mid-session speaks only what
             // arrives NEXT rather than replaying the backlog.
-            if (!this.#primed) {
+            if (!this.#primed.has(file)) {
                 for (const r of await this.#readReplies(file))
                     this.#spoken.add(r.id);
-                this.#primed = true;
+                this.#primed.add(file);
                 await this.#persistSpoken();
             }
             try {
@@ -122,7 +148,7 @@ export class HuddleController {
             this.#spoken.add(r.id);
             this.#lastReply = r.text;
             // 'queue', not 'replace': a reply arriving mid-utterance must not cut the previous one off.
-            this.#deps.speech.speak(r.text, 'queue');
+            this.#deps.speech.speak(r.text, 'queue', sessionLabel(file));
         }
         this.#deps.log(`read-aloud: spoke ${fresh.length} new repl${fresh.length === 1 ? 'y' : 'ies'}`);
         await this.#persistSpoken();

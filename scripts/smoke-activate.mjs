@@ -33,7 +33,9 @@ const EXPECTED_COMMANDS = [
   'read-aloud.stop',
   'read-aloud.toggle-huddle',
   'read-aloud.speak-last-reply',
-  'read-aloud.status'
+  'read-aloud.status',
+  'read-aloud.skip',
+  'read-aloud.unfollow'
 ]
 
 let ok = true

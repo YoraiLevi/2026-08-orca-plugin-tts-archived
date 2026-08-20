@@ -12,13 +12,14 @@ import { asAgentStatus, makeHost, worktreePathFrom } from './adapter/index.js';
 import { readClipboard, ClipboardUnavailableError } from './clipboard.js';
 import { SpeechService } from './speech-service.js';
 import { SubprocessSink } from './sinks/subprocess-sink.js';
-import { HuddleController } from './huddle/index.js';
+import { HuddleController, sessionLabel } from './huddle/index.js';
 export default function activate(orca) {
     const host = makeHost(orca);
     host.log('read-aloud: activating');
     const registry = new ProviderRegistry();
     registry.register(new OsSynthProvider(), { preferred: true });
     const sink = new SubprocessSink({ log: host.log });
+    let droppedNotice = null;
     let speech = null;
     let engineError = null;
     // Resolve the engine in the background: activate() must return promptly so command registration
@@ -29,7 +30,20 @@ export default function activate(orca) {
             host.log(`read-aloud: ${engineError}`);
             return;
         }
-        speech = new SpeechService({ provider: resolved.provider, sink, log: host.log });
+        speech = new SpeechService({
+            provider: resolved.provider,
+            sink,
+            log: host.log,
+            maxQueued: 8,
+            onDropped: (n) => {
+                // Coalesce: a burst must not produce a burst of notifications.
+                if (droppedNotice !== null)
+                    clearTimeout(droppedNotice);
+                droppedNotice = setTimeout(() => {
+                    host.notify('Read Aloud', `Skipped ${n} older repl${n === 1 ? 'y' : 'ies'} to keep up`);
+                }, 500);
+            }
+        });
         host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`);
         // R015: degrade loudly. Never let a worse engine pass unmentioned.
         if (resolved.status.reason !== undefined)
@@ -75,7 +89,9 @@ export default function activate(orca) {
     const huddle = new HuddleController({
         speech: {
             // 'queue' is the whole point for huddle: replies must not cut each other off.
-            speak: (t, mode) => { speech?.speak(t, mode ?? 'queue'); },
+            speak: (t, mode, label) => {
+                speech?.speak(t, mode ?? 'queue', label);
+            },
             stop: async () => { await speech?.stop(); }
         },
         log: host.log,
@@ -97,10 +113,31 @@ export default function activate(orca) {
     });
     host.registerCommand('read-aloud.status', async () => {
         await withSpeech((s) => {
-            s.speak(huddle.enabled
-                ? 'Read Aloud is on. Huddle mode is on, so agent replies are spoken as they arrive.'
-                : 'Read Aloud is on. Huddle mode is off.');
+            const parts = [];
+            parts.push(huddle.enabled ? 'Huddle mode is on.' : 'Huddle mode is off.');
+            const following = huddle.following;
+            if (following !== null)
+                parts.push(`Following ${sessionLabel(following)}.`);
+            const now = s.nowReading;
+            if (now !== null)
+                parts.push(`Now reading ${now}.`);
+            if (s.queued > 0)
+                parts.push(`${s.queued} more waiting.`);
+            else if (now === null)
+                parts.push('Nothing is being read.');
+            s.speak(parts.join(' '), 'replace');
         });
+    });
+    // Abandon this reply, move to the next. The single most important control when the wrong thing
+    // is being read at you.
+    host.registerCommand('read-aloud.skip', async () => {
+        await withSpeech(async (s) => { await s.skip(); });
+    });
+    // Stop following the current session. Huddle stays on but goes quiet until a session is picked.
+    host.registerCommand('read-aloud.unfollow', () => {
+        huddle.unlock();
+        host.notify('Read Aloud', 'No longer following any session');
+        speech?.speak('Stopped following that session.', 'replace');
     });
     host.registerCommand('read-aloud.speak-last-reply', async () => {
         await withSpeech(async (s) => {

@@ -16,6 +16,8 @@ export class SpeechService {
     #pending = [];
     #draining = false;
     #cancelled = false;
+    #skip = false;
+    #current = null;
     constructor(deps) {
         this.#deps = deps;
         this.#playback = new PlaybackQueue({
@@ -27,18 +29,27 @@ export class SpeechService {
         return this.#draining || this.#pending.length > 0 || this.#deps.sink.isPlaying;
     }
     get queued() { return this.#pending.length; }
+    /** What is being read right now, if the caller labelled it. */
+    get nowReading() { return this.#current; }
+    /** Abandon the current utterance and move to the next queued one. */
+    async skip() {
+        this.#skip = true;
+        await this.#playback.bargeIn();
+    }
     /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */
-    speak(text, mode = 'replace') {
+    speak(text, mode = 'replace', label) {
         if (mode === 'replace') {
             this.#pending = [];
             void this.#playback.bargeIn();
         }
-        this.#pending.push(text);
+        this.#pending.push(label === undefined ? { text } : { text, label });
         const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED;
         if (this.#pending.length > max) {
             const dropped = this.#pending.length - max;
             this.#pending = this.#pending.slice(-max); // keep the newest; never block the agent
+            // Never silently. Losing a reply you were waiting for, with no signal, is the worst outcome.
             this.#deps.log?.(`speech queue full, dropped ${dropped} older utterance(s)`);
+            this.#deps.onDropped?.(dropped);
         }
         this.#cancelled = false;
         void this.#drain();
@@ -55,10 +66,13 @@ export class SpeechService {
         this.#draining = true;
         try {
             for (;;) {
-                const text = this.#pending.shift();
-                if (text === undefined)
+                const next = this.#pending.shift();
+                if (next === undefined)
                     break;
-                await this.#speakOne(text);
+                this.#current = next.label ?? null;
+                this.#skip = false;
+                await this.#speakOne(next.text);
+                this.#current = null;
                 if (this.#cancelled)
                     break;
             }
@@ -80,7 +94,7 @@ export class SpeechService {
         const chunks = [...chunker.addText(spoken), ...chunker.finish()];
         const generation = this.#playback.begin();
         for (const chunk of chunks) {
-            if (this.#cancelled || generation !== this.#playback.generation)
+            if (this.#cancelled || this.#skip || generation !== this.#playback.generation)
                 return;
             try {
                 for await (const audio of this.#deps.provider.generate(chunk.text)) {

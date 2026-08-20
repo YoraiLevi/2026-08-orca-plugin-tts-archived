@@ -21,6 +21,8 @@ export interface SpeechServiceDeps {
   readonly normalizeOptions?: NormalizeOptions
   /** Cap on queued utterances; beyond this the OLDEST are dropped (never the newest). */
   readonly maxQueued?: number
+  /** Called when the queue overflows, so the user can be told rather than left guessing. */
+  readonly onDropped?: (count: number) => void
 }
 
 const DEFAULT_MAX_QUEUED = 20
@@ -28,9 +30,11 @@ const DEFAULT_MAX_QUEUED = 20
 export class SpeechService {
   readonly #deps: SpeechServiceDeps
   readonly #playback: PlaybackQueue
-  #pending: string[] = []
+  #pending: Array<{ text: string; label?: string }> = []
   #draining = false
   #cancelled = false
+  #skip = false
+  #current: string | null = null
 
   constructor(deps: SpeechServiceDeps) {
     this.#deps = deps
@@ -46,18 +50,29 @@ export class SpeechService {
 
   get queued(): number { return this.#pending.length }
 
+  /** What is being read right now, if the caller labelled it. */
+  get nowReading(): string | null { return this.#current }
+
+  /** Abandon the current utterance and move to the next queued one. */
+  async skip(): Promise<void> {
+    this.#skip = true
+    await this.#playback.bargeIn()
+  }
+
   /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */
-  speak(text: string, mode: SpeakMode = 'replace'): void {
+  speak(text: string, mode: SpeakMode = 'replace', label?: string): void {
     if (mode === 'replace') {
       this.#pending = []
       void this.#playback.bargeIn()
     }
-    this.#pending.push(text)
+    this.#pending.push(label === undefined ? { text } : { text, label })
     const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED
     if (this.#pending.length > max) {
       const dropped = this.#pending.length - max
       this.#pending = this.#pending.slice(-max)   // keep the newest; never block the agent
+      // Never silently. Losing a reply you were waiting for, with no signal, is the worst outcome.
       this.#deps.log?.(`speech queue full, dropped ${dropped} older utterance(s)`)
+      this.#deps.onDropped?.(dropped)
     }
     this.#cancelled = false
     void this.#drain()
@@ -75,9 +90,12 @@ export class SpeechService {
     this.#draining = true
     try {
       for (;;) {
-        const text = this.#pending.shift()
-        if (text === undefined) break
-        await this.#speakOne(text)
+        const next = this.#pending.shift()
+        if (next === undefined) break
+        this.#current = next.label ?? null
+        this.#skip = false
+        await this.#speakOne(next.text)
+        this.#current = null
         if (this.#cancelled) break
       }
     } finally {
@@ -98,7 +116,7 @@ export class SpeechService {
 
     const generation = this.#playback.begin()
     for (const chunk of chunks) {
-      if (this.#cancelled || generation !== this.#playback.generation) return
+      if (this.#cancelled || this.#skip || generation !== this.#playback.generation) return
       try {
         for await (const audio of this.#deps.provider.generate(chunk.text)) {
           if (!this.#playback.push(generation, audio)) return

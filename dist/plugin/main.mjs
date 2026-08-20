@@ -1101,6 +1101,8 @@ var SpeechService = class {
   #pending = [];
   #draining = false;
   #cancelled = false;
+  #skip = false;
+  #current = null;
   constructor(deps) {
     this.#deps = deps;
     this.#playback = new PlaybackQueue({
@@ -1116,18 +1118,28 @@ var SpeechService = class {
   get queued() {
     return this.#pending.length;
   }
+  /** What is being read right now, if the caller labelled it. */
+  get nowReading() {
+    return this.#current;
+  }
+  /** Abandon the current utterance and move to the next queued one. */
+  async skip() {
+    this.#skip = true;
+    await this.#playback.bargeIn();
+  }
   /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */
-  speak(text, mode = "replace") {
+  speak(text, mode = "replace", label) {
     if (mode === "replace") {
       this.#pending = [];
       void this.#playback.bargeIn();
     }
-    this.#pending.push(text);
+    this.#pending.push(label === void 0 ? { text } : { text, label });
     const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED;
     if (this.#pending.length > max) {
       const dropped = this.#pending.length - max;
       this.#pending = this.#pending.slice(-max);
       this.#deps.log?.(`speech queue full, dropped ${dropped} older utterance(s)`);
+      this.#deps.onDropped?.(dropped);
     }
     this.#cancelled = false;
     void this.#drain();
@@ -1143,9 +1155,12 @@ var SpeechService = class {
     this.#draining = true;
     try {
       for (; ; ) {
-        const text = this.#pending.shift();
-        if (text === void 0) break;
-        await this.#speakOne(text);
+        const next = this.#pending.shift();
+        if (next === void 0) break;
+        this.#current = next.label ?? null;
+        this.#skip = false;
+        await this.#speakOne(next.text);
+        this.#current = null;
         if (this.#cancelled) break;
       }
     } finally {
@@ -1164,7 +1179,7 @@ var SpeechService = class {
     const chunks = [...chunker.addText(spoken), ...chunker.finish()];
     const generation = this.#playback.begin();
     for (const chunk of chunks) {
-      if (this.#cancelled || generation !== this.#playback.generation) return;
+      if (this.#cancelled || this.#skip || generation !== this.#playback.generation) return;
       try {
         for await (const audio of this.#deps.provider.generate(chunk.text)) {
           if (!this.#playback.push(generation, audio)) return;
@@ -1299,17 +1314,26 @@ var HUDDLE_SPOKEN_KEY = "huddle.spokenIds";
 var MAX_REMEMBERED_IDS = 300;
 var WATCH_WINDOW_MS = 2e4;
 var DEBOUNCE_MS = 250;
+function sessionLabel(file) {
+  const parts = file.split(/[/\\]/);
+  const name = (parts[parts.length - 1] ?? "").replace(/\.jsonl$/, "");
+  const project = (parts[parts.length - 2] ?? "").replace(/^-+/, "").split("-").slice(-3).join(" ");
+  return `${project}, session ${name.slice(0, 8)}`;
+}
 var HuddleController = class {
   #deps;
   #enabled = false;
   #spoken = /* @__PURE__ */ new Set();
   #lastReply = null;
   #warnedAmbiguous = false;
+  #locked = null;
+  // the ONE session we are following
   #watcher = null;
   #watching = null;
   #stopTimer = null;
   #debounce = null;
-  #primed = false;
+  #primed = /* @__PURE__ */ new Set();
+  // per FILE: a new session must be primed too, or it dumps its backlog
   constructor(deps) {
     this.#deps = deps;
   }
@@ -1326,7 +1350,8 @@ var HuddleController = class {
     this.#enabled = !this.#enabled;
     void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled);
     if (this.#enabled) {
-      this.#primed = false;
+      this.#primed.clear();
+      this.#locked = null;
     } else {
       this.#stopWatching();
       void this.#deps.speech.stop();
@@ -1348,15 +1373,33 @@ var HuddleController = class {
   dispose() {
     this.#stopWatching();
   }
+  /** Follow a different session, announcing the switch so the listener is never disoriented. */
+  switchTo(file) {
+    this.#locked = file;
+    this.#deps.notify(`Now reading: ${sessionLabel(file)}`);
+    this.#deps.speech.speak(`Now reading from ${sessionLabel(file)}.`, "replace");
+  }
+  /** Stop following any session; huddle stays on but silent until you pick one. */
+  unlock() {
+    this.#locked = null;
+    this.#stopWatching();
+  }
+  get following() {
+    return this.#locked;
+  }
   async #ensureWatching(worktreePath) {
-    const file = await this.#newestTranscript(worktreePath);
+    const file = this.#locked ?? await this.#newestTranscript(worktreePath);
     if (file === null) return;
+    if (this.#locked === null) {
+      this.#locked = file;
+      this.#deps.log(`read-aloud: following ${file}`);
+    }
     if (this.#watching !== file) {
       this.#stopWatching();
       this.#watching = file;
-      if (!this.#primed) {
+      if (!this.#primed.has(file)) {
         for (const r of await this.#readReplies(file)) this.#spoken.add(r.id);
-        this.#primed = true;
+        this.#primed.add(file);
         await this.#persistSpoken();
       }
       try {
@@ -1388,7 +1431,7 @@ var HuddleController = class {
     for (const r of fresh) {
       this.#spoken.add(r.id);
       this.#lastReply = r.text;
-      this.#deps.speech.speak(r.text, "queue");
+      this.#deps.speech.speak(r.text, "queue", sessionLabel(file));
     }
     this.#deps.log(`read-aloud: spoke ${fresh.length} new repl${fresh.length === 1 ? "y" : "ies"}`);
     await this.#persistSpoken();
@@ -1478,6 +1521,7 @@ function activate(orca) {
   const registry = new ProviderRegistry();
   registry.register(new OsSynthProvider(), { preferred: true });
   const sink = new SubprocessSink({ log: host.log });
+  let droppedNotice = null;
   let speech = null;
   let engineError = null;
   void registry.resolve().then((resolved) => {
@@ -1486,7 +1530,18 @@ function activate(orca) {
       host.log(`read-aloud: ${engineError}`);
       return;
     }
-    speech = new SpeechService({ provider: resolved.provider, sink, log: host.log });
+    speech = new SpeechService({
+      provider: resolved.provider,
+      sink,
+      log: host.log,
+      maxQueued: 8,
+      onDropped: (n2) => {
+        if (droppedNotice !== null) clearTimeout(droppedNotice);
+        droppedNotice = setTimeout(() => {
+          host.notify("Read Aloud", `Skipped ${n2} older repl${n2 === 1 ? "y" : "ies"} to keep up`);
+        }, 500);
+      }
+    });
     host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`);
     if (resolved.status.reason !== void 0) host.notify("Read Aloud", resolved.status.reason);
   }).catch((err) => {
@@ -1527,8 +1582,8 @@ function activate(orca) {
   const huddle = new HuddleController({
     speech: {
       // 'queue' is the whole point for huddle: replies must not cut each other off.
-      speak: (t, mode) => {
-        speech?.speak(t, mode ?? "queue");
+      speak: (t, mode, label) => {
+        speech?.speak(t, mode ?? "queue", label);
       },
       stop: async () => {
         await speech?.stop();
@@ -1550,8 +1605,26 @@ function activate(orca) {
   });
   host.registerCommand("read-aloud.status", async () => {
     await withSpeech((s) => {
-      s.speak(huddle.enabled ? "Read Aloud is on. Huddle mode is on, so agent replies are spoken as they arrive." : "Read Aloud is on. Huddle mode is off.");
+      const parts = [];
+      parts.push(huddle.enabled ? "Huddle mode is on." : "Huddle mode is off.");
+      const following = huddle.following;
+      if (following !== null) parts.push(`Following ${sessionLabel(following)}.`);
+      const now = s.nowReading;
+      if (now !== null) parts.push(`Now reading ${now}.`);
+      if (s.queued > 0) parts.push(`${s.queued} more waiting.`);
+      else if (now === null) parts.push("Nothing is being read.");
+      s.speak(parts.join(" "), "replace");
     });
+  });
+  host.registerCommand("read-aloud.skip", async () => {
+    await withSpeech(async (s) => {
+      await s.skip();
+    });
+  });
+  host.registerCommand("read-aloud.unfollow", () => {
+    huddle.unlock();
+    host.notify("Read Aloud", "No longer following any session");
+    speech?.speak("Stopped following that session.", "replace");
   });
   host.registerCommand("read-aloud.speak-last-reply", async () => {
     await withSpeech(async (s) => {

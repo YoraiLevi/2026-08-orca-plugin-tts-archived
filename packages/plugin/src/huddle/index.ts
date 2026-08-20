@@ -25,7 +25,7 @@ import { decodeClaudeLine, type DecodedReply } from './decoders.js'
 
 /** Minimal port, so huddle can be tested without a synthesizer. */
 export interface SpeechPort {
-  speak(text: string, mode?: 'replace' | 'queue'): void
+  speak(text: string, mode?: 'replace' | 'queue', label?: string): void
   stop(): Promise<void>
 }
 
@@ -51,17 +51,26 @@ export interface HuddleDeps {
   readonly projectsDir?: string
 }
 
+/** "orca-plugin-tts, session 111693de" — enough to know whose words you are hearing. */
+export function sessionLabel(file: string): string {
+  const parts = file.split(/[/\\]/)
+  const name = (parts[parts.length - 1] ?? '').replace(/\.jsonl$/, '')
+  const project = (parts[parts.length - 2] ?? '').replace(/^-+/, '').split('-').slice(-3).join(' ')
+  return `${project}, session ${name.slice(0, 8)}`
+}
+
 export class HuddleController {
   readonly #deps: HuddleDeps
   #enabled = false
   #spoken = new Set<string>()
   #lastReply: string | null = null
   #warnedAmbiguous = false
+  #locked: string | null = null      // the ONE session we are following
   #watcher: FSWatcher | null = null
   #watching: string | null = null
   #stopTimer: NodeJS.Timeout | null = null
   #debounce: NodeJS.Timeout | null = null
-  #primed = false
+  #primed = new Set<string>()   // per FILE: a new session must be primed too, or it dumps its backlog
 
   constructor(deps: HuddleDeps) { this.#deps = deps }
 
@@ -78,8 +87,8 @@ export class HuddleController {
     this.#enabled = !this.#enabled
     void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled)
     if (this.#enabled) {
-      // Everything already on disk is history, not news: never dump the backlog on the user.
-      this.#primed = false
+      this.#primed.clear()          // re-prime every session on enable; never dump a backlog
+      this.#locked = null
     } else {
       this.#stopWatching()
       void this.#deps.speech.stop()
@@ -103,18 +112,39 @@ export class HuddleController {
 
   dispose(): void { this.#stopWatching() }
 
+  /** Follow a different session, announcing the switch so the listener is never disoriented. */
+  switchTo(file: string): void {
+    this.#locked = file
+    this.#deps.notify(`Now reading: ${sessionLabel(file)}`)
+    this.#deps.speech.speak(`Now reading from ${sessionLabel(file)}.`, 'replace')
+  }
+
+  /** Stop following any session; huddle stays on but silent until you pick one. */
+  unlock(): void {
+    this.#locked = null
+    this.#stopWatching()
+  }
+
+  get following(): string | null { return this.#locked }
+
   async #ensureWatching(worktreePath: string | null): Promise<void> {
-    const file = await this.#newestTranscript(worktreePath)
+    // Once we are following a session we STAY on it. Previously every event re-picked the
+    // most-recently-modified transcript, so a busy unrelated session stole the audio mid-reply.
+    const file = this.#locked ?? await this.#newestTranscript(worktreePath)
     if (file === null) return
+    if (this.#locked === null) {
+      this.#locked = file
+      this.#deps.log(`read-aloud: following ${file}`)
+    }
 
     if (this.#watching !== file) {
       this.#stopWatching()
       this.#watching = file
       // Mark everything currently on disk as seen, so enabling mid-session speaks only what
       // arrives NEXT rather than replaying the backlog.
-      if (!this.#primed) {
+      if (!this.#primed.has(file)) {
         for (const r of await this.#readReplies(file)) this.#spoken.add(r.id)
-        this.#primed = true
+        this.#primed.add(file)
         await this.#persistSpoken()
       }
       try {
@@ -146,7 +176,7 @@ export class HuddleController {
       this.#spoken.add(r.id)
       this.#lastReply = r.text
       // 'queue', not 'replace': a reply arriving mid-utterance must not cut the previous one off.
-      this.#deps.speech.speak(r.text, 'queue')
+      this.#deps.speech.speak(r.text, 'queue', sessionLabel(file))
     }
     this.#deps.log(`read-aloud: spoke ${fresh.length} new repl${fresh.length === 1 ? 'y' : 'ies'}`)
     await this.#persistSpoken()

@@ -22,6 +22,23 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
 
+## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
+**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
+read many of its replies and not a single one… this is really confusing what it is even reading."*
+**Cause:** three faults compounding.
+1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
+   busy session stole the audio mid-reply.
+2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
+   "already primed", so every reply in it counted as fresh and the whole history was read out.
+3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
+   for — with no signal.
+**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
+every utterance with its session; announce switches aloud; tell the user when replies were skipped;
+and add a skip control so the wrong thing can always be abandoned.
+**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
+worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
+must say *whose* words these are before speaking them.
+
 ## P21 — One speak() mode cannot serve both callers
 **Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
 **Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
@@ -112,6 +129,23 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 **Worth remembering:** an event that means "the turn ended" is not the same as "the text is
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
+
+## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
+**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
+read many of its replies and not a single one… this is really confusing what it is even reading."*
+**Cause:** three faults compounding.
+1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
+   busy session stole the audio mid-reply.
+2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
+   "already primed", so every reply in it counted as fresh and the whole history was read out.
+3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
+   for — with no signal.
+**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
+every utterance with its session; announce switches aloud; tell the user when replies were skipped;
+and add a skip control so the wrong thing can always be abandoned.
+**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
+worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
+must say *whose* words these are before speaking them.
 
 ## P21 — One speak() mode cannot serve both callers
 **Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
@@ -216,6 +250,23 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 **Worth remembering:** an event that means "the turn ended" is not the same as "the text is
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
+
+## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
+**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
+read many of its replies and not a single one… this is really confusing what it is even reading."*
+**Cause:** three faults compounding.
+1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
+   busy session stole the audio mid-reply.
+2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
+   "already primed", so every reply in it counted as fresh and the whole history was read out.
+3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
+   for — with no signal.
+**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
+every utterance with its session; announce switches aloud; tell the user when replies were skipped;
+and add a skip control so the wrong thing can always be abandoned.
+**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
+worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
+must say *whose* words these are before speaking them.
 
 ## P21 — One speak() mode cannot serve both callers
 **Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
@@ -331,6 +382,23 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 **Worth remembering:** an event that means "the turn ended" is not the same as "the text is
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
+
+## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
+**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
+read many of its replies and not a single one… this is really confusing what it is even reading."*
+**Cause:** three faults compounding.
+1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
+   busy session stole the audio mid-reply.
+2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
+   "already primed", so every reply in it counted as fresh and the whole history was read out.
+3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
+   for — with no signal.
+**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
+every utterance with its session; announce switches aloud; tell the user when replies were skipped;
+and add a skip control so the wrong thing can always be abandoned.
+**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
+worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
+must say *whose* words these are before speaking them.
 
 ## P21 — One speak() mode cannot serve both callers
 **Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
@@ -466,6 +534,23 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 **Worth remembering:** an event that means "the turn ended" is not the same as "the text is
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
+
+## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
+**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
+read many of its replies and not a single one… this is really confusing what it is even reading."*
+**Cause:** three faults compounding.
+1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
+   busy session stole the audio mid-reply.
+2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
+   "already primed", so every reply in it counted as fresh and the whole history was read out.
+3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
+   for — with no signal.
+**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
+every utterance with its session; announce switches aloud; tell the user when replies were skipped;
+and add a skip control so the wrong thing can always be abandoned.
+**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
+worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
+must say *whose* words these are before speaking them.
 
 ## P21 — One speak() mode cannot serve both callers
 **Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
