@@ -23,8 +23,13 @@
 <div class="row"><span class="k">Speak clipboard</span><span class="v"><code>Mod+Shift+S</code></span></div>
 <div class="row"><span class="k">Stop</span><span class="v"><code>Mod+Shift+X</code></span></div>
 <div class="row"><span class="k">Toggle huddle</span><span class="v"><code>Mod+Shift+H</code></span></div>
+<div class="note" style="border-color:var(--accent)">
+  <strong>Shortcuts need app focus.</strong> Click the sidebar or a settings pane first — with a
+  terminal focused, ORCA does not deliver plugin shortcuts at all. For terminal-heavy work use
+  huddle mode, which needs no shortcut once it is on.
+</div>
 <div class="note">
-  <strong>Known limits.</strong> ORCA exposes no way for a plugin to read your editor selection, so
+  <strong>Other limits.</strong> ORCA exposes no way for a plugin to read your editor selection, so
   the hotkey speaks the <em>clipboard</em>. Huddle mode reads agent transcripts and supports Claude,
   Codex, Grok and omp only. Audio plays from the plugin worker, so there is a short pause between
   sentences.

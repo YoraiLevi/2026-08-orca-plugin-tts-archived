@@ -33,9 +33,27 @@ plugin root. `dist/plugin` is three files and nothing else.
 | Speak clipboard | `Mod+Shift+S` | press again to stop |
 | Stop speaking | `Mod+Shift+X` | |
 | Toggle huddle mode | `Mod+Shift+H` | speaks agent replies as they land |
-| Speak last agent reply | *(command palette)* | |
 
 Shortcuts are rebindable in the manifest.
+
+### ⚠️ Shortcuts do not work while a terminal has focus
+
+**Click somewhere outside a terminal — the sidebar, a settings pane, the tab bar — then press the
+shortcut.** With focus in a terminal pane nothing happens at all.
+
+This is ORCA's behaviour, not a bug in this plugin, and it is deliberate on their side: plugin
+chords are dispatched only when focus context is `app`, so a plugin cannot steal `Ctrl+C` from your
+shell. The consequence is that a plugin command is unreachable exactly where you spend your time.
+
+There is no workaround available to a plugin: ORCA has no command palette to contribute to, panels
+cannot invoke commands, and no OS-level global shortcut exists for plugins *or* for ORCA itself. A
+keybinding in app focus is the only trigger a plugin gets.
+
+Tracked upstream at [stablyai/orca#15642](https://github.com/stablyai/orca/issues/15642), which
+proposes an opt-in flag so a binding can ask for terminal reach.
+
+**If you work mostly in terminals, use huddle mode** (`Mod+Shift+H` once, from the sidebar). It
+needs no trigger afterwards — agent replies are spoken as they arrive.
 
 ## Known limitations
 
@@ -54,6 +72,7 @@ change that would remove it.
   maintained Node audio package can stop fast enough for barge-in. The resident service (planned)
   holds one player open and removes the gap.
 - **Windows on ARM uses the system voice only** — the neural engine has no build for that platform.
+- **Shortcuts are dead while a terminal has focus** — see above. Upstream: stablyai/orca#15642.
 - **SSH/remote worktrees are not supported**: the transcript lives on the remote host.
 
 ## Engines
