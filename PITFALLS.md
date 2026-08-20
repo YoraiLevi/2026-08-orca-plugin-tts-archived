@@ -6,6 +6,51 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P26 — An option nobody can pass is invisible to every test you would think to write
+**Symptom:** `SynthesizeOptions.voice` and `.rate` were declared in core, implemented by
+`OsSynthProvider` on all three platforms, and covered by provider tests — and **no caller could
+reach them.** `SpeechService` called `provider.generate(chunk.text)` with no options at all. Same
+for the chunker's `isolateFirstSentence`: only `maxUnits` was forwarded. The two settings every
+user asks for first were unsettable in the shipped plugin, and nothing was red.
+**Cause:** the tests asserted the *field exists and the provider honours it*. Nothing asserted the
+value **arrives** by the path a real caller uses. A dead wire passes both halves of that split.
+**Instead:** for anything a user is meant to configure, test **reachability end to end** — set it
+on the outermost object a caller actually constructs, and assert the innermost consumer received
+it. `packages/plugin/src/speech-service.test.ts` "voice, rate and chunking are reachable from the
+caller" does this, and it includes the control case (nothing configured → provider receives `{}`),
+so the other assertions can be shown to fail for the right reason.
+**Worth remembering:** this is the same shape as P18 — a defensible-looking layer between two
+correct pieces, where the failure is that nothing connects them. Before M12 freezes any settings
+schema, walk each field from the UI to the process that consumes it; a field that cannot be walked
+is not a setting, it is a comment.
+
+## P25 — A shared library is not a CLI, and that made our Linux floor silent
+**Symptom:** on a stock Ubuntu 24.04 desktop the plugin produced **no sound at all**, with no error
+the user could see. `listVoices()` returned `[]` from a bare `catch` and `generate()` threw into
+another one.
+**Cause:** we synthesized on Linux with `espeak-ng -w`. The Ubuntu desktop image ships
+`libespeak-ng1` and `espeak-ng-data` — because speech-dispatcher's backend links them — but **not**
+`/usr/bin/espeak-ng`, which lives in its own package that is not in the manifest. The library's
+presence makes the binary look installed, and nothing in our code distinguished them.
+**Instead:** probe the **binary**, never infer it from a library or a data package, and ladder down
+to something that is actually on the image. `spd-say` is installed there and **cannot write a
+WAV** — verified upstream (`brailcom/speechd` `src/clients/say/options.c` has no file-output
+option, `-w` is `--wait`; `src/modules/module_utils.c` `module_audio_init` only opens
+oss/alsa/nas/libao/pulse, so there is no capture path either). So it is driven as a *speaker*:
+`spd-say --wait`, the provider yields no audio, and the daemon owns playback — a deliberate,
+announced exception to "providers never play" taken because silence is worse for assistive tech.
+Barge-in must then also send `spd-say --cancel`: killing our client does not stop the daemon.
+**Verify by effect** (needs a Linux box):
+```
+curl -sfL https://releases.ubuntu.com/24.04/ubuntu-24.04.3-desktop-amd64.manifest | grep -i espeak
+command -v espeak-ng espeak spd-say
+spd-say -w /tmp/b.wav "x"; ls /tmp/b.wav      # expect: no such file (-w is --wait)
+```
+**Worth remembering:** the same trap sits under every "the OS already has X" assumption. Ask what
+the *image manifest* ships, not what the *distro packages*. And a swallowed exception on the floor
+of a degradation ladder is the worst place to have one: there is nothing below it to catch you, so
+the only symptom is silence.
+
 ## P24 — `str.replace` duplicated every pitfall in this very file
 **Symptom:** `PITFALLS.md` held **62 entries where 24 existed** — every entry from P13 up repeated
 three or four times. Nobody noticed for hours because the file is only ever appended to and read
