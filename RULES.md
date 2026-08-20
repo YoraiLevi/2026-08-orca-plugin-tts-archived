@@ -59,6 +59,25 @@ RULE: Tell subagents that "could not verify, here is why" is a valid and valuabl
 RULE: Do not take another agent's conclusion at face value when it is load-bearing; check its citations.
 RULE: Delegate only what parallelism, isolation, or fresh eyes actually buys; a two-file edit is not a delegation.
 
+## Continuation — how work keeps moving
+
+RULE: Break work into numbered tasks before starting, and never begin work that has no task id.
+RULE: Keep exactly one task in progress, named in `STATE.md`, so a fresh agent can resume mid-flight.
+RULE: Finish the task you started before opening the next; never leave a task half-done across a stop.
+RULE: Work the critical path until it blocks, then take the next parallel task rather than stopping.
+RULE: A report is not a stopping point — report and keep going in the same turn.
+RULE: Stop only for a decision that is genuinely the user's, an irreversible action, or a hard block.
+RULE: When blocked on a user decision, first do everything that does not depend on it.
+RULE: If a decision stays unanswered, proceed under the stated default and record the assumption in `STATE.md`.
+RULE: Never ask permission to continue work already agreed.
+RULE: Tick the task in `TASKS.md` the moment its gate passes, in the same commit as the work.
+RULE: A failed gate is fixed before moving on; a red gate is never left behind.
+RULE: When a task turns out bigger than its line, split it into subtasks and keep going.
+RULE: End every working turn by naming the next task id, never with a question you could have answered yourself.
+RULE: On resume, read `STATE.md` and `TASKS.md` first and pick up the named in-progress task.
+RULE: Long-horizon work survives compaction because the memory files carry the state; the conversation does not.
+RULE: Prefer shipping a working milestone boundary over polishing an unfinished one.
+
 ## Decisions and reporting
 
 RULE: One decision per discussion body, with Question, Options, Recommendation, and an Engineer prompt.

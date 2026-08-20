@@ -12,9 +12,9 @@ value that must move.
 ## Phase M0 — Spec (blocking; nothing else starts)
 
 - [ ] **T001** Answer the three open questions in `docs/PLAN.md` §1 → user decision
-  - [ ] T001a Repo layout: one repo two packages, or two repos
-  - [ ] T001b Licence: MIT vs GPL-3.0, given Piper/espeak-ng coupling
-  - [ ] T001c Does the resident service ship at v1, or is v1 OS-synth-only
+  - [x] T001a Repo layout: **one repo, two packages** — decided by default, see STATE.md assumptions
+  - [x] T001b Licence: **MIT** — decided by default, revisit before T082/publish
+  - [x] T001c **v1 is OS-synth-only**; service is M9 — decided by default
 - [ ] **T002** Run `/speckit-specify` for `001-speak-selection` → `specs/001-speak-selection/spec.md`
 - [ ] **T003** Write user stories with acceptance scenarios → same file
   - [ ] T003a US1 (P1): speak the clipboard on a hotkey
@@ -32,13 +32,13 @@ value that must move.
 
 ## Phase M1 — Repo skeleton
 
-- [ ] **T010** pnpm workspace + root `package.json` → `package.json`, `pnpm-workspace.yaml`
-- [ ] **T011** [P] TypeScript strict config → `tsconfig.base.json`
-- [ ] **T012** [P] vitest config with per-package projects → `vitest.config.ts`
-- [ ] **T013** [P] esbuild bundle script → `scripts/build.mjs`
-- [ ] **T014** [P] oxlint config → `.oxlintrc.json`
-- [ ] **T015** Create `packages/core`, `packages/providers`, `packages/plugin` with index + package.json
-- [ ] **T016** [P] `.gitattributes` (LF everywhere) — CRLF will corrupt fixture comparisons on Windows
+- [x] **T010** pnpm workspace + root `package.json` → `package.json`, `pnpm-workspace.yaml`
+- [x] **T011** [P] TypeScript strict config → `tsconfig.base.json`
+- [x] **T012** [P] vitest config with per-package projects → `vitest.config.ts`
+- [x] **T013** [P] esbuild bundle script → `scripts/build.mjs`
+- [x] **T014** [P] oxlint config → `.oxlintrc.json`
+- [x] **T015** Create `packages/core`, `packages/providers`, `packages/plugin` with index + package.json
+- [x] **T016** [P] `.gitattributes` (LF everywhere) — CRLF will corrupt fixture comparisons on Windows
 
 **Gate M1:** `pnpm test` exits 0 on macOS, Linux, Windows locally or in a throwaway CI run.
 

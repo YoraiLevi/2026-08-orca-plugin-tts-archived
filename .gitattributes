@@ -1,0 +1,5 @@
+# LF everywhere. CRLF corrupts transcript fixtures and normalizer golden tests on Windows.
+* text=auto eol=lf
+*.wav binary
+*.mp3 binary
+*.onnx binary
