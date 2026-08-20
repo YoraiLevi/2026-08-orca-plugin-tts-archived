@@ -1,0 +1,15 @@
+# Search-skill scratch output (raw scrapes, regenerable)
+/.research/
+
+# Node
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local agent settings
+.claude/settings.local.json
