@@ -133,8 +133,9 @@ describe('T022c tables announced by row', () => {
 
 describe('T022d file paths', () => {
   run([
-    { name: 'path is spoken as its basename with a locator by default',
-      input: 'edit src/core/main.ts now', expect: 'edit the typescript file main, in src core, now' },
+    { name: 'path is announced, humanised, and located',
+      input: 'edit src/core/main.ts now',
+      expect: 'edit file named main, typescript, in folder src core, now' },
     { name: 'bare filename is left alone', input: 'edit main.ts now', expect: 'edit main.ts now' }
   ])
 })
@@ -168,6 +169,21 @@ describe('T024 no residual markdown metacharacters', () => {
 describe('T026 options', () => {
   it('paths can be spoken verbatim when asked', () => {
     expect(normalize('edit src/a/b.ts now', { pathStyle: 'verbatim' })).toBe('edit src/a/b.ts now')
+  })
+
+  it('terse style drops the file kind entirely', () => {
+    expect(normalize('edit src/core/session_handler.py now', { pathStyle: 'terse' }))
+      .toBe('edit session handler, in folder src core, now')
+  })
+
+  it('the file kind can be omitted, kept raw, or moved first', () => {
+    const p = 'edit src/core/session_handler.py now'
+    expect(normalize(p, { extensionStyle: 'omit' }))
+      .toBe('edit file named session handler, in folder src core, now')
+    expect(normalize(p, { extensionStyle: 'raw-last' }))
+      .toBe('edit file named session handler, dot py, in folder src core, now')
+    expect(normalize(p, { extensionStyle: 'word-first' }))
+      .toBe('edit python file named session handler, in folder src core, now')
   })
   it('code blocks can be dropped silently', () => {
     expect(normalize('a\n```\nx\n```\nb', { codeBlocks: 'drop' })).toBe('a b')
@@ -213,15 +229,30 @@ describe('L3 tables pair each value with its header', () => {
   ])
 })
 
+describe('L4b trailing punctuation is not swallowed into the extension', () => {
+  run([
+    { name: 'a comma after a path stays a comma',
+      input: 'from packages/core/index.ts, and then',
+      expect: 'from file named index, typescript, in folder packages core, and then' },
+    { name: 'a full stop ends the sentence rather than becoming part of the extension',
+      input: 'lived in src/core/session_handler.py. There is also',
+      expect: 'lived in file named session handler, python, in folder src core. There is also' },
+    { name: 'a hyphenated stem is humanised',
+      input: 'run scripts/smoke-activate.mjs now',
+      expect: 'run file named smoke activate, javascript, in folder scripts, now' }
+  ])
+})
+
 describe('L4 file paths are comprehensible', () => {
   run([
-    { name: 'extension becomes a word and underscores become spaces',
+    { name: 'name is announced first, kind last, folder announced',
       input: 'see src/core/session_handler.py now',
-      expect: 'see the python file session handler, in src core, now' },
+      expect: 'see file named session handler, python, in folder src core, now' },
     { name: 'typescript file', input: 'edit packages/core/index.ts here',
-      expect: 'edit the typescript file index, in packages core, here' },
-    { name: 'unknown extension still reads sensibly', input: 'open a/b/thing.xyz now',
-      expect: 'open the file thing dot xyz, in a b, now' }
+      expect: 'edit file named index, typescript, in folder packages core, here' },
+    { name: 'unknown extension falls back to the raw suffix, still last',
+      input: 'open a/b/thing.xyz now',
+      expect: 'open file named thing, dot xyz, in folder a b, now' }
   ])
 })
 

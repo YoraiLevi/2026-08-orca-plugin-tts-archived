@@ -46,9 +46,36 @@ by reading the output:
 | "the URL was abruptly surprising" | links say their destination: *"a link to github dot com"* |
 | "52 ms was odd to hear" | units expand: *"fifty two milliseconds"* |
 | "row reading was too quick, I can't tell what I'm hearing" | every cell is paired with its header: *"Piper. Latency, fifty two milliseconds."* |
-| "file paths made no sense whatsoever" | *"the python file session handler, in src core"* — name the kind, humanise the stem |
+| "file paths made no sense whatsoever" | announce the name, humanise the stem, announce the folder |
+| "not heads up enough… the file kind is garbled noise… extension should be last" | *"file named session handler, python, in folder src core"* — see below |
 
 Plus keyboard glyphs, which reached the engine as garbage: `⌘⇧S` → *"command shift S"*.
+
+### File paths
+
+Default: `src/core/session_handler.py` → **"file named session handler, python, in folder src core"**
+
+Three rules, each from a listener:
+
+- **Announce that a name is coming.** "the python file X" was *"not heads up enough"* — you are
+  already mid-name before realising it is a name.
+- **Kind goes last.** Leading with it was *"garbled noise"*: it means nothing until you know what is
+  being named.
+- **Announce the folder too.** Bare "in src core" was *"hard to understand where the files are"*.
+
+Configurable, because none of this is universal:
+
+| Option | Result |
+|---|---|
+| `pathStyle: 'spoken'` *(default)* | file named session handler, python, in folder src core |
+| `pathStyle: 'terse'` | session handler, in folder src core |
+| `pathStyle: 'verbatim'` | src/core/session_handler.py |
+| `extensionStyle: 'omit'` | file named session handler, in folder src core |
+| `extensionStyle: 'raw-last'` | file named session handler, dot py, in folder src core |
+| `extensionStyle: 'word-first'` | python file named session handler, in folder src core |
+
+Trailing punctuation is split off before parsing, or `index.ts,` becomes extension `ts,` and the
+full stop ending a sentence disappears into the file name.
 
 ## Deliberate deviation from buzz
 

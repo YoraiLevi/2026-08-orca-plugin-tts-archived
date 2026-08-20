@@ -432,7 +432,7 @@ var KEY_GLYPHS = {
 var CODE_PLACEHOLDER = " . Here, a code block is omitted. ";
 function normalize(md, opts = {}) {
   const codeBlocks = opts.codeBlocks ?? "announce";
-  const pathStyle = opts.pathStyle ?? "basename";
+  const pathStyle = opts.pathStyle ?? "spoken";
   const doNumbers = opts.expandNumbers ?? true;
   let s = stripFencedCode(md, codeBlocks);
   s = stripInlineCode(s);
@@ -441,7 +441,7 @@ function normalize(md, opts = {}) {
   s = headingsToPauses(s);
   s = listItemsToSentences(s);
   s = tablesToRows(s);
-  if (pathStyle === "basename") s = speakFilePaths(s);
+  if (pathStyle !== "verbatim") s = speakFilePaths(s, pathStyle, opts.extensionStyle ?? "word-last");
   s = stripMarkdownMarkers(s);
   s = speakKeyGlyphs(s);
   s = stripEmoji(s);
@@ -621,7 +621,7 @@ var WORD_BREAK = /* @__PURE__ */ new Set([" ", "\n", "	"]);
 function humanise(text) {
   return text.split("_").join(" ").split("-").join(" ");
 }
-function speakFilePaths(src) {
+function speakFilePaths(src, style, extStyle) {
   const tokens = [];
   let cur = "";
   for (const ch of src) {
@@ -631,20 +631,39 @@ function speakFilePaths(src) {
     } else cur += ch;
   }
   tokens.push(cur);
-  return tokens.map((tok) => {
-    if (tok.length === 0 || WORD_BREAK.has(tok)) return tok;
-    if (!tok.includes("/")) return tok;
+  return tokens.map((raw) => {
+    if (raw.length === 0 || WORD_BREAK.has(raw)) return raw;
+    let tok = raw;
+    let trailing = "";
+    while (tok.length > 0 && TRAILING_PUNCT.has(tok[tok.length - 1])) {
+      trailing = tok[tok.length - 1] + trailing;
+      tok = tok.slice(0, -1);
+    }
+    if (tok.length === 0) return raw;
+    if (!tok.includes("/")) return raw;
     const slash = tok.lastIndexOf("/");
     const base = tok.slice(slash + 1);
     const dir = tok.slice(0, slash);
-    if (base.length === 0 || dir.length === 0) return tok;
+    if (base.length === 0 || dir.length === 0) return raw;
     const dot = base.lastIndexOf(".");
-    if (dot <= 0) return tok;
+    if (dot <= 0 || dot === base.length - 1) return raw;
     const stem = humanise(base.slice(0, dot));
     const ext = base.slice(dot + 1).toLowerCase();
-    const kind = EXTENSION_WORDS[ext];
-    const named = kind === void 0 ? `the file ${stem} dot ${ext}` : `the ${kind} file ${stem}`;
-    return `${named}, in ${humanise(dir.split("/").join(" "))},`;
+    if (!/^[a-z0-9]+$/.test(ext)) return raw;
+    const kindWord = EXTENSION_WORDS[ext] ?? `dot ${ext}`;
+    const folder = `in folder ${humanise(dir.split("/").join(" "))}`;
+    const tail = trailing.length > 0 ? trailing : ",";
+    if (style === "terse") return `${stem}, ${folder}${tail}`;
+    switch (extStyle) {
+      case "omit":
+        return `file named ${stem}, ${folder}${tail}`;
+      case "word-first":
+        return `${kindWord} file named ${stem}, ${folder}${tail}`;
+      case "raw-last":
+        return `file named ${stem}, dot ${ext}, ${folder}${tail}`;
+      default:
+        return `file named ${stem}, ${kindWord}, ${folder}${tail}`;
+    }
   }).join("");
 }
 function isBoundaryBefore(prev) {

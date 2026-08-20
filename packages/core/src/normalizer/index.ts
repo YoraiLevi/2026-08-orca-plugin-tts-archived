@@ -13,13 +13,25 @@
  */
 
 export type CodeBlockPolicy = 'announce' | 'drop'
-export type PathStyle = 'basename' | 'verbatim'
+export type PathStyle = 'spoken' | 'terse' | 'verbatim'
+/** Where the file kind lands, or whether it is spoken at all. */
+export type ExtensionStyle = 'word-last' | 'word-first' | 'raw-last' | 'omit'
 
 export interface NormalizeOptions {
   /** Fenced code: announce as "code block omitted", or drop silently. Default 'announce'. */
   codeBlocks?: CodeBlockPolicy
-  /** Paths: speak `src/a/b.ts` as "b.ts in src/a", or verbatim. Default 'basename'. */
+  /**
+   * How file paths are spoken. Default 'spoken':
+   *   "file named session handler, python, in folder src core"
+   * 'terse'    -> "session handler, in folder src core"   (no file kind)
+   * 'verbatim' -> the raw path, untouched
+   */
   pathStyle?: PathStyle
+  /**
+   * Where the file kind goes. Default 'word-last' — heard as a trailing detail rather than a
+   * prefix, because a kind spoken first is noise before you know what is being named.
+   */
+  extensionStyle?: ExtensionStyle
   /** Expand integers and clock times to words. Default true. */
   expandNumbers?: boolean
 }
@@ -63,7 +75,7 @@ const CODE_PLACEHOLDER = ' . Here, a code block is omitted. '
 
 export function normalize(md: string, opts: NormalizeOptions = {}): string {
   const codeBlocks = opts.codeBlocks ?? 'announce'
-  const pathStyle = opts.pathStyle ?? 'basename'
+  const pathStyle = opts.pathStyle ?? 'spoken'
   const doNumbers = opts.expandNumbers ?? true
 
   let s = stripFencedCode(md, codeBlocks)
@@ -73,7 +85,7 @@ export function normalize(md: string, opts: NormalizeOptions = {}): string {
   s = headingsToPauses(s)
   s = listItemsToSentences(s)
   s = tablesToRows(s)
-  if (pathStyle === 'basename') s = speakFilePaths(s)
+  if (pathStyle !== 'verbatim') s = speakFilePaths(s, pathStyle, opts.extensionStyle ?? 'word-last')
   s = stripMarkdownMarkers(s)
   s = speakKeyGlyphs(s)
   s = stripEmoji(s)
@@ -284,13 +296,17 @@ function humanise(text: string): string {
 }
 
 /**
- * `src/core/session_handler.py` -> `the python file session handler, in src core`.
+ * `src/core/session_handler.py` -> `file named session handler, python, in folder src core`.
  *
- * Reading the path verbatim was reported as "made no sense whatsoever": separators, underscores
- * and a spelled-out extension arrive as noise. Name the KIND of file, humanise the stem, and keep
- * the directory as orientation rather than transcription.
+ * Three rules, all from listening:
+ *  - **Announce that a file name is coming.** "the python file X" was reported as "not heads up
+ *    enough" — the listener is already mid-name before realising it is a name.
+ *  - **Kind goes last.** Leading with it was "garbled noise": it means nothing until you know what
+ *    is being named. Configurable via `extensionStyle`.
+ *  - **Announce the directory too.** Bare "in src core" was "hard to understand where the files
+ *    are"; "in folder" gives the same beat of warning the name gets.
  */
-function speakFilePaths(src: string): string {
+function speakFilePaths(src: string, style: PathStyle, extStyle: ExtensionStyle): string {
   const tokens: string[] = []
   let cur = ''
   for (const ch of src) {
@@ -298,22 +314,48 @@ function speakFilePaths(src: string): string {
   }
   tokens.push(cur)
 
-  return tokens.map((tok) => {
-    if (tok.length === 0 || WORD_BREAK.has(tok)) return tok
-    if (!tok.includes('/')) return tok
+  return tokens.map((raw) => {
+    if (raw.length === 0 || WORD_BREAK.has(raw)) return raw
+
+    // Sentence punctuation clings to the token: "index.ts," and "handler.py." would otherwise be
+    // parsed as extensions "ts," and "py.", producing "dot ts," and swallowing the full stop that
+    // ends the sentence. Split it off and put it back afterwards.
+    let tok = raw
+    let trailing = ''
+    while (tok.length > 0 && TRAILING_PUNCT.has(tok[tok.length - 1] as string)) {
+      trailing = (tok[tok.length - 1] as string) + trailing
+      tok = tok.slice(0, -1)
+    }
+    if (tok.length === 0) return raw
+    if (!tok.includes('/')) return raw
+
     const slash = tok.lastIndexOf('/')
     const base = tok.slice(slash + 1)
     const dir = tok.slice(0, slash)
-    if (base.length === 0 || dir.length === 0) return tok
+    if (base.length === 0 || dir.length === 0) return raw
     const dot = base.lastIndexOf('.')
-    if (dot <= 0) return tok                        // not a file reference
+    if (dot <= 0 || dot === base.length - 1) return raw   // not a file reference
     const stem = humanise(base.slice(0, dot))
     const ext = base.slice(dot + 1).toLowerCase()
-    const kind = EXTENSION_WORDS[ext]
-    const named = kind === undefined
-      ? `the file ${stem} dot ${ext}`
-      : `the ${kind} file ${stem}`
-    return `${named}, in ${humanise(dir.split('/').join(' '))},`
+    if (!/^[a-z0-9]+$/.test(ext)) return raw
+    const kindWord = EXTENSION_WORDS[ext] ?? `dot ${ext}`
+    const folder = `in folder ${humanise(dir.split('/').join(' '))}`
+
+    // Only add our own comma when the source did not already end the clause for us.
+    const tail = trailing.length > 0 ? trailing : ','
+
+    if (style === 'terse') return `${stem}, ${folder}${tail}`
+
+    switch (extStyle) {
+      case 'omit':
+        return `file named ${stem}, ${folder}${tail}`
+      case 'word-first':
+        return `${kindWord} file named ${stem}, ${folder}${tail}`
+      case 'raw-last':
+        return `file named ${stem}, dot ${ext}, ${folder}${tail}`
+      default:
+        return `file named ${stem}, ${kindWord}, ${folder}${tail}`
+    }
   }).join('')
 }
 
