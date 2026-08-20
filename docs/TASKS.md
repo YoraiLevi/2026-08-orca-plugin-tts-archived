@@ -2,6 +2,7 @@
 
 Format: `T### [P?] [M#] Description → path`
 `[P]` = parallelizable with its siblings (different files, no shared state). No `[P]` = sequential.
+Checkbox states: `[ ]` not started · `[x]` done, gate run · `[~]` raised upstream, not ours to close.
 Derived from `docs/PLAN.md`. Checkpoints are gates: do not start the next phase until the gate holds.
 
 **Gate rule:** a checkpoint that could not have failed is not a checkpoint. Every one below names a
@@ -189,8 +190,8 @@ value that must move.
 - [x] **T081** [P] `README.md`: install, config, engines, limitations verbatim from the blocked table
 - [x] **T082** [P] `LICENSE` per T001b
 - [x] **T083** [P] `CONTRIBUTING.md` + the dev-loop pointer
-- [ ] **T084** Reconcile `STATE.md`, `HANDOFF.md`, `PITFALLS.md` against the shipped system
-- [ ] **T085** Create the public GitHub repo and push
+- [x] **T084** Reconcile `STATE.md`, `HANDOFF.md`, `PITFALLS.md` against the shipped system
+- [x] **T085** Create the public GitHub repo and push
 - [ ] **T086** Marketplace entry `{kind:git, url, ref}` pinned to an exact commit
 - [ ] **T087** Tag v1.0.0
 
@@ -219,9 +220,9 @@ value that must move.
 
 ## Phase M10 — Upstream PRs to `stablyai/orca`
 
-- [ ] **T100** PR 1: host→panel `postMessage` channel (unlocks measured-good panel playback)
-- [ ] **T101** PR 2: `sessionId` / `transcriptPath` in the `agent.status.changed` projection
-- [ ] **T102** PR 3: `selection:read` capability
+- [~] **T100** PR 1: host→panel `postMessage` channel (unlocks measured-good panel playback)
+- [x] **T101** PR 2: `sessionId` / `transcriptPath` in the `agent.status.changed` projection
+- [~] **T102** PR 3: `selection:read` capability
 - [ ] **T103** [P] `PanelSink` implementation, dormant until PR 1 merges
 - [ ] **T104** [P] Swap the correlation heuristic for the real id once PR 2 merges
 
