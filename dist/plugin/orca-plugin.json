@@ -65,7 +65,7 @@
       },
       {
         "command": "read-aloud.status",
-        "key": "mod+shift+i",
+        "key": "mod+shift+u",
         "when": "global"
       }
     ]

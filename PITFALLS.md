@@ -6,6 +6,24 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
+**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
+never fires. Nothing in the manifest or the build warns you.
+**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
+time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
+(`src/shared/keybindings.ts`).
+**Instead:** pick from the free set and pin it in a test.
+`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
+commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
+ORCA version:
+```
+grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
+```
+Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
+**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
+cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
+keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
+
 ## P18 — Guessed host API names + a defensive adapter = silent no-op
 **Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
 *"Could not run the plugin command."* The hotkey does nothing at all.
@@ -53,6 +71,24 @@ Actions runner there is **no speech stack at all** (`actions/runner-images` has 
 **Instead:** one portable neural engine as the default on all platforms; OS-native only as a
 labelled fallback. And do not let "but macOS `say` is pretty good" argue for native-first — the same
 argument fails identically on the other two. Verified 2026-08-20.
+
+## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
+**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
+never fires. Nothing in the manifest or the build warns you.
+**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
+time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
+(`src/shared/keybindings.ts`).
+**Instead:** pick from the free set and pin it in a test.
+`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
+commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
+ORCA version:
+```
+grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
+```
+Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
+**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
+cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
+keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
 
 ## P18 — Guessed host API names + a defensive adapter = silent no-op
 **Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
@@ -114,6 +150,24 @@ like a clean archive-free download path. But sherpa's own `tts-models` release t
 ONNX metadata *and* a `tokens.txt` the HF files do not carry.
 **Instead:** download sherpa's release assets, or convert and re-host the models yourself. Verified
 2026-08-20.
+
+## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
+**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
+never fires. Nothing in the manifest or the build warns you.
+**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
+time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
+(`src/shared/keybindings.ts`).
+**Instead:** pick from the free set and pin it in a test.
+`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
+commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
+ORCA version:
+```
+grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
+```
+Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
+**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
+cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
+keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
 
 ## P18 — Guessed host API names + a defensive adapter = silent no-op
 **Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
@@ -186,6 +240,24 @@ pipeline, not only its units.
 not guaranteed on Windows.
 **Instead:** pure-JS `unbzip2-stream` (1.4.3, `gypfile: false`) piped into `tar-stream`. Verified:
 397 entries / 81 MB decoded in 4.7 s with no native build. Or re-host the models as `.tar.gz`.
+
+## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
+**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
+never fires. Nothing in the manifest or the build warns you.
+**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
+time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
+(`src/shared/keybindings.ts`).
+**Instead:** pick from the free set and pin it in a test.
+`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
+commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
+ORCA version:
+```
+grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
+```
+Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
+**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
+cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
+keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
 
 ## P18 — Guessed host API names + a defensive adapter = silent no-op
 **Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
@@ -278,6 +350,24 @@ own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see
 `npm install` anyway (P5) and must fetch binaries itself, **source from GitHub releases, not npm** —
 then all six platform+arch combos are covered. Those tarballs also contain standalone executables
 (`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
+
+## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
+**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
+never fires. Nothing in the manifest or the build warns you.
+**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
+time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
+(`src/shared/keybindings.ts`).
+**Instead:** pick from the free set and pin it in a test.
+`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
+commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
+ORCA version:
+```
+grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
+```
+Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
+**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
+cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
+keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
 
 ## P18 — Guessed host API names + a defensive adapter = silent no-op
 **Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports

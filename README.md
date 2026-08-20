@@ -33,7 +33,7 @@ plugin root. `dist/plugin` is three files and nothing else.
 | Speak clipboard | `Mod+Shift+S` | press again to stop |
 | Stop speaking | `Mod+Shift+X` | |
 | Toggle huddle mode | `Mod+Shift+H` | speaks agent replies as they land; says "huddle mode on/off" aloud |
-| Say status | `Mod+Shift+I` | speaks whether huddle mode is on — the reliable way to check |
+| Say status | `Mod+Shift+U` | speaks whether huddle mode is on — the reliable way to check |
 
 Shortcuts are rebindable in the manifest.
 
@@ -75,7 +75,7 @@ change that would remove it.
 - **Windows on ARM uses the system voice only** — the neural engine has no build for that platform.
 - **Shortcuts are dead while a terminal has focus** — see above. Upstream: stablyai/orca#15642.
 - **The panel cannot show live state.** ORCA has no worker→panel channel, so the panel shows
-  shortcuts and caveats only, never status. Press `Mod+Shift+I` and the plugin tells you its state
+  shortcuts and caveats only, never status. Press `Mod+Shift+U` and the plugin tells you its state
   out loud. Upstream: stablyai/orca#15638.
 - **SSH/remote worktrees are not supported**: the transcript lives on the remote host.
 
