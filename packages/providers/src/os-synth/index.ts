@@ -20,7 +20,16 @@ export type OsPlatform = 'darwin' | 'win32' | 'linux'
 export interface OsSynthOptions {
   /** Override for tests. Defaults to `process.platform`. */
   readonly platform?: OsPlatform
+  /**
+   * Hard deadline for any spawned helper. A synthesizer that never exits must not hang the
+   * plugin — Windows PowerShell can block indefinitely on a headless session, and without this
+   * the worker waits forever (found by CI on windows-latest, PITFALLS P14).
+   */
+  readonly timeoutMs?: number
 }
+
+/** PowerShell + Add-Type of System.Speech is slow to start; be generous but never unbounded. */
+export const DEFAULT_SPAWN_TIMEOUT_MS = 60_000
 
 const CAPABILITIES: ProviderCapabilities = {
   streaming: false,          // whole-utterance only; honest per T041d
@@ -39,18 +48,27 @@ export class OsSynthUnavailableError extends Error {
   }
 }
 
+export class OsSynthTimeoutError extends Error {
+  constructor(cmd: string, ms: number) {
+    super(`${cmd} did not finish within ${ms} ms and was killed`)
+    this.name = 'OsSynthTimeoutError'
+  }
+}
+
 export class OsSynthProvider implements TtsProvider {
   readonly id = 'os-synth'
   readonly displayName = 'System voice'
   readonly capabilities = CAPABILITIES
 
   readonly #platform: OsPlatform
+  readonly #timeoutMs: number
   #warm = false
   #child: ChildProcess | null = null
   #cancelled = false
 
   constructor(opts: OsSynthOptions = {}) {
     this.#platform = opts.platform ?? (process.platform as OsPlatform)
+    this.#timeoutMs = opts.timeoutMs ?? DEFAULT_SPAWN_TIMEOUT_MS
   }
 
   get isWarm(): boolean { return this.#warm }
@@ -80,7 +98,7 @@ export class OsSynthProvider implements TtsProvider {
           const ps = 'Add-Type -AssemblyName System.Speech; ' +
             '(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | ' +
             '%{ $_.VoiceInfo.Name }'
-          const out = await this.#capture('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps])
+          const out = await this.#capture('powershell', ['-NoProfile', '-NonInteractive', '-STA', '-Command', ps])
           return out.split('\n').map((l) => l.trim()).filter((v) => v.length > 0)
         }
         case 'linux': {
@@ -102,7 +120,12 @@ export class OsSynthProvider implements TtsProvider {
     const dir = await mkdtemp(join(tmpdir(), 'orca-tts-'))
     const wav = join(dir, 'out.wav')
     try {
-      await this.#synthesizeToFile(text, wav, opts)
+      try {
+        await this.#synthesizeToFile(text, wav, opts)
+      } catch (err) {
+        if (err instanceof OsSynthTimeoutError) return   // no audio, but never a hang
+        throw err
+      }
       if (this.#cancelled || opts.signal?.aborted === true) return
       const data = await readFile(wav).catch(() => null)
       if (data === null || data.length === 0) return
@@ -133,7 +156,7 @@ export class OsSynthProvider implements TtsProvider {
           `$s.Rate = ${rate}; ` +
           `$s.SetOutputToWaveFile('${esc(outFile)}'); ` +
           `$s.Speak('${esc(text)}'); $s.Dispose()`
-        return { cmd: 'powershell', args: ['-NoProfile', '-NonInteractive', '-Command', ps] }
+        return { cmd: 'powershell', args: ['-NoProfile', '-NonInteractive', '-STA', '-Command', ps] }
       }
       case 'linux': {
         const args = ['-w', outFile]
@@ -156,8 +179,13 @@ export class OsSynthProvider implements TtsProvider {
         return
       }
       this.#child = child
-      child.on('error', () => reject(new OsSynthUnavailableError(this.#platform, [cmd])))
-      child.on('close', () => { this.#child = null; resolve() })
+      const timer = setTimeout(() => {
+        if (child.exitCode === null) child.kill('SIGKILL')
+        reject(new OsSynthTimeoutError(cmd, this.#timeoutMs))
+      }, this.#timeoutMs)
+      const settle = (fn: () => void) => { clearTimeout(timer); fn() }
+      child.on('error', () => settle(() => reject(new OsSynthUnavailableError(this.#platform, [cmd]))))
+      child.on('close', () => settle(() => { this.#child = null; resolve() }))
       opts.signal?.addEventListener('abort', () => this.cancel(), { once: true })
     })
   }
@@ -172,12 +200,17 @@ export class OsSynthProvider implements TtsProvider {
         return
       }
       let out = ''
+      const timer = setTimeout(() => {
+        if (child.exitCode === null) child.kill('SIGKILL')
+        reject(new OsSynthTimeoutError(cmd, this.#timeoutMs))
+      }, this.#timeoutMs)
+      const settle = (fn: () => void) => { clearTimeout(timer); fn() }
       child.stdout?.on('data', (d: Buffer) => { out += d.toString('utf8') })
-      child.on('error', () => reject(new OsSynthUnavailableError(this.#platform, [cmd])))
-      child.on('close', (code) => {
+      child.on('error', () => settle(() => reject(new OsSynthUnavailableError(this.#platform, [cmd]))))
+      child.on('close', (code) => settle(() => {
         if (code === 0) resolve(out)
         else reject(new OsSynthUnavailableError(this.#platform, [cmd]))
-      })
+      }))
     })
   }
 }

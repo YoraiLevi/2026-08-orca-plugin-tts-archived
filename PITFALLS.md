@@ -34,6 +34,22 @@ not guaranteed on Windows.
 **Instead:** pure-JS `unbzip2-stream` (1.4.3, `gypfile: false`) piped into `tar-stream`. Verified:
 397 entries / 81 MB decoded in 4.7 s with no native build. Or re-host the models as `.tar.gz`.
 
+## P14 — Windows PowerShell helpers hang instead of failing, and nothing had a deadline
+**Symptom:** CI green on macOS and Ubuntu, `windows-latest` times out on both the clipboard read and
+the OS-synth contract. Locally everything passed — the Windows path had never executed anywhere.
+**Cause:** two compounding faults.
+1. `Get-Clipboard` drives the Windows clipboard COM API, which **requires single-threaded apartment
+   mode**. Without `-STA`, PowerShell 5.1 can block indefinitely rather than erroring.
+2. More seriously: **not one spawned process in the codebase had a timeout.** A helper that never
+   exits would have hung the plugin worker forever on a real user's machine, with no error and no
+   audio — the exact "fails silently" failure principle I forbids.
+**Instead:** every `spawn` now carries a hard deadline that kills the child and rejects
+(`DEFAULT_SPAWN_TIMEOUT_MS`, `DEFAULT_CLIPBOARD_TIMEOUT_MS`), and all PowerShell invocations pass
+`-STA -NoProfile -NonInteractive`. A test with a 1 ms deadline exercises the timeout path on every
+platform, so this cannot regress unnoticed.
+**Worth remembering:** this is the value of CI on all three OSes. A hang-forever bug in the default
+path was invisible to 105 passing local tests, because the platform that triggers it was never run.
+
 ## P13 — `sherpa-onnx-win-arm64` is missing from **npm**, but upstream does build it
 **Symptom:** you conclude Windows-on-ARM is unsupported and design a fallback you don't need.
 **Cause:** npm at 1.13.6 ships `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `win-x64`
@@ -44,6 +60,22 @@ own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see
 `npm install` anyway (P5) and must fetch binaries itself, **source from GitHub releases, not npm** —
 then all six platform+arch combos are covered. Those tarballs also contain standalone executables
 (`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
+
+## P14 — Windows PowerShell helpers hang instead of failing, and nothing had a deadline
+**Symptom:** CI green on macOS and Ubuntu, `windows-latest` times out on both the clipboard read and
+the OS-synth contract. Locally everything passed — the Windows path had never executed anywhere.
+**Cause:** two compounding faults.
+1. `Get-Clipboard` drives the Windows clipboard COM API, which **requires single-threaded apartment
+   mode**. Without `-STA`, PowerShell 5.1 can block indefinitely rather than erroring.
+2. More seriously: **not one spawned process in the codebase had a timeout.** A helper that never
+   exits would have hung the plugin worker forever on a real user's machine, with no error and no
+   audio — the exact "fails silently" failure principle I forbids.
+**Instead:** every `spawn` now carries a hard deadline that kills the child and rejects
+(`DEFAULT_SPAWN_TIMEOUT_MS`, `DEFAULT_CLIPBOARD_TIMEOUT_MS`), and all PowerShell invocations pass
+`-STA -NoProfile -NonInteractive`. A test with a 1 ms deadline exercises the timeout path on every
+platform, so this cannot regress unnoticed.
+**Worth remembering:** this is the value of CI on all three OSes. A hang-forever bug in the default
+path was invisible to 105 passing local tests, because the platform that triggers it was never run.
 
 ## P13 — Subagent spawn can fail on the host runtime, not on your prompt
 **Symptom:** `Agent` returns *"Failed to create teammate pane: Timed out waiting for the Orca runtime

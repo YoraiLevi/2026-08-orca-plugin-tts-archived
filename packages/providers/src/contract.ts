@@ -34,7 +34,7 @@ export function runProviderContract(
       for await (const c of p.generate('Testing one two three.')) { bytes += c.data.length; chunks++ }
       expect(chunks, 'no audio chunks produced').toBeGreaterThan(0)
       expect(bytes, 'audio was empty').toBeGreaterThan(0)
-    }, 30_000)
+    }, 120_000)
 
     it('T041b returns nothing, and does not throw, for empty input', async () => {
       const p = make()
@@ -42,7 +42,7 @@ export function runProviderContract(
       let chunks = 0
       for await (const c of p.generate('')) { void c; chunks++ }
       expect(chunks).toBe(0)
-    }, 30_000)
+    }, 120_000)
 
     it(`T041c cancel() is observed within ${CANCEL_BUDGET_MS} ms`, async () => {
       const p = make()
@@ -70,7 +70,7 @@ export function runProviderContract(
       if (elapsed > CANCEL_BUDGET_MS) {
         console.warn(`[contract] ${name}: cancel took ${elapsed} ms (budget ${CANCEL_BUDGET_MS} ms)`)
       }
-    }, 30_000)
+    }, 120_000)
 
     it('T041d capabilities describe actual behaviour', async () => {
       const p = make()
@@ -89,14 +89,14 @@ export function runProviderContract(
       await p.prepare()
       await p.prepare()
       expect(p.isWarm).toBe(true)
-    }, 30_000)
+    }, 120_000)
 
     it('lists voices without throwing', async () => {
       const p = make()
       await p.prepare()
       const voices = await p.listVoices()
       expect(Array.isArray(voices)).toBe(true)
-    }, 30_000)
+    }, 120_000)
   })
 
   if (opts.skipReason) {

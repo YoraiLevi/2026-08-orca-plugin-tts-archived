@@ -20,7 +20,7 @@ describe('T042 per-platform command construction', () => {
     let bytes = 0
     for await (const c of p.generate('Testing one two three.')) bytes += c.data.length
     expect(bytes, 'the OS synthesizer produced no audio').toBeGreaterThan(1000)
-  }, 30_000)
+  }, 120_000)
 
   it('T042a macOS output is WAV, never AIFF — decodeAudioData rejects AIFF-C', async () => {
     if (process.platform !== 'darwin') return
@@ -32,7 +32,7 @@ describe('T042 per-platform command construction', () => {
       expect(header, 'not a RIFF/WAV header').toBe('RIFF')
       break
     }
-  }, 30_000)
+  }, 120_000)
 })
 
 describe('T042d cancel latency is measured, not assumed', () => {
@@ -48,5 +48,5 @@ describe('T042d cancel latency is measured, not assumed', () => {
     const elapsed = Date.now() - t0
     console.info(`[measured] OsSynthProvider cancel -> return: ${elapsed} ms`)
     expect(elapsed).toBeLessThan(2000)
-  }, 30_000)
+  }, 120_000)
 })
