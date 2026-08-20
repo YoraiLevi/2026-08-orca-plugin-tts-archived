@@ -95,25 +95,25 @@ value that must move.
 
 ## Phase M4 — Provider seam + OS synthesizer
 
-- [ ] **T040** Define `TtsProvider`, `AudioChunk`, `ProviderCapabilities` → `core/src/types/`
-- [ ] **T041** Write the provider CONTRACT suite; it must fail against a null provider → `providers/src/contract.test.ts`
-  - [ ] T041a Yields at least one non-empty audio chunk for ordinary text
-  - [ ] T041b Returns empty, does not throw, for empty input
-  - [ ] T041c `cancel()` observed within 50 ms — measured elapsed, not exit code
-  - [ ] T041d `capabilities` matches actual behaviour (streaming claim verified)
-  - [ ] T041e `prepare()` is idempotent and reports warm state
-- [ ] **T042** Implement `OsSynthProvider` dispatch → `providers/src/os-synth/index.ts`
-  - [ ] T042a macOS: `say -o out.wav --data-format=LEI16@22050` ← never AIFF, decodeAudioData rejects AIFF-C
-  - [ ] T042b Windows: `System.Speech` via `powershell -NoProfile`
-  - [ ] T042c Linux: `spd-say`, falling back to `espeak-ng`
-  - [ ] T042d Cancel = kill the child process; assert the measured latency
-  - [ ] T042e Detect absence of every OS synth and surface a real error (never silence)
-- [ ] **T043** [P] `ProviderRegistry`: select by config, query capability, report warm state
-- [ ] **T044** [P] Generation-tagged playback queue → `core/src/queue/`
-  - [ ] T044a Barge-in clears the queue; voice-switch preserves it
-  - [ ] T044b Single-flight lock: a second hotkey press never overlaps the first
-  - [ ] T044c Two-sided cancel: abort synthesis AND flush buffers
-- [ ] **T045** Wire the contract suite to run against `OsSynthProvider` on all 3 OSes
+- [x] **T040** Define `TtsProvider`, `AudioChunk`, `ProviderCapabilities` → `core/src/types/`
+- [x] **T041** Write the provider CONTRACT suite; it must fail against a null provider → `providers/src/contract.test.ts`
+  - [x] T041a Yields at least one non-empty audio chunk for ordinary text
+  - [x] T041b Returns empty, does not throw, for empty input
+  - [x] T041c `cancel()` observed within 50 ms — measured elapsed, not exit code
+  - [x] T041d `capabilities` matches actual behaviour (streaming claim verified)
+  - [x] T041e `prepare()` is idempotent and reports warm state
+- [x] **T042** Implement `OsSynthProvider` dispatch → `providers/src/os-synth/index.ts`
+  - [x] T042a macOS: `say -o out.wav --data-format=LEI16@22050` ← never AIFF, decodeAudioData rejects AIFF-C
+  - [x] T042b Windows: `System.Speech` via `powershell -NoProfile`
+  - [x] T042c Linux: `spd-say`, falling back to `espeak-ng`
+  - [x] T042d Cancel = kill the child process; assert the measured latency
+  - [x] T042e Detect absence of every OS synth and surface a real error (never silence)
+- [x] **T043** [P] `ProviderRegistry`: select by config, query capability, report warm state
+- [x] **T044** [P] Generation-tagged playback queue → `core/src/queue/`
+  - [x] T044a Barge-in clears the queue; voice-switch preserves it
+  - [x] T044b Single-flight lock: a second hotkey press never overlaps the first
+  - [x] T044c Two-sided cancel: abort synthesis AND flush buffers
+- [x] **T045** Wire the contract suite to run against `OsSynthProvider` on all 3 OSes
 
 **Gate M4:** contract suite green per OS; T041c reports a real measured number under 50 ms.
 

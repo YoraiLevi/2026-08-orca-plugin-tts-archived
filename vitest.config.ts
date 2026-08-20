@@ -1,6 +1,12 @@
 import { defineConfig } from 'vitest/config'
+import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@orca-tts/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url))
+    }
+  },
   test: {
     include: ['packages/*/src/**/*.test.ts'],
     // Cross-platform: no OS-specific reporters, no snapshot path assumptions.

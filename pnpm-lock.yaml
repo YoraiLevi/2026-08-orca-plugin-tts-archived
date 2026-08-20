@@ -28,7 +28,11 @@ importers:
 
   packages/plugin: {}
 
-  packages/providers: {}
+  packages/providers:
+    dependencies:
+      '@orca-tts/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 
