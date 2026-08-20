@@ -1,6 +1,6 @@
 # STATE — orca-plugin-tts
 
-**Updated:** 2026-08-20 · **Phase:** v1 shipped to a public repo · **Branch:** `main` ·
+**Updated:** 2026-08-21 · **Phase:** v1 shipped to a public repo · **Branch:** `main` ·
 **Repo:** https://github.com/YoraiLevi/orca-plugin-tts
 
 ## One-paragraph status
@@ -21,7 +21,7 @@ two Definition-of-Done items are unmet and named below.
 | README documents limitations verbatim | ✅ |
 | Memory files reconcile | ✅ |
 | **First audio < 500 ms** | ❌ **927 ms on the OS synth.** Tracked: repo issue #1. Fixed by M9. |
-| **A third party installs it and hears a reply** | ❌ **never verified by a human.** Needs the user. |
+| **A human installs it and hears an agent reply** | ✅ **VERIFIED 2026-08-21.** Huddle mode spoke a live reply in a real ORCA session, on time and without repeating. |
 
 ## Open work
 
@@ -65,7 +65,10 @@ two Definition-of-Done items are unmet and named below.
 
 ## Next action
 
-Install it into a real ORCA and listen. Everything else is downstream of whether it sounds right.
+Listening quality. It works; now find out where it sounds wrong. The obvious targets:
+- a reply dense with code, file paths and keyboard symbols (⌘⇧S currently goes to the engine raw)
+- the ~1 s gap between sentences (M9 removes it)
+- a very long reply — is queue-and-drop the right policy in practice?
 
 ## Reading order for a new agent
 
