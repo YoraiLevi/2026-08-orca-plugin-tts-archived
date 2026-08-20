@@ -6,6 +6,31 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P20 — Speaking on the `done` edge reads the PREVIOUS reply
+**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
+spoken. Consistently one behind.
+**Cause:** two faults compounding.
+1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
+   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
+   the previous turn.
+2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
+   the dedup set was empty, so already-spoken replies looked new again.
+**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
+and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
+event. Persist spoken ids to plugin storage, bounded to 300.
+**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
+readable". Anywhere we react to a state change by reading a file someone else writes, watch the
+file — the event only says when to start looking.
+
+## P21 — One speak() mode cannot serve both callers
+**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
+**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
+*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
+decision — it was an accident of having one caller when it was written.
+**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
+the newest and drops the oldest so a fast agent can never block. Documented in the README, because
+"what happens if it is already talking" is the first thing a user asks.
+
 ## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
 **Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
 never fires. Nothing in the manifest or the build warns you.
@@ -71,6 +96,31 @@ Actions runner there is **no speech stack at all** (`actions/runner-images` has 
 **Instead:** one portable neural engine as the default on all platforms; OS-native only as a
 labelled fallback. And do not let "but macOS `say` is pretty good" argue for native-first — the same
 argument fails identically on the other two. Verified 2026-08-20.
+
+## P20 — Speaking on the `done` edge reads the PREVIOUS reply
+**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
+spoken. Consistently one behind.
+**Cause:** two faults compounding.
+1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
+   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
+   the previous turn.
+2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
+   the dedup set was empty, so already-spoken replies looked new again.
+**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
+and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
+event. Persist spoken ids to plugin storage, bounded to 300.
+**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
+readable". Anywhere we react to a state change by reading a file someone else writes, watch the
+file — the event only says when to start looking.
+
+## P21 — One speak() mode cannot serve both callers
+**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
+**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
+*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
+decision — it was an accident of having one caller when it was written.
+**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
+the newest and drops the oldest so a fast agent can never block. Documented in the README, because
+"what happens if it is already talking" is the first thing a user asks.
 
 ## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
 **Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
@@ -150,6 +200,31 @@ like a clean archive-free download path. But sherpa's own `tts-models` release t
 ONNX metadata *and* a `tokens.txt` the HF files do not carry.
 **Instead:** download sherpa's release assets, or convert and re-host the models yourself. Verified
 2026-08-20.
+
+## P20 — Speaking on the `done` edge reads the PREVIOUS reply
+**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
+spoken. Consistently one behind.
+**Cause:** two faults compounding.
+1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
+   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
+   the previous turn.
+2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
+   the dedup set was empty, so already-spoken replies looked new again.
+**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
+and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
+event. Persist spoken ids to plugin storage, bounded to 300.
+**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
+readable". Anywhere we react to a state change by reading a file someone else writes, watch the
+file — the event only says when to start looking.
+
+## P21 — One speak() mode cannot serve both callers
+**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
+**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
+*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
+decision — it was an accident of having one caller when it was written.
+**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
+the newest and drops the oldest so a fast agent can never block. Documented in the README, because
+"what happens if it is already talking" is the first thing a user asks.
 
 ## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
 **Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
@@ -240,6 +315,31 @@ pipeline, not only its units.
 not guaranteed on Windows.
 **Instead:** pure-JS `unbzip2-stream` (1.4.3, `gypfile: false`) piped into `tar-stream`. Verified:
 397 entries / 81 MB decoded in 4.7 s with no native build. Or re-host the models as `.tar.gz`.
+
+## P20 — Speaking on the `done` edge reads the PREVIOUS reply
+**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
+spoken. Consistently one behind.
+**Cause:** two faults compounding.
+1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
+   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
+   the previous turn.
+2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
+   the dedup set was empty, so already-spoken replies looked new again.
+**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
+and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
+event. Persist spoken ids to plugin storage, bounded to 300.
+**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
+readable". Anywhere we react to a state change by reading a file someone else writes, watch the
+file — the event only says when to start looking.
+
+## P21 — One speak() mode cannot serve both callers
+**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
+**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
+*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
+decision — it was an accident of having one caller when it was written.
+**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
+the newest and drops the oldest so a fast agent can never block. Documented in the README, because
+"what happens if it is already talking" is the first thing a user asks.
 
 ## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
 **Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
@@ -350,6 +450,31 @@ own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see
 `npm install` anyway (P5) and must fetch binaries itself, **source from GitHub releases, not npm** —
 then all six platform+arch combos are covered. Those tarballs also contain standalone executables
 (`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
+
+## P20 — Speaking on the `done` edge reads the PREVIOUS reply
+**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
+spoken. Consistently one behind.
+**Cause:** two faults compounding.
+1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
+   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
+   the previous turn.
+2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
+   the dedup set was empty, so already-spoken replies looked new again.
+**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
+and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
+event. Persist spoken ids to plugin storage, bounded to 300.
+**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
+readable". Anywhere we react to a state change by reading a file someone else writes, watch the
+file — the event only says when to start looking.
+
+## P21 — One speak() mode cannot serve both callers
+**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
+**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
+*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
+decision — it was an accident of having one caller when it was written.
+**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
+the newest and drops the oldest so a fast agent can never block. Documented in the README, because
+"what happens if it is already talking" is the first thing a user asks.
 
 ## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
 **Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command

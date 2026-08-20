@@ -943,52 +943,80 @@ var PlaybackQueue = class {
 };
 
 // packages/plugin/src/speech-service.ts
+var DEFAULT_MAX_QUEUED = 20;
 var SpeechService = class {
   #deps;
-  #queue;
-  #chunker;
+  #playback;
+  #pending = [];
+  #draining = false;
+  #cancelled = false;
   constructor(deps) {
     this.#deps = deps;
-    this.#queue = new PlaybackQueue({
+    this.#playback = new PlaybackQueue({
       sink: deps.sink,
       cancelSynthesis: () => {
         deps.provider.cancel();
       }
     });
-    this.#chunker = this.#newChunker();
-  }
-  #newChunker() {
-    const opts = {};
-    if (this.#deps.maxUnits !== void 0) opts.maxUnits = this.#deps.maxUnits;
-    return new Chunker(opts);
   }
   get isSpeaking() {
-    return this.#queue.depth > 0 || this.#deps.sink.isPlaying;
+    return this.#draining || this.#pending.length > 0 || this.#deps.sink.isPlaying;
   }
-  /** Speak a complete string. Returns as soon as the first chunk is queued. */
-  speak(text) {
-    const generation = this.#queue.begin();
-    this.#chunker = this.#newChunker();
-    const done = this.#run(generation, text);
-    return { generation, done };
+  get queued() {
+    return this.#pending.length;
   }
-  /** Two-sided stop: cancels synthesis AND flushes queued audio (R022). */
+  /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */
+  speak(text, mode = "replace") {
+    if (mode === "replace") {
+      this.#pending = [];
+      void this.#playback.bargeIn();
+    }
+    this.#pending.push(text);
+    const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED;
+    if (this.#pending.length > max) {
+      const dropped = this.#pending.length - max;
+      this.#pending = this.#pending.slice(-max);
+      this.#deps.log?.(`speech queue full, dropped ${dropped} older utterance(s)`);
+    }
+    this.#cancelled = false;
+    void this.#drain();
+  }
+  /** Two-sided stop: cancels synthesis, flushes audio, and clears anything waiting (R022). */
   async stop() {
-    await this.#queue.bargeIn();
-    this.#chunker = this.#newChunker();
+    this.#cancelled = true;
+    this.#pending = [];
+    await this.#playback.bargeIn();
   }
-  async #run(generation, text) {
+  async #drain() {
+    if (this.#draining) return;
+    this.#draining = true;
+    try {
+      for (; ; ) {
+        const text = this.#pending.shift();
+        if (text === void 0) break;
+        await this.#speakOne(text);
+        if (this.#cancelled) break;
+      }
+    } finally {
+      this.#draining = false;
+    }
+  }
+  async #speakOne(text) {
     const spoken = normalize(text, this.#deps.normalizeOptions ?? {});
     if (spoken.length === 0) {
       this.#deps.log?.("nothing speakable in that text");
       return;
     }
-    const chunks = [...this.#chunker.addText(spoken), ...this.#chunker.finish()];
+    const chunkerOpts = {};
+    if (this.#deps.maxUnits !== void 0) chunkerOpts.maxUnits = this.#deps.maxUnits;
+    const chunker = new Chunker(chunkerOpts);
+    const chunks = [...chunker.addText(spoken), ...chunker.finish()];
+    const generation = this.#playback.begin();
     for (const chunk of chunks) {
-      if (generation !== this.#queue.generation) return;
+      if (this.#cancelled || generation !== this.#playback.generation) return;
       try {
         for await (const audio of this.#deps.provider.generate(chunk.text)) {
-          if (!this.#queue.push(generation, audio)) return;
+          if (!this.#playback.push(generation, audio)) return;
         }
       } catch (err) {
         this.#deps.log?.(`synthesis failed: ${String(err)}`);
@@ -1080,6 +1108,7 @@ var SubprocessSink = class {
 
 // packages/plugin/src/huddle/index.ts
 import { readFile as readFile2, readdir, stat } from "node:fs/promises";
+import { watch } from "node:fs";
 import { homedir } from "node:os";
 import { join as join3 } from "node:path";
 
@@ -1115,31 +1144,42 @@ function decodeClaudeLine(line) {
 
 // packages/plugin/src/huddle/index.ts
 var HUDDLE_STATE_KEY = "huddle.enabled";
+var HUDDLE_SPOKEN_KEY = "huddle.spokenIds";
+var MAX_REMEMBERED_IDS = 300;
+var WATCH_WINDOW_MS = 2e4;
+var DEBOUNCE_MS = 250;
 var HuddleController = class {
   #deps;
   #enabled = false;
-  #spokenIds = /* @__PURE__ */ new Set();
+  #spoken = /* @__PURE__ */ new Set();
   #lastReply = null;
   #warnedAmbiguous = false;
+  #watcher = null;
+  #watching = null;
+  #stopTimer = null;
+  #debounce = null;
+  #primed = false;
   constructor(deps) {
     this.#deps = deps;
   }
   get enabled() {
     return this.#enabled;
   }
-  /**
-   * Restore the persisted setting. The worker is reaped after 5 minutes idle and re-forked on the
-   * next trigger, so without this huddle mode silently switches itself off between uses.
-   */
   async restore() {
-    const saved = await this.#deps.store?.get(HUDDLE_STATE_KEY);
-    this.#enabled = saved === true;
+    this.#enabled = await this.#deps.store?.get(HUDDLE_STATE_KEY) === true;
+    const ids = await this.#deps.store?.get(HUDDLE_SPOKEN_KEY);
+    if (Array.isArray(ids)) this.#spoken = new Set(ids.filter((x) => typeof x === "string"));
     return this.#enabled;
   }
   toggle() {
     this.#enabled = !this.#enabled;
-    if (!this.#enabled) void this.#deps.speech.stop();
     void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled);
+    if (this.#enabled) {
+      this.#primed = false;
+    } else {
+      this.#stopWatching();
+      void this.#deps.speech.stop();
+    }
     return this.#enabled;
   }
   async lastReply() {
@@ -1147,33 +1187,82 @@ var HuddleController = class {
     const file = await this.#newestTranscript(null);
     if (file === null) return null;
     const replies = await this.#readReplies(file);
-    const last = replies[replies.length - 1];
-    return last?.text ?? null;
+    return replies[replies.length - 1]?.text ?? null;
   }
-  /** Called on every `agent.status.changed`. Speaks on the working -> done edge. */
+  /** The event is a hint: start (or extend) watching the transcript for this worktree. */
   onAgentStatus(status, worktreePath) {
-    if (status.state !== "done") return;
-    void this.#speakNewReplies(worktreePath);
+    if (!this.#enabled) return;
+    void this.#ensureWatching(worktreePath);
   }
-  async #speakNewReplies(worktreePath) {
+  dispose() {
+    this.#stopWatching();
+  }
+  async #ensureWatching(worktreePath) {
     const file = await this.#newestTranscript(worktreePath);
     if (file === null) return;
+    if (this.#watching !== file) {
+      this.#stopWatching();
+      this.#watching = file;
+      if (!this.#primed) {
+        for (const r of await this.#readReplies(file)) this.#spoken.add(r.id);
+        this.#primed = true;
+        await this.#persistSpoken();
+      }
+      try {
+        this.#watcher = watch(file, () => {
+          this.#onChange(file);
+        });
+        this.#deps.log(`read-aloud: watching ${file}`);
+      } catch (err) {
+        this.#deps.log(`read-aloud: could not watch transcript: ${String(err)}`);
+      }
+    }
+    if (this.#stopTimer !== null) clearTimeout(this.#stopTimer);
+    this.#stopTimer = setTimeout(() => {
+      this.#stopWatching();
+    }, WATCH_WINDOW_MS);
+    this.#onChange(file);
+  }
+  #onChange(file) {
+    if (this.#debounce !== null) clearTimeout(this.#debounce);
+    this.#debounce = setTimeout(() => {
+      void this.#speakNew(file);
+    }, DEBOUNCE_MS);
+  }
+  async #speakNew(file) {
+    if (!this.#enabled) return;
     const replies = await this.#readReplies(file);
-    const fresh = replies.filter((r) => !this.#spokenIds.has(r.id));
-    for (const r of fresh) this.#spokenIds.add(r.id);
-    const last = fresh[fresh.length - 1];
-    if (last === void 0) return;
-    this.#lastReply = last.text;
-    if (this.#enabled) this.#deps.speech.speak(last.text);
+    const fresh = replies.filter((r) => !this.#spoken.has(r.id));
+    if (fresh.length === 0) return;
+    for (const r of fresh) {
+      this.#spoken.add(r.id);
+      this.#lastReply = r.text;
+      this.#deps.speech.speak(r.text, "queue");
+    }
+    this.#deps.log(`read-aloud: spoke ${fresh.length} new repl${fresh.length === 1 ? "y" : "ies"}`);
+    await this.#persistSpoken();
+  }
+  async #persistSpoken() {
+    const ids = [...this.#spoken].slice(-MAX_REMEMBERED_IDS);
+    this.#spoken = new Set(ids);
+    await this.#deps.store?.set(HUDDLE_SPOKEN_KEY, ids);
+  }
+  #stopWatching() {
+    this.#watcher?.close();
+    this.#watcher = null;
+    this.#watching = null;
+    if (this.#stopTimer !== null) {
+      clearTimeout(this.#stopTimer);
+      this.#stopTimer = null;
+    }
+    if (this.#debounce !== null) {
+      clearTimeout(this.#debounce);
+      this.#debounce = null;
+    }
   }
   #projectsRoot() {
     return this.#deps.projectsDir ?? join3(homedir(), ".claude", "projects");
   }
-  /**
-   * Most-recently-modified transcript under the worktree's project slug.
-   * This is the heuristic. If two transcripts were touched within a few seconds of each other we
-   * cannot tell which agent spoke, so we warn once and decline to guess.
-   */
   async #newestTranscript(worktreePath) {
     const root = this.#projectsRoot();
     let dirs;
@@ -1183,8 +1272,8 @@ var HuddleController = class {
       return null;
     }
     const slug = worktreePath === null ? null : worktreePath.replace(/[/\\:]/g, "-");
-    const candidates = slug === null ? dirs : dirs.filter((d) => d === slug || d.endsWith(slug) || slug.endsWith(d));
-    const search = candidates.length > 0 ? candidates : dirs;
+    const matched = slug === null ? [] : dirs.filter((d) => d === slug || d.endsWith(slug) || slug.endsWith(d));
+    const search = matched.length > 0 ? matched : dirs;
     const files = [];
     for (const d of search) {
       let entries;
@@ -1205,15 +1294,12 @@ var HuddleController = class {
     }
     if (files.length === 0) return null;
     files.sort((a, b) => b.mtime - a.mtime);
-    const first = files[0];
-    const second = files[1];
-    if (first !== void 0 && second !== void 0 && first.mtime - second.mtime < 2e3) {
-      if (!this.#warnedAmbiguous) {
-        this.#warnedAmbiguous = true;
-        this.#deps.notify(
-          'Read Aloud: two agents are active in this worktree, so huddle mode cannot tell which one replied. Speaking the most recent \u2014 use "speak last reply" if it picks the wrong one.'
-        );
-      }
+    const [first, second] = files;
+    if (first !== void 0 && second !== void 0 && first.mtime - second.mtime < 2e3 && !this.#warnedAmbiguous) {
+      this.#warnedAmbiguous = true;
+      this.#deps.notify(
+        "two agents are active in this worktree, so huddle cannot tell which one replied. Speaking the most recent."
+      );
     }
     return first?.path ?? null;
   }
@@ -1289,8 +1375,9 @@ function activate(orca) {
   });
   const huddle = new HuddleController({
     speech: {
-      speak: (t) => {
-        speech?.speak(t);
+      // 'queue' is the whole point for huddle: replies must not cut each other off.
+      speak: (t, mode) => {
+        speech?.speak(t, mode ?? "queue");
       },
       stop: async () => {
         await speech?.stop();
@@ -1308,7 +1395,7 @@ function activate(orca) {
   host.registerCommand("read-aloud.toggle-huddle", () => {
     const on = huddle.toggle();
     host.notify("Read Aloud", `Huddle mode ${on ? "ON" : "OFF"}`);
-    if (speech !== null) speech.speak(on ? "Huddle mode on." : "Huddle mode off.");
+    if (speech !== null) speech.speak(on ? "Huddle mode on." : "Huddle mode off.", "replace");
   });
   host.registerCommand("read-aloud.status", async () => {
     await withSpeech((s) => {

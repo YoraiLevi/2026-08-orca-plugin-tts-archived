@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { SpeechService } from './speech-service.js'
 import type { AudioChunk, PlaybackSink, ProviderCapabilities, TtsProvider } from '@orca-tts/core'
 
+/** Let the async drain loop run to completion. */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5))
+}
+
 class RecordingProvider implements TtsProvider {
   id = 'fake'; displayName = 'Fake'
   synthesized: string[] = []
@@ -32,7 +37,8 @@ describe('T066 pipeline integration', () => {
     const provider = new RecordingProvider()
     const sink = new FakeSink()
     const s = new SpeechService({ provider, sink })
-    await s.speak('# Title\nThis is **one**. This is two.').done
+    s.speak('# Title\nThis is **one**. This is two.')
+    await settle()
     // Markdown is gone before the engine ever sees the text.
     expect(provider.synthesized.join('')).not.toMatch(/[*#]/)
     expect(provider.synthesized.join('')).toContain('Title.')
@@ -43,7 +49,8 @@ describe('T066 pipeline integration', () => {
     const provider = new RecordingProvider()
     const log = vi.fn()
     const s = new SpeechService({ provider, sink: new FakeSink(), log })
-    await s.speak('.').done
+    s.speak('.')
+    await settle()
     expect(provider.synthesized).toEqual([])
     expect(log).toHaveBeenCalled()          // never fail silently
   })
@@ -68,7 +75,43 @@ describe('T066 pipeline integration', () => {
     }
     const log = vi.fn()
     const s = new SpeechService({ provider, sink: new FakeSink(), log })
-    await expect(s.speak('Hello there.').done).resolves.toBeUndefined()
+    s.speak('Hello there.')
+    await settle()
     expect(log).toHaveBeenCalledWith(expect.stringContaining('engine died'))
+  })
+
+  it("queue mode speaks utterances in order and never cuts one off", async () => {
+    const provider = new RecordingProvider()
+    const s = new SpeechService({ provider, sink: new FakeSink() })
+    s.speak('First reply.', 'queue')
+    s.speak('Second reply.', 'queue')
+    s.speak('Third reply.', 'queue')
+    await settle()
+    const said = provider.synthesized.join(' ')
+    expect(said).toContain('First reply.')
+    expect(said).toContain('Second reply.')
+    expect(said).toContain('Third reply.')
+    expect(said.indexOf('First')).toBeLessThan(said.indexOf('Second'))
+    expect(said.indexOf('Second')).toBeLessThan(said.indexOf('Third'))
+  })
+
+  it('replace mode interrupts, which is what a hotkey press means', async () => {
+    const provider = new RecordingProvider()
+    const sink = new FakeSink()
+    const s = new SpeechService({ provider, sink })
+    s.speak('Old text.', 'queue')
+    s.speak('New text.', 'replace')
+    await settle()
+    expect(provider.cancelled).toBeGreaterThan(0)
+    expect(sink.stops).toBeGreaterThan(0)
+  })
+
+  it('a full queue drops the OLDEST, never blocking the agent', async () => {
+    const provider = new RecordingProvider()
+    const log = vi.fn()
+    const s = new SpeechService({ provider, sink: new FakeSink(), log, maxQueued: 2 })
+    for (let i = 0; i < 6; i++) s.speak(`Reply number ${i}.`, 'queue')
+    await settle()
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('queue full'))
   })
 })

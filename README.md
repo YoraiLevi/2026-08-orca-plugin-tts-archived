@@ -37,6 +37,17 @@ plugin root. `dist/plugin` is three files and nothing else.
 
 Shortcuts are rebindable in the manifest.
 
+### What happens if it is already speaking
+
+| Trigger | Behaviour |
+|---|---|
+| Hotkey while speaking | **interrupts** — you asked for this text *now*. A second `Mod+Shift+S` stops. |
+| Agent reply while speaking (huddle) | **queues** — replies are spoken in order and never cut each other off. |
+| `Mod+Shift+X` | stops everything and clears the queue. |
+
+If replies arrive faster than they can be read, the queue keeps the newest and drops the oldest,
+so a busy agent can never block or lag behind indefinitely.
+
 ### ⚠️ Shortcuts do not work while a terminal has focus
 
 **Click somewhere outside a terminal — the sidebar, a settings pane, the tab bar — then press the
