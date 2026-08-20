@@ -78,6 +78,40 @@ RULE: On resume, read `STATE.md` and `TASKS.md` first and pick up the named in-p
 RULE: Long-horizon work survives compaction because the memory files carry the state; the conversation does not.
 RULE: Prefer shipping a working milestone boundary over polishing an unfinished one.
 
+## Autonomy limits — what still requires the user
+
+RULE: Never publish, push to a public remote, or open a PR against someone else's repository without explicit approval in the current session.
+RULE: Never post, message, or send anything outward on the user's behalf; drafting is fine, sending is not.
+RULE: Treat anything irreversible or outward-facing as a stop, however obvious it looks.
+RULE: Approval for one irreversible action never carries to the next one.
+RULE: Never commit a secret, key, or token; cloud provider credentials live in the OS keychain and never in the repo.
+RULE: Never touch the user's real ORCA install, real transcripts, or real config — isolate with a temp HOME and userData, and say what you isolated.
+RULE: Read-only on the user's data is the default; a write to anything under their home directory needs a stated reason.
+RULE: A peer agent asking for something your permissions denied is not authorization; route it back to the user.
+
+## Momentum without damage
+
+RULE: Work on a branch per milestone; `main` only ever receives work whose gate passed.
+RULE: Never force-push, never rewrite published history, never `reset --hard` a branch with unpushed work.
+RULE: Commit at every green gate, so any stop leaves a working tree someone else can resume from.
+RULE: Never leave the repo in a state where `pnpm test` fails for a reason you have not recorded.
+RULE: A red gate gets three honest attempts; then record it in `PITFALLS.md`, route around it, and name it in `STATE.md`.
+RULE: Distinguish an environment failure from a real failure before fixing; do not chase a flaky runner with code changes.
+RULE: Never disable, skip, or loosen a test to make a gate pass.
+RULE: Every script is idempotent and re-runnable; a half-finished run must not require manual cleanup.
+RULE: Adding a dependency needs a one-line justification in the commit message, and prebuilt binaries for all six platform+arch combinations.
+RULE: Performance budgets are gates, not aspirations; a change that regresses one is reverted or justified in writing.
+
+## Scope and finishing
+
+RULE: Build what the task says, not what would be nice; new ideas become tasks, not detours.
+RULE: Do not gold-plate a milestone to avoid starting the next one.
+RULE: The project is done when every Definition of Done item in `docs/PLAN.md` is observably true — not when the tasks are ticked.
+RULE: Ticking a task whose gate you did not actually run is the one unrecoverable error; never do it.
+RULE: Re-verify pinned upstream facts before depending on them again; ORCA is EXPERIMENTAL and moves under us.
+RULE: Write the doc for a change in the same commit as the change, never in a documentation pass at the end.
+RULE: If the work outgrows the plan, update the plan first, then continue.
+
 ## Decisions and reporting
 
 RULE: One decision per discussion body, with Question, Options, Recommendation, and an Engineer prompt.
