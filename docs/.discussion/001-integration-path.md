@@ -93,3 +93,68 @@ should name this in the spec rather than let it read as delivered.
 > this document's recommendation around a panel-hosted synthesizer and say what happens to the
 > worker. If E1 is negative, produce the Option B/companion-process comparison this document does
 > not currently contain. Then write the constitution and `specs/001-*` against whichever option survives.
+
+---
+
+# RESOLUTION — 2026-08-20, after E1/E2/E6/E7/E8
+
+**Decision: Option C (hybrid), with a specific shape the pre-empirical draft did not anticipate.**
+
+## What the measurements changed
+
+| Hoped-for architecture | Measured verdict |
+|---|---|
+| Worker has real Node (fs, spawn, net) | ✅ **Confirmed unrestricted.** Option A's foundation is sound. |
+| Panel can play raw PCM via Web Audio | ✅ **Works, beautifully.** 4 ms scheduling drift, 2 ms stop-to-silence, decodes MP3/Opus/AAC/WAV. Zero CSP violations. |
+| Worker can hand the panel those samples | ❌ **No channel exists.** `commands.invoke`, `storage.get`, `events.subscribe` are all *"not a panel-callable action"*; there is no host→panel push at all. |
+
+So the clean design is **technically sound and currently unreachable**, blocked not by an audio
+problem but by one missing message channel. The panel is an excellent speaker with no wire to it.
+
+Two further measurements constrain the rest:
+
+- **E7:** declaring `keybindings` folds a hash of *every file in the plugin directory* into the
+  consent fingerprint (`plugin-discovery.ts:126-135`). Any byte change — a `.DS_Store` — flips the
+  plugin to `needsReconsent`. Bumping `version` alone does **not** work around it. PITFALLS P6's
+  proposed workaround is dead; the working loop is a script that re-reads the live fingerprint and
+  calls `plugins.consent` programmatically.
+- **E8:** the panel→host bridge caps at 64 KB per message and 30 messages per 10 s.
+
+## The resolved architecture
+
+**Four parts, with the ORCA-specific surface kept deliberately thin.**
+
+1. **ORCA plugin worker** — the orchestrator. Tails the agent transcript JSONL (it has real `fs`),
+   filters thinking blocks at the raw record level, normalizes markdown for speech, chunks on
+   sentence boundaries. Owns no audio.
+2. **A resident local TTS service** — synthesis and playback, over loopback HTTP. This is the
+   user's own two-process rule made concrete, and it is *also* their existing
+   `TTS-Hotkey-AI-Read-Clipboard-CLI` project. Models stay warm; a hotkey never pays model load.
+   Playback lives on the machine with the speakers (user requirement R5.2).
+3. **A zero-install bridge** — before the service is installed or warm, the worker spawns the OS
+   synthesizer directly (`say` / PowerShell SAPI / `spd-say`). Slower, always present, never fails.
+   This is what makes Constitution principle I (never fail silently) true on first run.
+4. **Panel** — UI only: status, what is speaking, controls. It becomes a *playback surface* the day
+   upstream PR #1 lands, and the code is structured so that is a sink swap, not a rewrite.
+
+**Why the service rather than putting synthesis in the worker:** the worker is reaped after 5
+minutes idle, cannot host a `.node` native addon inside a bundled `main.mjs`, is capped at 50 MB
+and 2,000 files, and has no maintained instant-stop audio sink available to it. The service has
+none of those limits, is reusable outside ORCA, is testable in CI without Electron, and is the
+artifact the user already specified.
+
+**Upstream PRs, in value order.** Each is small, independently useful to other plugin authors, and
+each retroactively upgrades the plugin:
+1. A host→panel `postMessage` channel. Unlocks the measured-good panel playback path.
+2. `sessionId` / `providerSession.transcriptPath` in the `agent.status.changed` projection. Kills
+   the correlation heuristic outright.
+3. `selection:read`. The only honest route to a real "speak selection".
+
+## What this costs us, stated plainly
+
+- **"Speak selection" still cannot read an editor selection.** Ships as speak-the-clipboard plus
+  speak-the-last-reply until PR #3 lands. This must be named in the spec, not implied away.
+- **Transcript correlation stays a heuristic** until PR #2 lands: `worktreeId` carries the absolute
+  worktree path, which is the only usable handle, and it breaks with two agents in one worktree.
+- **Coverage is 5 of 14 agents** — only those with transcript decoders.
+- **A second installable component.** Mitigated by part 3: the plugin is useful, if slower, alone.

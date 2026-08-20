@@ -21,10 +21,14 @@ Raw JSON for every probe is under
    `voiceschanged`, and `speak()` fired `start` → 4× `boundary` → `end` over 1,672 ms for
    "testing one two three". **Zero CSP violations for speech.** `AudioContext` constructs in state
    `running` with no user gesture. **Synthesis can live inside the sandbox with zero capabilities.**
-3. **But `<audio>` in a panel is genuinely dead.** MEASURED: setting `audio.src` to *either* a
-   `data:` URI or a `blob:` URL raises `securitypolicyviolation` with `effectiveDirective:
-   "media-src"` and `MediaError.code = 4`. So a panel can *synthesize* but cannot *play supplied
-   bytes* — cloud-TTS-audio-in-the-panel is impossible; OS-voice-in-the-panel is easy.
+3. **A panel can play arbitrary audio after all — just not through `<audio>`.** MEASURED (E6, and
+   this supersedes the narrower E2 reading): `<audio src=…>` is blocked for `data:` and `blob:`
+   alike (`media-src`, `MediaError.code 4`), but **Web Audio is completely unblocked — zero CSP
+   violations across the whole E6 run.** Raw `Float32Array` PCM plays through an
+   `AudioBufferSourceNode`; scheduling drift is **≤ 4 ms**; `stop()` → `onended` is **2–5 ms**; and
+   `decodeAudioData` successfully decodes **MP3, Opus-in-Ogg, AAC/M4A and WAV** in 8–10 ms. The CSP
+   governs resource *loads*, not sample data you already hold. `AudioWorklet.addModule()` is the one
+   casualty (blocked for both `blob:` and `data:`), which costs us nothing that matters.
 4. **The `paneKey` → transcript gap is real and worse than "heuristic".** MEASURED: the plugin
    receives exactly four fields; a `last_assistant_message` we injected through ORCA's own hook
    endpoint never appeared. `paneKey` is `<tabId UUID>:<layoutLeaf UUID>` — no session id, no agent
@@ -36,16 +40,31 @@ Raw JSON for every probe is under
    until it is force-restarted; (b) if the manifest declares `keybindings` (which a TTS plugin
    wants), **every single file edit changes the consent fingerprint, flips the plugin to `pending` /
    `needsReconsent: true`, and disables it** until the user re-approves. Hot reload is really hot
-   re-consent. Also MEASURED: plugin logs are an in-memory 200-line ring buffer — **there is no log
-   file on disk at all**.
-
-6. **A plugin panel cannot talk to its own plugin worker.** MEASURED: the panel bridge accepts
+   re-consent — and MEASURED (E7), **bumping only the `version` field does it too**, so the
+   version-bump workaround recorded as PITFALLS P6 does not work. The trigger is any byte change
+   anywhere in the plugin directory, because `keybindings` opts the whole tree into the fingerprint
+   hash. It *is* fully automatable — `plugins.consent` with a freshly-read fingerprint re-approves
+   with zero UI — so the fix is a script, not a click. Also MEASURED: plugin logs are an in-memory
+   200-line ring buffer — **there is no log file on disk at all**.
+6. **A plugin panel cannot talk to its own plugin worker.** MEASURED (E8): the panel bridge accepts
    exactly three actions. `commands.invoke`, `plugin.invokeCommand`, `storage.get`, and
    `events.subscribe` all come back `invalid_request` / `"action: not a panel-callable action"`.
    There is no host→panel push either — the bridge has four message types and the only host→panel
    frames are a watchdog ping and the result of a panel-initiated call. **So finding 2 and finding 1
    cannot be composed as stated: the worker can get the text but has no way to hand it to the panel
    that can speak it.** This is the sharpest open design problem the measurements produced.
+7. **Everything the clean architecture needs is measured working except one link.** Worker gets the
+   text (E1) · panel plays the audio with sample-accurate scheduling and instant barge-in (E6) ·
+   **but the worker cannot hand the panel the samples** (E8). The gap is not an audio problem and
+   not a CSP problem; it is one missing host method. Measured budget for any future channel: 64 KB
+   per message, 30 messages per 10 s (~1.9 MB/10 s), against 44 KB/s for `Int16` PCM at 22 kHz — so
+   bandwidth is comfortable if the channel ever exists.
+8. **Net effect on the design space.** Three shapes survive measurement: **(a)** worker-only —
+   works today, spawns an OS TTS binary, but sits outside the capability model and needs a
+   per-OS binary story; **(b)** panel-only — clean and capability-free, and now known to handle both
+   OS voices *and* decoded cloud audio, but has no source of agent text; **(c)** upstream one
+   `panel.postMessage`-shaped host method and get (a)+(b) together. (c) is a much smaller ask than
+   it looked before E6.
 
 ## Environment
 
@@ -506,7 +525,265 @@ by hand-editing that file, so **hand-editing `orca-data.json` while ORCA is runn
 NOT-TESTED** — and given the app holds the store in memory and rewrites it, I would not assume it
 works.
 
-## E6 Panel ↔ worker bridge — **MEASURED: no channel exists**
+## E6 Web Audio PCM playback — **MEASURED: it all works, and it changes the architecture**
+
+The decisive experiment. E2 established that `<audio src=…>` is blocked by `media-src` and that
+`AudioContext` constructs `running`. This tests the combination that matters: **audio that never
+crosses a URL boundary.** All of the below ran inside the real sandboxed plugin panel, opaque
+origin, under the unmodified `PLUGIN_PANEL_CSP`.
+
+**Headline: `"cspViolations": []` — zero, across the entire E6 run.** Every violation E2 recorded
+came from an `<audio>` `src` assignment. Nothing in Web Audio triggers one.
+
+### E6a — AudioContext. MEASURED.
+
+```json
+{ "constructed": true, "state": "running", "sampleRate": 48000, "baseLatency": 0.005333333333333333 }
+```
+
+`running` on construction, with no user gesture. 48 kHz device rate, 5.33 ms base latency.
+
+### E6b — raw PCM playback. MEASURED: **works, no throw, no violation.**
+
+`ctx.createBuffer(1, 22050, 22050)`, channel data filled with a 440 Hz sine from a `Float32Array`,
+played through an `AudioBufferSourceNode`:
+
+```json
+{ "threw": false, "onendedFired": true,
+  "wallClockMs": 1001, "ctxTimeDelta": 1.0027,
+  "bufferDurationS": 1, "bufferSampleRate": 22050, "numberOfChannels": 1 }
+```
+
+A 1.000 s buffer ended after 1,001 ms of wall clock and 1.0027 s of context time. Note the buffer
+was created at **22050 Hz inside a 48000 Hz context** and played correctly — the implicit resample
+works, so a TTS engine's native rate does not have to match the device.
+
+### E6c — gapless scheduling. MEASURED: **drift ≤ 4 ms, far inside the 50 ms budget.**
+
+Three 0.3 s buffers scheduled at `t`, `t+0.3`, `t+0.6` on three separate source nodes:
+
+```json
+{ "sourcesCreated": 3, "bufferDurationS": 0.3, "firedInOrder": true,
+  "events": [
+    { "index": 0, "scheduledCtxTime": 1.186, "expectedEndCtxTime": 1.486, "actualEndCtxTime": 1.488,  "wallClockMs": 350 },
+    { "index": 1, "scheduledCtxTime": 1.486, "expectedEndCtxTime": 1.786, "actualEndCtxTime": 1.7867, "wallClockMs": 649 },
+    { "index": 2, "scheduledCtxTime": 1.786, "expectedEndCtxTime": 2.086, "actualEndCtxTime": 2.0907, "wallClockMs": 953 } ],
+  "gaps": [
+    { "betweenIndex": "0->1", "wallClockGapMs": 299, "ctxTimeGapS": 0.2987, "driftFromIdealMs": -1 },
+    { "betweenIndex": "1->2", "wallClockGapMs": 304, "ctxTimeGapS": 0.304,  "driftFromIdealMs":  4 } ],
+  "maxAbsDriftMs": 4 }
+```
+
+All three fired in order. Consecutive `onended` deltas were 299 ms and 304 ms against an ideal
+300 ms — **−1 ms and +4 ms drift**. Measured against the brief's < 50 ms inter-sentence budget, this
+is an order of magnitude of headroom. Note the drift figures are `onended` *event-delivery* jitter;
+the *audio* itself is sample-accurate by construction, since each buffer starts at an explicit
+`ctx.currentTime`-relative offset rather than being chained on a callback.
+
+### E6d — instant stop / barge-in. MEASURED: **2–5 ms, budget is 50 ms.**
+
+A 5 s buffer started, then `src.stop()` called 200 ms in. Two runs:
+
+```json
+{ "stopToOnendedMs": 2, "stopToOnendedCtxMs": 5, "bufferDurationS": 5 }
+{ "stopToOnendedMs": 5, "stopToOnendedCtxMs": 5, "bufferDurationS": 5 }
+```
+
+`stop()` → `onended` in **2 ms** (wall) / 5 ms (context clock) on one run, 5 ms / 5 ms on the other,
+against a 5-second buffer. Barge-in is effectively instantaneous. (For production, ramp a
+`GainNode` over ~10 ms before `stop()` to avoid a click — not measured, but standard practice.)
+
+### E6e — `decodeAudioData`. MEASURED: **works, and this reverses the E2 conclusion for cloud TTS.**
+
+Five real encoded files were handed to the panel as `ArrayBuffer`s and decoded:
+
+```json
+{ "selfBuiltWav_22050_1s": { "ok": true, "ms":  9, "duration": 1.0,   "sampleRate": 48000, "channels": 1 },
+  "sayWav":                { "ok": true, "ms":  8, "duration": 1.467, "sampleRate": 48000, "channels": 1 },
+  "sayMp3":                { "ok": true, "ms":  9, "duration": 1.467, "sampleRate": 48000, "channels": 1 },
+  "sayOpusOgg":            { "ok": true, "ms":  8, "duration": 1.467, "sampleRate": 48000, "channels": 1 },
+  "sayAacM4a":             { "ok": true, "ms": 10, "duration": 1.483, "sampleRate": 48000, "channels": 1 },
+  "sayAiff":               { "ok": false, "error": "Unable to decode audio data" } }
+```
+
+- **MP3 (64 kbps mono), Opus-in-Ogg (32 kbps), AAC in M4A, and WAV all decode**, in 8–10 ms for
+  ~1.5 s of audio, all resampled to the context's 48 kHz.
+- **AIFF-C is the only failure, and it is a codec gap, not CSP** — no `securitypolicyviolation`
+  fired for it, and the identical audio in WAV/MP3/Opus/AAC decoded fine. (`/usr/bin/say`'s default
+  `-o file.aiff` emits AIFF-C compressed; `say -o out.wav --data-format=LEI16@22050` produces a WAV
+  Chromium reads happily. Use that form.)
+- **`decodeAudioData` is not CSP-gated.** Loading an `<audio src>` is a resource fetch; decoding an
+  `ArrayBuffer` you already hold is not.
+
+**This is the finding that reverses E2's pessimism about cloud TTS.** A cloud provider's MP3 or
+Opus response *can* be played in a panel — the blocker was never the codec or the CSP's audio
+policy, only the URL-shaped delivery. What still blocks it is `connect-src 'none'` (the panel
+cannot fetch it) plus E8 (no worker→panel channel to hand it over).
+
+### E6f — AudioWorklet. MEASURED: **blocked, both ways.**
+
+```json
+{ "audioWorkletDefined": "object",
+  "blobUrlSample": "blob:null/49dec759-0",
+  "blobModule": { "ok": false, "error": "Unable to load a worklet's module." },
+  "dataModule": { "ok": false, "error": "Unable to load a worklet's module." } }
+```
+
+`ctx.audioWorklet` exists, and `URL.createObjectURL` succeeds, but `addModule()` rejects for **both**
+a `blob:` URL and a `data:text/javascript;base64,…` URL. `addModule` is a script *fetch*, and
+`script-src 'unsafe-inline'` permits inline script only — no `blob:`, no `data:`. So the
+answer to the lead's question is: neither loads.
+
+**Consequence, and it is a mild one:** `AudioBufferSourceNode` scheduling is our only path. That is
+sufficient — E6c/E6d show scheduling accuracy and stop latency are already an order of magnitude
+inside budget. What we lose is true sample-by-sample streaming synthesis; what we keep is
+buffer-at-a-time streaming, which is what a sentence-chunked TTS pipeline wants anyway.
+
+### E6g — the transfer path. MEASURED: **there is no worker→panel channel, so there is nothing to transfer over.**
+
+E8 already measured that `commands.invoke`, `plugin.invokeCommand`, `storage.get`, and
+`events.subscribe` are all rejected as *"action: not a panel-callable action"*, and that the bridge
+has four message types with no host→panel push. E6g adds three numbers that matter if a channel is
+ever added upstream:
+
+```json
+{ "selfChannel": { "ok": true, "roundTripMs": 1.5,
+                   "receivedType": "[object Float32Array]", "receivedLength": 25000,
+                   "byteLength": 100000,
+                   "note": "panel-internal MessageChannel, NOT a worker->panel path" },
+  "transferredOutDetached": true,
+
+  "oversizePanelAction": { "ok": false, "errorCode": "invalid_request",
+                           "error": "Message exceeds the size limit.", "approxBytes": 69999 },
+  "normalPanelAction":   { "ok": true },
+
+  "rateLimit": { "sent": 40, "ok": 27, "denied": 13, "timedOut": 0,
+                 "errorCodes": { "rate_limited": 13 } } }
+```
+
+- **Structured clone of a transferable is fine *inside* the panel.** A 100,000-byte `Float32Array`
+  round-tripped through a `MessageChannel` in **1.5 ms**, arriving as a real `Float32Array` of
+  25,000 elements with its 100,000-byte buffer, and the source was detached
+  (`transferredOutDetached: true`) — so zero-copy transfer works in principle in this document.
+  (The `firstSampleIntact` flag in the raw dump reads `false`; that is my assertion being wrong —
+  I compared an f32-rounded sample against a double — not a data-integrity failure. The type,
+  length, and byteLength all survived.)
+- **The panel→host bridge caps at 64 KB and enforces it.** A ~70 KB payload came back
+  `invalid_request` / *"Message exceeds the size limit."*; the same call with ~1 KB succeeded.
+- **The rate limit is real and measured: 27 of 40 rapid calls succeeded, 13 were `rate_limited`.**
+  That matches the documented 30 messages per 10 s (`plugin-panel-bridge.ts:23`), with three of the
+  budget already spent by earlier probes in the same window.
+
+**Read this as a budget for any future channel:** 64 KB per message and 30 messages per 10 s is
+about **1.9 MB per 10 s** ceiling. Raw 22 kHz mono `Float32` PCM is 88 KB/s, so raw float PCM would
+need ~2 messages/s — fine on the message count, but each second of audio must be split across two
+messages. `Int16` PCM halves that to 44 KB/s (one message per second). Base64 over JSON would
+inflate by 4/3 to ~59 KB/s, still inside one message per second. **So bandwidth is not the
+constraint; the absence of the channel is.**
+
+### What E6 changes
+
+The clean architecture the lead hoped for is **measured as technically sound** — sample-accurate
+scheduling, 4 ms drift, 2 ms barge-in, no capabilities, no sidecar binary, no Homebrew dependency,
+and it decodes cloud MP3/Opus too. Every piece works. The single missing link is not an audio
+problem at all: **the worker cannot hand the panel the samples.** That is now the whole ballgame,
+and it is a small, well-shaped upstream ask (one `panel.postMessage`-style host method) rather than
+an architectural rethink.
+
+## E7 Keybinding re-consent — **MEASURED: the version-bump workaround does not work**
+
+Two dev plugins loaded side by side, identical except that one declares `contributes.keybindings`
+and the other does not. Verbatim (`probe-out/e7-reconsent-triggers.json`):
+
+```json
+[ { "step": "baseline",
+    "withKeybindings":    { "status": "idle", "needsReconsent": false, "version": "1.0.0",
+                            "fp": "sha256-hfMTqWivUswD8LJw8Fg4MNbBRtbIPWSbBBxyv3IzpR4=" },
+    "withoutKeybindings": { "status": "idle", "needsReconsent": false, "version": "1.0.0",
+                            "fp": "sha256-ZuKTaf3IpJyW2E7uCIl3PP7TyYvPg6zZF8gPVQC64XA=" } },
+
+  { "step": "after-version-bump-only",
+    "withKeybindings":    { "status": "pending", "needsReconsent": true,  "version": "1.0.1",
+                            "fp": "sha256-dNOkJsOEroe6CyXgeKyHW2LrYZX5ChjWlEqUNEMHWVQ=" },
+    "withoutKeybindings": { "status": "idle",    "needsReconsent": false, "version": "1.0.1",
+                            "fp": "sha256-ZuKTaf3IpJyW2E7uCIl3PP7TyYvPg6zZF8gPVQC64XA=" } },
+
+  { "step": "after-undeclared-file-added",
+    "withKeybindings": { "status": "pending", "needsReconsent": true,
+                         "fp": "sha256-niNaeD1/6kwF7taNAEAMuHsxfUv051mKal2XN5QCLSw=" } },
+
+  { "step": "after-programmatic-consent", "programmaticError": null,
+    "withKeybindings": { "status": "idle", "needsReconsent": false,
+                         "fp": "sha256-niNaeD1/6kwF7taNAEAMuHsxfUv051mKal2XN5QCLSw=" } },
+
+  { "step": "stale-fingerprint-consent-attempt",
+    "staleFingerprintUsed": "sha256-niNaeD1/6kwF7taNAEAMuHsxfUv051mKal2XN5QCLSw=",
+    "staleError": "Error invoking remote method 'plugins:consent': Error: plugin orca-tts-probe.tts-probe changed since its permissions were reviewed",
+    "withKeybindings": { "status": "pending", "needsReconsent": true,
+                         "fp": "sha256-+jT2DrLTeU5Le3+JuujtnwzIR6XMT8sayb4kmlKyDGU=" } } ]
+```
+
+**Answering the question directly: yes — bumping only `version` forces re-consent, and PITFALLS P6's
+workaround is broken.** MEASURED: a one-character edit to the `version` field and nothing else moved
+the fingerprint `hfMTqWiv…` → `dNOkJsOE…` and flipped the plugin to `pending` / `needsReconsent:
+true`. The control plugin, identical but with no `keybindings`, kept fingerprint `ZuKTaf3I…`
+byte-for-byte across the same version bump and stayed `idle`.
+
+**It is not the keybindings *changing* that does it — it is their mere presence.** MEASURED: adding
+a file (`UNRELATED.txt`) that no part of the manifest declares also churned the fingerprint. The
+mechanism is at `src/main/plugins/plugin-discovery.ts:126-135`: for a dev plugin,
+`hasInstructionalPluginContributions(manifest)` (true if `keybindings | vmRecipes | agents` is
+non-empty) causes `hashPluginTree(rootDir)` — a hash over **every file in the directory** — to be
+folded into the fingerprint. Declaring one keybinding opts the whole tree into the hash forever.
+
+**So the trigger is: any byte change anywhere under the plugin directory, if the manifest declares
+keybindings, vmRecipes, or agents.** Not just the manifest. Not just the keybindings. Any file.
+A stray editor swapfile or a `.DS_Store` landing in that directory would do it.
+
+### Can consent be pre-accepted? MEASURED: partly, and the working answer is good enough
+
+- **There is no consent-bypass flag.** A grep across `src/main/plugins`, `src/shared/plugins`, and
+  `src/main/e2e-config.ts` for `autoApprove|skipConsent|preApprove|trustAll` returns nothing; the
+  only E2E env knobs are `ORCA_E2E_HEADLESS` and `ORCA_E2E_USER_DATA_DIR` (`src/main/e2e-config.ts:5-6`).
+- **A stale fingerprint is refused**, so you cannot pre-bake a constant:
+  *"plugin orca-tts-probe.tts-probe changed since its permissions were reviewed"*. MEASURED.
+- **Writing `pluginConsents` directly through `settings.set` did NOT work.** MEASURED: the write
+  succeeded and read back (`pluginConsents["orca-tts-probe.tts-probe"] = "sha256-k/arst9R…"`), but
+  the plugin's live fingerprint was `sha256-WnMgG6/d…`, it stayed `pending` / `needsReconsent:
+  true`, and a command invoke failed with `plugin … is not enabled`. Whether a *perfectly
+  timed* direct write (reading the live fingerprint and writing it in the same tick, with no
+  watcher re-hash in between) would stick is **NOT-TESTED** — my writes kept racing the dev
+  watcher's re-hash. I would not build a dev loop on it.
+- **The path that does work, with zero UI: `plugins.consent` with a freshly-read fingerprint.**
+  MEASURED — `programmaticError: null`, and the plugin went straight back to `idle`:
+
+  ```ts
+  const list = await window.api.plugins.list()
+  const fp = list.find(e => e.pluginKey === PLUGIN_KEY).consentFingerprint  // read it live
+  await window.api.plugins.consent({ pluginKey: PLUGIN_KEY, reviewedFingerprint: fp, decision: 'approve' })
+  ```
+
+  The same call exists over headless RPC as `plugins.consent`
+  (`src/main/runtime/rpc/methods/plugins.ts:89-101`), whose comment says outright that it is *"the
+  only way a pending plugin becomes active on a server"*.
+
+**Recommended dev loop, given all of the above.** Do not fight the fingerprint. Wrap the
+edit→reload cycle in a script that, after every rebuild, (1) calls `plugins.list()`, (2) reads the
+current `consentFingerprint`, (3) calls `plugins.consent(...)` with it, and (4) toggles
+`setEnabled` off/on to force the worker re-fork that E5 showed is required anyway. That is
+automatable end to end and costs no clicks. The manual Settings-dialog path is only needed for the
+very first approval in a fresh profile.
+
+**Second option worth weighing:** develop with `keybindings` *omitted* from the manifest and add it
+only for release builds. MEASURED, the control plugin proves this removes the churn entirely. The
+cost is that the hotkey is untestable during development — and E4 already showed the hotkey has its
+own surprising behaviour (dead in terminal focus), so that is exactly the thing you least want to
+leave untested. Prefer the scripted re-consent.
+
+## E8 Panel ↔ worker bridge — **MEASURED: no channel exists**
+
+> Renamed from E6 in the first revision of this document, to free the `E6` label for the
+> Web Audio experiment the lead assigned afterwards. Content unchanged except where E6g extended it.
 
 Not in the original brief, but finding 2 made it load-bearing: if synthesis lives in the panel and
 text acquisition lives in the worker, something has to carry text from one to the other. I had the
@@ -555,14 +832,16 @@ plugin do (1) and (2) together as one plugin today.
 The source-read holds up unusually well. Everything I could check that it labelled VERIFIED, was.
 Corrections and sharpenings, bluntest first:
 
-1. **"Audio cannot be played from a plugin panel" is wrong as stated, and it is the most
-   consequential error in the document.** *Loading* audio is blocked — I measured the `media-src`
-   violations, so that half is right. But `speechSynthesis.speak()` is not a resource load, and it
-   works completely: 180 real system voices, full event lifecycle, no violation. The document's own
-   open question 10 anticipated this; the verdict bullet at the top does not, and a reader who only
-   reads the verdict will build the wrong architecture. **"Playback must happen in the worker (a
-   subprocess) or not at all" should read "playback of *supplied audio bytes* must happen in the
-   worker; OS speech synthesis works in the panel with zero capabilities."**
+1. **"Audio cannot be played from a plugin panel" is flatly wrong, and it is the most consequential
+   error in the document.** *Loading* audio through an `<audio src>` is blocked — I measured the
+   `media-src` violations, so that narrow half is right. Everything else about the claim is wrong.
+   `speechSynthesis.speak()` works completely (180 real system voices, full event lifecycle). And
+   E6 goes further: **raw PCM through Web Audio plays, `decodeAudioData` handles MP3/Opus/AAC/WAV,
+   scheduling drift is ≤ 4 ms and barge-in is 2–5 ms — with zero CSP violations.** The document's
+   own open question 10 anticipated the `speechSynthesis` half; nobody anticipated that arbitrary
+   audio plays fine as long as it never wears a URL. **"Playback must happen in the worker (a
+   subprocess) or not at all" should read "a panel can play anything it can hold as bytes; what it
+   cannot do is *fetch* those bytes, or receive them from its own worker."**
 2. **"The recommended path is the worker's filesystem access" is now premature.** It was the right
    recommendation given what was known. With E2 measured, the panel-`speechSynthesis` path is
    strictly less fragile — it needs no capability, no subprocess, no `~/.claude` read, and survives
@@ -572,8 +851,9 @@ Corrections and sharpenings, bluntest first:
    `createRequire` works, the require cache is 4 entries deep, no loader hook. The document's
    INFERRED "high confidence" was correct. Delete the risk.
 4. **The document says nothing about the dev-loop de-consent trap, and it is a serious omission for
-   requirement R2.** MEASURED: with a `keybindings` contribution, *every file edit* disables the
-   plugin pending re-consent. And there is no worker hot-reload at all, with or without keybindings.
+   requirement R2.** MEASURED: with a `keybindings` contribution, *every file edit* — including a
+   bare `version` bump, and including files the manifest never declares — disables the plugin
+   pending re-consent. And there is no worker hot-reload at all, with or without keybindings.
    "manifest/panel hot-reload via a Parcel watcher … **This is how we will develop**" oversells what
    that watcher does — it re-runs discovery, it does not reload worker code.
 5. **`agent.status.changed`'s `worktreeId` is more useful than the document implies.** It is not an
@@ -588,14 +868,19 @@ Corrections and sharpenings, bluntest first:
    does not say that plugin chords are additionally dead whenever focus is in a terminal pane —
    which, in ORCA, is most of the time. MEASURED: fires with app focus, does not fire with
    `xterm-helper-textarea` focus.
-8. Minor, worth noting so nobody trips: a command handler registered in the worker but absent from
+8. **PITFALLS P6's "bump the version to force a reload" workaround should be struck.** MEASURED
+   (E7): a version-only bump changes the fingerprint and de-consents the plugin, exactly like any
+   other edit. Replace it with the scripted `plugins.consent` + `setEnabled` toggle in E7.
+9. Minor, worth noting so nobody trips: a command handler registered in the worker but absent from
    `contributes.commands` is rejected at invoke time with `does not contribute command <id>`.
 
 ## Still unknown
 
-- **Audible output.** E2's evidence is event-based and timing-based, not acoustic. Headless CI has
-  no speaker and I captured no audio. Someone should run `pnpm dev` on a desktop and listen once.
-  I would not ship the architecture on 1,672 ms of `speaking === true` alone, even though I believe it.
+- **Audible output.** Both E2 and E6 are event- and timing-based, not acoustic. Headless CI has no
+  speaker and I captured no audio. The E6 evidence is stronger than E2's — a 1.000 s buffer ending
+  at 1.0027 s of context time and a 5 s buffer stopping in 2 ms mean the audio *graph* genuinely
+  ran on the device clock — but "the graph ran" is still not "a human heard it". Someone should run
+  `pnpm dev` on a desktop and listen once, to both `speechSynthesis` and a PCM buffer.
 - **Two agents in one worktree (E3d).** Not runnable — the isolated E2E `HOME` has no agent
   credentials, so no live `claude`/`codex` session could start. Needs a real desktop session with
   two agents in one worktree.
@@ -606,17 +891,28 @@ Corrections and sharpenings, bluntest first:
 - **The 5-minute idle worker reap.** Not exercised; no probe waited that long. Its effect on a
   long-lived audio pipeline is still only a source-level claim
   (`PLUGIN_WORKER_IDLE_REAP_MS`, `plugin-host-protocol.ts:110-112`).
-- **Windows and Linux.** Everything here is macOS 26.5 / arm64. `/usr/bin/say` obviously has no
-  counterpart elsewhere; whether Electron's `speechSynthesis` returns a non-empty `getVoices()` on
-  Windows (SAPI) and Linux (speech-dispatcher) is **unmeasured and is now the single most important
-  open question**, because requirement R1 demands cross-platform parity and finding 2 is the whole
-  architecture. A Linux CI box with no speech-dispatcher installed would return zero voices.
+- **Windows and Linux.** Everything here is macOS 26.5 / arm64. Two separate cross-platform
+  questions, and E6 changed their relative weight:
+  - `speechSynthesis.getVoices()` on Windows (SAPI) and Linux (speech-dispatcher) — **unmeasured**.
+    A Linux CI box with no speech-dispatcher installed would return zero voices. This still matters
+    for an OS-voices feature, but it is no longer the whole architecture.
+  - **Web Audio PCM playback (E6) is the part that must hold cross-platform**, and it is the part
+    most likely to: it is Chromium, not an OS speech service, and `AudioBufferSourceNode` +
+    `decodeAudioData` are baseline Chromium features with no system dependency beyond an output
+    device. **Still NOT-TESTED off macOS** — and headless Linux CI with no audio device is the
+    specific case to check, since `AudioContext` may not reach `state === "running"` there.
 - **`orca serve` / relay parity for a worker doing filesystem reads.** I confirmed the RPC surface
   exists but never ran a headless server with a plugin loaded end to end.
 - **Hand-editing `orca-data.json` to set `devPluginPaths` while ORCA runs.** I used the IPC path
   instead; the file-edit path is untested and probably races the in-memory store.
-- **A worker→panel channel that does not exist yet.** E6 measured that none of the obvious ones
-  work. What is *not* measured is whether some indirect path exists (e.g. the host re-rendering a
-  panel's `srcdoc` when the plugin's own on-disk panel file changes, which the dev watcher does but
-  a shipped immutable install cannot). Someone should decide whether to design around this or
-  upstream a `panel.postMessage`-style host method — the architecture hinges on it.
+- **A worker→panel channel that does not exist yet.** E8 measured that none of the obvious ones
+  work, and E6g measured the budget any replacement would inherit (64 KB/message, 30 messages/10 s).
+  What is *not* measured is whether some indirect path exists — e.g. the host re-rendering a
+  panel's `srcdoc` when the plugin's on-disk panel file changes, which the dev watcher does but a
+  shipped immutable install cannot. **After E6 this is the single highest-value open item in the
+  project**: every other piece of the clean architecture is now measured working.
+- **A `GainNode` fade before `stop()`.** E6d measured stop latency, not click-freeness. Standard
+  practice is a ~10 ms ramp; unmeasured here.
+- **Timed direct writes to `pluginConsents`.** E7 measured that a naive `settings.set` write does
+  not take effect. Whether a write that wins the race against the dev watcher's re-hash would stick
+  is untested; the scripted `plugins.consent` path works, so I did not chase it.
