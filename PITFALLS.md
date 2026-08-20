@@ -6,6 +6,45 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P16 — "Use the OS's built-in voice" is a two-tier trap, not a zero-install win
+**Symptom:** macOS sounds fine in the demo, then Windows and Linux users hear something from 2005.
+**Cause:** the three OS-native synths are not one tier. macOS `say` reaches decent Apple voices.
+Windows third-party apps are fenced to SAPI 5 `*Desktop` (Zira/David) — Microsoft's own WinRT docs
+say *"Only Microsoft-signed voices installed on the system can be used"*, and the maintainer of the
+911★ project built to break that fence calls his own work *"more like a hack… can stop working at
+any time"*. Linux out of the box is `espeak-ng` formant synthesis, and on a headless box or a GitHub
+Actions runner there is **no speech stack at all** (`actions/runner-images` has zero references to
+`espeak`, `speech`, `alsa` or `pulseaudio`).
+**Instead:** one portable neural engine as the default on all platforms; OS-native only as a
+labelled fallback. And do not let "but macOS `say` is pretty good" argue for native-first — the same
+argument fails identically on the other two. Verified 2026-08-20.
+
+## P15 — Bare Piper `.onnx` files from Hugging Face do not work with sherpa-onnx
+**Symptom:** `'sample_rate' does not exist in the metadata` at model load.
+**Cause:** `rhasspy/piper-voices` serves `.onnx`/`.onnx.json` directly over HTTP 200, which looks
+like a clean archive-free download path. But sherpa's own `tts-models` release tarballs embed extra
+ONNX metadata *and* a `tokens.txt` the HF files do not carry.
+**Instead:** download sherpa's release assets, or convert and re-host the models yourself. Verified
+2026-08-20.
+
+## P14 — Node cannot decompress bzip2, and sherpa ships models as `.tar.bz2`
+**Symptom:** first-run model download works on macOS/Linux (shell out to `tar xj`) and dies on Windows.
+**Cause:** Node 26's `zlib` exposes gzip, brotli and zstd — **no bzip2**. `tar` with bz2 support is
+not guaranteed on Windows.
+**Instead:** pure-JS `unbzip2-stream` (1.4.3, `gypfile: false`) piped into `tar-stream`. Verified:
+397 entries / 81 MB decoded in 4.7 s with no native build. Or re-host the models as `.tar.gz`.
+
+## P13 — `sherpa-onnx-win-arm64` is missing from **npm**, but upstream does build it
+**Symptom:** you conclude Windows-on-ARM is unsupported and design a fallback you don't need.
+**Cause:** npm at 1.13.6 ships `darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`, `win-x64`
+and `win-ia32` — nothing for win-arm64. (Note the naming: `win-x64`, **not** `win32-x64`.) ORCA's
+own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see P7).
+**Instead:** the GitHub release **does** carry
+`sherpa-onnx-v1.13.6-win-arm64-shared-MD-Release.tar.bz2`. Since an ORCA plugin gets no
+`npm install` anyway (P5) and must fetch binaries itself, **source from GitHub releases, not npm** —
+then all six platform+arch combos are covered. Those tarballs also contain standalone executables
+(`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
+
 ## P12 — Two agents appending to PITFALLS.md at once produce duplicate numbers
 **Symptom:** the file contains two `## P4`, two `## P5`, two `## P6`, and cross-references become
 ambiguous.
