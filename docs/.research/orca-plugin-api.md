@@ -867,6 +867,234 @@ subscription all work"* (`:1-4`), including an assertion that the panel document
 `examples/` demo has a worker. The plugin system in production use today is far simpler than what a
 TTS plugin needs. INFERRED from the four manifests.
 
+## Plugin build, dev loop, and distribution
+
+### Building a plugin: there is no build system, and that is the point
+
+**There is no plugin SDK, no scaffolding CLI, no published types package, and no build step.**
+`pnpm-workspace.yaml` declares `packages: []`; nothing in the repo publishes an `@orca/*` package.
+The `orca` CLI has **no plugin subcommand** — `src/cli/specs/` contains account, agent-hooks,
+artifacts, automations, browser, computer, diagnostics, emulator, environment, file, linear,
+orchestration, project, serve, skills, vm. No `plugin.ts`. VERIFIED.
+
+A plugin **is** a directory. The artifact is the folder itself — not a zip, tarball, or npm
+package. Required layout, from the two working examples:
+
+```
+my-plugin/
+├── orca-plugin.json     REQUIRED, exactly this filename at the root
+├── main.mjs             worker entry, if `main` is declared. Native ESM.
+└── panel.html           panel entry, if a panel is declared
+```
+
+The worker entry is loaded by a bare dynamic `import()` of a `file://` URL
+(`src/main/plugins/plugin-host-runtime.ts:56,82`), so it must be **valid ESM that Node 24 can run
+as-is**. It must default-export the activate function.
+
+**Critical consequence: installation never runs a build.** `checkoutPluginGitSource` does a
+`git clone --quiet --depth 1` (or `fetch --depth 1` + `checkout FETCH_HEAD`)
+(`src/main/plugins/plugin-git-repository.ts:33-41`), and `installStagedPluginTree` then `cp`s the
+tree recursively, filtering out only `.git`
+(`src/main/plugins/plugin-install-staging.ts:165-174`). **No `npm install`, no dependency
+resolution, no compile step, ever.** VERIFIED.
+
+So: TypeScript must be compiled and **all npm dependencies must be bundled into the committed
+output** before publishing. Our repo must contain runnable JavaScript on the published ref.
+
+**And committing `node_modules` is not a workaround** — `src/main/plugins/plugin-content-hash.ts:15-16`:
+
+```ts
+const MAX_PLUGIN_FILES = 2_000
+const MAX_PLUGIN_TOTAL_BYTES = 50 * 1024 * 1024
+```
+
+**2,000 files and 50 MB, hard.** A typical `node_modules` blows the file count immediately.
+
+> **Design consequence for TTS.** Bundle to a single `main.mjs` with esbuild or rollup. And a local
+> neural voice model cannot ship inside the plugin — 50 MB is at or below one decent voice. Models
+> must be **downloaded at runtime** into a cache directory outside the immutable install tree
+> (which is content-hash-verified and must not be mutated). This mirrors what ORCA's own STT does
+> with `src/main/speech/model-manager.ts`. INFERRED, but forced by the two constants above.
+
+Per-artifact size caps (`src/main/plugins/plugin-artifact-validation.ts:9-14`): worker entry 50 MB,
+panel entry 10 MB, icon 2 MB, language pack 5 MB, VM recipe 256 KB, agent profile 1 MB.
+
+### Loading a locally-built plugin — the exact dev loop
+
+**This is the "load unpacked" path, and it is a GUI-only flow.** There is no CLI flag, no env var,
+and no symlink convention.
+
+> **Settings → Plugins → Development → paste an absolute folder path → Add**
+
+Component: `src/renderer/src/components/settings/PluginDevelopmentSection.tsx`. Its own help text
+(`:66-71`) is worth quoting because it answers three questions at once:
+
+> *"Load plugins directly from folders on this computer while you develop them. Dev plugins still
+> require permission review. Workers run on this desktop host; SSH workspace actions route through
+> Orca, so paths here are desktop paths."*
+
+Under the hood this writes the `devPluginPaths` setting
+(`PluginsSettingsSection.tsx:284`, type at `src/shared/global-settings-types.ts:312-313`) and
+triggers a refresh. Discovery then reads each dev path as a plugin root
+(`src/main/plugins/plugin-discovery.ts:220,238`). Dev plugins have `isDev: true` and
+`contentHash: null` (`plugin-discovery.ts:38-50`) — they are exempt from the hash-addressed
+immutable layout, but **not** from manifest validation, artifact validation, or consent.
+
+**Prerequisites, in order:** enable `pluginSystemEnabled` (Settings → Plugins toggle) → add the dev
+path → review and accept the consent dialog. A dev plugin is inert until consented, and the e2e
+test pins that invariant (`tests/e2e/plugin-demo.spec.ts:1-4`).
+
+### Hot reload: partial, and the gap will bite us
+
+A Parcel-based watcher subscribes to each dev path and calls `refresh()` on change, debounced
+**300 ms** (`src/main/plugins/plugin-dev-watcher.ts:38-71,106-114`; wired at
+`src/main/plugins/plugin-service-housekeeping.ts:23-32`).
+
+What actually reloads:
+
+| You edit | Result |
+|---|---|
+| `orca-plugin.json` | Full reload — worker is killed and re-forked. |
+| `panel.html` | Reloads — panel HTML is re-read and re-wrapped per load (`plugin-panel-controller.ts:142-154`). |
+| **`main.mjs` (worker code)** | **No restart. The running worker keeps the old code.** |
+
+The reason is the spawn-spec equality check. `pluginWorkerSpawnSpecsEqual` compares
+`pluginKey`, `rootDir`, `mainEntry`, `manifestRevision`, and capabilities
+(`src/main/plugins/plugin-worker-spawn-spec.ts:23-41`), where `manifestRevision` is
+`JSON.stringify(plugin.manifest)` (`:18`) — **the manifest, not the code**. `ensureActive` returns
+the existing handle whenever the specs match (`src/main/plugins/plugin-worker-manager.ts:89-91`).
+The comment at `plugin-worker-spawn-spec.ts:16-17` confirms the intent: the manifest is included so
+"hot reload cannot reuse a worker with stale *contributions*" — contributions, not code.
+
+**Workarounds for a worker-code edit (INFERRED from the mechanism):**
+- Touch the manifest (bump `version`) to change `manifestRevision` and force a re-fork.
+- Toggle the plugin off and on in Settings.
+- Wait out the 5-minute idle reap (`PLUGIN_WORKER_IDLE_REAP_MS`,
+  `src/shared/plugins/plugin-host-protocol.ts:112`), after which the next trigger re-forks with
+  fresh code.
+
+> **This is our single biggest inner-loop risk, and it lands squarely on the code we care most
+> about.** A TTS plugin is almost entirely worker code. Recommend a dev script that bumps the
+> manifest `version` on every build so the watcher always forces a re-fork. *A human should verify
+> this empirically before we build tooling around it* — see Unknowns.
+
+### Debugging
+
+**You cannot attach a Node debugger to a plugin worker.** `fork` is called with `execArgv: []`
+specifically so that "inspector/loader flags from Orca's own launch must never execute inside
+third-party plugin workers" (`src/main/plugins/plugin-host-process.ts:88-99`), and a test pins it
+(`plugin-host-process.test.ts:41-50`, *"does not inherit Orca execArgv"*). No `--inspect`, no
+`--inspect-brk`. VERIFIED.
+
+What you get instead:
+
+- **A log viewer in Settings.** `orca.log(msg)` sends a `log` frame
+  (`plugin-host-runtime.ts:115-117`), and the worker's **stdout and stderr are piped** into the same
+  sink (`plugin-host-process.ts:100-101`), so plain `console.log` works.
+- Storage is a **200-line in-memory ring buffer per plugin**
+  (`src/main/plugins/plugin-log-buffer.ts:3-19`) — not a file, and lost on restart.
+- Surfaced via `src/renderer/src/components/settings/use-plugin-logs.ts` and
+  `PluginSettingsOverview.tsx`.
+- Crashes: `uncaughtException` / `unhandledRejection` send a `fatal` frame with the stack before
+  exiting (`src/main/plugins/plugin-host-entry.ts:22-35`). A supervisor then restarts with backoff
+  `[500, 2000, 5000] ms` and gives up after `maxRestarts: 3`, marking the plugin `errored`
+  (`src/main/plugins/plugin-supervisor.ts:32-33,84-91`). **Three crashes in development and the
+  plugin is dead until you re-enable it** — worth knowing before you burn twenty minutes wondering
+  why nothing runs.
+- **Panel debugging: no dedicated DevTools.** `openDevTools` exists only for browser-pane guests
+  (`src/main/browser/browser-manager.ts:1709-1720`) and the main window
+  (`src/main/window/createMainWindow.ts:837`). INFERRED: since the panel is an ordinary
+  same-process iframe in the renderer, main-window DevTools should be able to select its frame —
+  **not verified.**
+- **Mutation auditing.** Every mutating host call is written to an audit log with actor
+  `plugin:<key>` (`src/main/plugins/plugin-host-methods.ts:61-70`,
+  `src/main/plugins/plugin-audit-log.ts`). Useful for confirming calls actually landed.
+
+### How a third party installs our plugin
+
+Four install source kinds (`src/shared/plugins/plugin-install-lockfile.ts:17-59`):
+`local-path`, `git`, `marketplace`, `bundled`.
+
+**The realistic path for us is `git`.** The user opens Settings → Plugins → *Install plugin* and
+enters a `URL#ref` string. The parser requires **both** parts
+(`src/renderer/src/components/settings/plugin-install-source.ts:24-39`) — a bare URL is rejected
+with `missing-git-ref`. So a user types something like:
+
+```
+https://github.com/<us>/orca-plugin-tts.git#v1.0.0
+```
+
+URLs are restricted to HTTPS or SSH, with no username in HTTPS URLs and no password ever
+(`plugin-install-lockfile.ts:63-79`). The stated reason: *"System Git supports executable remote
+helpers (`ext::`, custom `foo::` transports). P0 accepts network Git only over HTTPS or SSH so
+installing a source cannot turn URL parsing into arbitrary command execution."*
+
+**Marketplaces are self-serve — no central review.** A user can add *any* git repo containing an
+`orca-marketplace.json` as a marketplace source
+(`src/renderer/src/components/settings/PluginMarketplaceSourceDialog.tsx:154-155`: *"Use an HTTPS or
+SSH repository URL containing orca-marketplace.json"*). We can publish our own index. The official
+one is `stablyai/orca-plugins` (`src/shared/plugins/plugin-marketplace.ts:11-12`); its entries
+require a resolved exact commit so a listing is reproducible (`:51-53`).
+
+**There is no npm publish path, no `orca plugin install` command, and no central registry
+submission.** Distribution is: push a git tag, tell people the `URL#ref`. VERIFIED.
+
+### Naming, versioning, and trust requirements we must meet
+
+- **Identity is `<publisher>.<id>`** (`plugin-manifest.ts:149-151`), also the install directory
+  name. Both parts must satisfy `pluginIdSchema`.
+- **We must NOT use `stablyai` as publisher, nor an `orca-` id prefix.** Those are reserved: a
+  reserved identity must resolve to the stablyai org, and cannot be installed from a local path at
+  all (`src/main/plugins/plugin-install-trust.ts:8-26`,
+  `plugin-marketplace.ts:9-12`). Pick something like `publisher: "<our-handle>"`, `id: "tts"`.
+- `version` must be **strict semver** (`plugin-manifest.ts:34-35,86`).
+- `manifestVersion: 1` and `pluginApi: 1` are literals — no other value validates.
+- `engines.orca` must match `>=x.y.z` exactly; no ranges, carets, or tildes
+  (`plugin-manifest.ts:41-44`). We would declare `>=1.4.0`.
+- `contributes` is `.strict()` — one unknown key fails the whole install.
+
+**Signing and review:** there is **no code signing of plugins, no notarization, and no review
+process.** Integrity is by SHA-256 content hash over the tree, recorded in an install lockfile
+alongside the resolved commit and the consent fingerprint
+(`plugin-install-lockfile.ts:4-15`). Installs are immutable and hash-addressed; a reinstall whose
+bytes differ is a visible change (`plugin-install-staging.ts:150-155,202-205`).
+
+**The user sees a consent dialog on install**, covering the capability list and — because we
+declare `main` — the `trusted-node-worker` tier (`plugin-consent-fingerprint.ts:19-35`). Any change
+to our capabilities, or to instructional contributions like keybindings, re-prompts on update. There
+is also a remote **kill list** that can revoke a plugin
+(`src/main/plugins/plugin-kill-list-service.ts`).
+
+### ORCA's CI — what we can and cannot model
+
+**There is no plugin-authoring CI in the repo to copy.** The one plugin hit in
+`.github/workflows/pr.yml:77` is "Enforce focused code-quality plugins", which runs oxlint plugins —
+unrelated. VERIFIED.
+
+ORCA's own `pr.yml` is a large gate (static analysis on `ubuntu-latest`, typecheck, tests, e2e,
+localization and entitlement verifiers, a max-lines ratchet, a root-directory guard). It is built
+for a 16k-file Electron monorepo and is the wrong shape for a single-folder plugin.
+
+**What is worth modelling is the e2e test, not the workflow.** `tests/e2e/plugin-demo.spec.ts`
+drives a real ORCA against `examples/plugins/hello-orca` through Playwright: open plugin settings,
+consent, open the panel, assert the CSP, create a worktree, assert the event fired. Its stated
+invariant (`:1-4`) is exactly the shape our own acceptance test should take.
+
+A realistic plugin CI (INFERRED — no in-repo precedent): bundle to `main.mjs`, assert the manifest
+parses against `pluginManifestSchema`, assert the tree is under 2,000 files / 50 MB, and tag a
+release. The manifest schema is importable from ORCA's source but **not published as a package**, so
+we would vendor a copy or re-implement the check.
+
+### Documentation status — a pitfall in itself
+
+**ORCA ships no plugin documentation.** `docs/` has no plugin file; `README.md`, `AGENTS.md`, and
+`CLAUDE.md` do not contain the word "plugin" at all (grep, zero hits). The public docs site
+(`onorca.dev/docs`, linked throughout the README) is not in-tree and was not fetched.
+
+There is therefore **nothing to disagree with the source** — but also no author-facing guide. The
+two example plugins, the e2e spec, and the zod schemas are the entire specification. **Treat this
+document as the substitute, and re-derive it against a fresh commit before implementation starts.**
+
 ## Unknowns and risks
 
 Ordered by how badly each could sink the project.
@@ -926,6 +1154,18 @@ Ordered by how badly each could sink the project.
     when the agent runs over SSH — the transcript would be on the *remote* host. Huddle mode over
     SSH worktrees is likely broken by construction. INFERRED; not chased down.
 
-12. **Storage is far too small for audio.** 256 KB per value, 5 MB total
+12. **Worker code does not hot-reload.** Only a manifest change re-forks the worker
+    (`plugin-worker-spawn-spec.ts:23-41`). *A human should verify the version-bump workaround
+    empirically* — edit `main.mjs` only, confirm stale behaviour; then bump `version`, confirm fresh
+    behaviour. Watch a named value change, not just "it seemed to reload."
+
+13. **50 MB / 2,000 files kills bundled voice models.** Models must be downloaded at runtime into a
+    cache dir outside the content-hash-verified install tree. That is a network fetch from a worker
+    with no `net:fetch` capability — see risk 4.
+
+14. **No plugin debugger.** `execArgv: []` blocks `--inspect`. Debugging is a 200-line in-memory log
+    ring. Budget for this being slow.
+
+15. **Storage is far too small for audio.** 256 KB per value, 5 MB total
     (`plugin-host-api.ts:68-70`). Any caching of synthesized speech must go to the worker's own
     `TMPDIR` — which is, again, outside the capability model.

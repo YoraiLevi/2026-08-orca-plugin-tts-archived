@@ -50,6 +50,11 @@
    `getUserMedia` echo cancellation. For a single-user desktop coding agent, "remote participant"
    doesn't exist, so we'd inherit *no* hands-free barge-in at all.
 
+**Cross-platform note:** every one of the five "copy" items above is pure logic with **zero**
+`cfg(target_os)` branches — verified by grep across `huddle/`. The parity risk in this project sits
+entirely in mic capture and AEC, not in anything we want to steal. See
+[Cross-platform reality check](#cross-platform-reality-check).
+
 *(Minor third: skip the rodio persistent-`Player` + mixer plumbing — lead-in cushions sized around
 a specific rodio 0.22.2 bootstrap quirk, `tts.rs:106-125`. Rust-audio-stack yak shaving with no
 analogue in an Electron/Web Audio host.)*
@@ -876,6 +881,141 @@ E2E tests** — the inventory above is the whole of it, and the E2E specs
 
 ---
 
+## Cross-platform reality check
+
+**Headline: the voice stack is OS-agnostic by construction; the *shell around it* is not, and
+Linux/Windows are demonstrably second-class in practice.**
+
+The single most useful measurement: `grep -rn 'cfg(target_os' desktop/src-tauri/src/` returns **87
+hits across the desktop backend — and exactly zero of them are in `huddle/`.** The only conditional
+compilation anywhere in the voice code is two `#[cfg(unix)]` blocks in
+`crates/buzz-voice/src/imported.rs:275,288`, and both are about *file permissions* (`0o700` on the
+voice storage dir, `0o600` on written files), not audio. (VERIFIED)
+
+The OS-specific code lives in `lib.rs` (16), `managed_agents/runtime/sweep.rs` (7),
+`tray_menu.rs` (6), `prevent_sleep.rs` (6), `secret_store.rs` (5), `initial_window.rs`,
+`app_menu.rs`, `commands/notifications.rs`, `commands/window_chrome.rs` — i.e. tray, menus,
+windowing, notifications, secrets, process management. **Never audio.**
+
+### Which OSes does it actually run on?
+
+**All three, genuinely — this is not a macOS app with a Linux port bolted on.** `release.yml`
+builds **four** platform jobs that all upload into one release, and the assembly step hard-fails if
+fewer than three succeed (`release.yml:907`: `[ "${#TRIPLES[@]}" -ge 3 ] || { echo "::error::too
+few platforms"; exit 1; }`) (VERIFIED):
+
+| Job | Runner | Target | Evidence |
+|---|---|---|---|
+| macOS Apple Silicon | `macos-latest` | `aarch64-apple-darwin` | `release.yml:55`, artifact `Buzz_${VERSION}_aarch64.app.tar.gz` `:240` |
+| macOS Intel | `macos-latest` | `x86_64-apple-darwin` | `release.yml:268-279` |
+| Linux | `ubuntu-latest` | x86_64, AppImage + deb | `release.yml:429` |
+| Windows | `windows-latest` | NSIS/MSI | `release.yml:657` |
+
+There are also four dedicated per-OS canary workflows kept green on `main` —
+`windows-canary.yml`, `linux-canary.yml`, `macos-intel-canary.yml`, `signed-macos-canary.yml`.
+`tauri.conf.json:54` sets `"targets": "all"`. So the *build* parity is real and enforced.
+
+**But the day-to-day parity is not.** The issue tracker is where this shows (VERIFIED via
+`gh issue list`), and the pattern is one-sided:
+
+| Issue | OS | What breaks |
+|---|---|---|
+| **6044** | **Windows 11** | *"Huddle: speaker (audio output) selector is inert — cannot enable the speaker or change output device"* — an **audio-output** bug, Windows-only |
+| **4358** | Linux | WebKitWebProcess **segfaults in PipeWire's `module-metadata`** on startup — *device enumeration alone*, no huddle join needed |
+| **2560** | Linux | Mixed GStreamer deps → *"unreliable audio on Ubuntu 26.04"* |
+| **2562** | Linux | Notification sounds never play — WebKitGTK can't load media from Tauri's custom URI scheme |
+| **3494** | Linux | Bundled `libsoup-3.0`/`libnghttp2` shadow system libs, breaking system GStreamer WebRTC |
+| **2811 / 2604 / 3109** | Linux | AppImage display failures, dynamic-linking crashes, Hyprland/Wayland protocol error |
+| **3495** (closed) | Linux | Huddles failed with `NotAllowedError` — WebKitGTK user-media permission unhandled |
+
+**Read as:** macOS is the reference platform. Windows has at least one live *audio-output* defect.
+Linux has a whole cluster of audio/media-stack defects, most of them rooted in **WebKitGTK and the
+Linux media stack**, not in Buzz's own audio code.
+
+### Audio OUT, portably
+
+One library, three backends, **no conditional code in Buzz at all**:
+
+```
+Buzz  →  rodio 0.22  →  cpal  →  ┬─ CoreAudio   (macOS)
+                                 ├─ WASAPI      (Windows)
+                                 └─ ALSA        (Linux)
+```
+
+`rodio = "0.22"` at `desktop/src-tauri/Cargo.toml:143`; Buzz touches `rodio::cpal` only for output
+*device enumeration* (`huddle/audio_output.rs:16-25`), using the generic `HostTrait` /
+`DeviceTrait` API with zero platform branches. The single platform-visible build requirement is
+**`libasound2-dev` on Linux** (`linux-canary.yml:65`), i.e. ALSA headers for cpal. (VERIFIED)
+
+Grepped for OS-specific shelling-out — `afplay`, `say`, `powershell`, `paplay`, `pactl`,
+`coreaudio`, `wasapi`, `alsa`, `pulseaudio`, `pipewire` — across `huddle/` and `buzz-voice/`:
+**zero hits.** Nothing invokes a system TTS or a platform audio CLI. (VERIFIED by absence)
+
+### Audio IN (mic), portably
+
+**Capture is not in Rust at all** — it is `navigator.mediaDevices.getUserMedia` +
+`AudioWorklet` in the WebView (`HuddleContext.tsx:569-579`, `audioWorklet.ts:56-76`), with PCM
+shipped to Rust over Tauri's raw-binary IPC.
+
+That choice **buys portability and costs consistency**:
+
+- ✅ One code path for mic capture, device enumeration, and permissions on all three OSes.
+- ✅ Free platform AEC/NS via the `echoCancellation: true, noiseSuppression: true` constraints.
+- ❌ **The webview is not the same engine on each OS.** macOS/iOS get WKWebView, Windows gets
+  WebView2 (Chromium), Linux gets **WebKitGTK** — and WebKitGTK is exactly where issues #4358,
+  #3495, #2562, and #3118 land. The `getUserMedia` contract is nominally identical; the
+  implementation quality is not.
+- ❌ `cpal` is *not* used for input, so there is no in-process fallback when the webview's media
+  stack fails.
+
+### Native binaries and models per platform+arch
+
+**Models are platform-independent; native code is vendored by the crates.** (VERIFIED)
+
+| Artifact | Per-platform? | How fetched / cached |
+|---|---|---|
+| **Pocket TTS ONNX graphs** (Mimi encoder/decoder, text conditioner, Flow LM ×2) | ❌ No — plain `.onnx`, one build for all OSes | HuggingFace, revision-pinned URL `models.rs:50-51`, **SHA-256 pinned per artifact**, cached to `~/.buzz/models/pocket-tts/` |
+| **Parakeet STT** | ❌ No — `.tar.bz2` of `model.int8.onnx` + `tokens.txt` | sherpa-onnx GitHub release `models.rs:120`, `STT_ARCHIVE_SHA256` pinned `models.rs:47`, extracted to `~/.buzz/models/parakeet-tdt-ctc-110m-en/` |
+| **Reference voice WAVs** (12 bundled + Kyutai p333) | ❌ No | `desktop/src-tauri/resources/pocket-voices/*.wav`, shipped in the bundle |
+| **ONNX Runtime native lib** | ✅ Yes, but **not Buzz's problem** | `sherpa-onnx 1.12` vendors it; `ort-sys` is pinned with `features = ["disable-linking"]` (`buzz-voice/Cargo.toml:14`) so `ort` does **not** link its own copy — one runtime, supplied by sherpa, per platform |
+
+A version manifest (`.buzz-model-manifest`) triggers re-download on mismatch (`models.rs:1-19`).
+Cache root is `dirs::home_dir()?.join(".buzz").join("models")` (`models.rs:608`) — portable, though
+on Windows that means a dotfile directory in the user profile rather than `%LOCALAPPDATA%`.
+
+**The clean consequence for us: a downloaded ONNX model is one artifact for all platforms+arches.**
+Only the inference runtime is per-platform, and a crate/npm package supplies it.
+
+### Is the echo-cancellation / barge-in mechanism OS-specific?
+
+**AEC: yes, entirely — and it is not theirs.** Buzz ships **no** AEC code (grepped
+`webrtc-audio-processing`, `speexdsp`, `rnnoise`, `nnnoiseless`, `aec3` across `Cargo.toml`/`.lock`
+→ zero). The whole strategy is two `getUserMedia` booleans, so the *actual* echo canceller is
+**WKWebView's on macOS, WebView2/Chromium's on Windows, WebKitGTK's on Linux** — three different
+implementations of differing quality, none under their control. Their UI even concedes this with
+an `aecMissing` code path that pops the *"Headphones help prevent echo"* nudge
+(`MicControls.tsx:351-395`). ⚠️ **This does not port cleanly to a non-webview capture path.**
+
+**Barge-in: no, portable.** The trigger paths are a Tauri global shortcut, an Opus packet counter,
+and a UI command; enforcement is an `AtomicBool` polled by a `std::thread` at 10 ms that swaps a
+rodio `Player`. Zero platform branches (`tts_speaker_cancellation.rs`, `tts_playback.rs`,
+`playout.rs:350-363`). ✅ **Ports as-is.**
+
+### OS-specific bits in the UI / shell layer
+
+| Thing | Portable? | Detail |
+|---|---|---|
+| **Global hotkey registration** | ⚠️ Mostly | `tauri-plugin-global-shortcut` v2 abstracts all three OSes, and `Ctrl+Space` is used unmodified everywhere. **But** the plugin is `#[cfg(test)]`-stubbed out entirely because *"linking the plugin into the lib-test binary makes it fail to load on **Windows** (`STATUS_ENTRYPOINT_NOT_FOUND`) before any test runs"* (`ptt_shortcut.rs:14-21`). A Windows-specific linking landmine, and it means **the PTT hotkey path is never exercised by the unit-test suite on any platform.** |
+| Hotkey **label** | ✅ | `isMacPlatform() ? "⌃Space" : "Ctrl+Space"` (`MicControls.tsx:111`); registry carries `keys` + `keysWindows` (`keyboard-shortcuts.ts:265-277`) |
+| **Mic-permission deep link** | ❌ **macOS only** | `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`, rendered behind `{isMac && …}` (`MicControls.tsx:300-319`). **Windows and Linux users get the "Microphone unavailable" card with no recovery button.** A real parity gap in the exact failure state where help matters most. |
+| Platform detection | ⚠️ | `isMacPlatform()` / `isLinuxPlatform()` sniff **`navigator.platform`** — deprecated and unreliable — rather than Tauri's `os` plugin (`shared/lib/platform.ts:7-24`). Notably there is **no `isWindowsPlatform()`**: Windows is the else-branch. |
+| **Prevent-sleep during a session** | ❌ **macOS only, silently** | `prevent_sleep.rs` links IOKit (`IOPMAssertionCreateWithName`) under `#[cfg(target_os = "macos")]`; the `#[cfg(not(target_os = "macos"))]` arm is a **no-op stub** that just sets `assertion_id = None` (`prevent_sleep.rs:91-96,187-191`). Windows and Linux machines can idle-sleep mid-session. |
+| Tray menu / app menu / notifications / window chrome | ❌ Per-OS | `tray_menu.rs` (6 `cfg`s), `app_menu.rs` (4), `commands/notifications.rs` (3), `commands/window_chrome.rs` (3), `initial_window.rs` (4) |
+| **Huddle companion window** | ✅ | `huddle/window.rs` uses Tauri's `WebviewWindowBuilder` with no platform branches |
+| Reduced-motion / a11y CSS | ✅ | Standard media queries |
+
+---
+
 ## Known problems
 
 From their open issues (VERIFIED — read via `gh issue view` on `block/buzz`) and from in-code
@@ -998,7 +1138,67 @@ cloud-provider-with-key-store, which is exactly the TTS provider shape we need.
 | rodio / cpal / mixer plumbing, 512-sample bootstrap cushions | ❌ | Rust-audio-stack specific. |
 | Nostr relay, ephemeral channels, kind:9000 membership, per-agent pubkeys | ❌ | Buzz's multi-agent-multi-human room model. ORCA is one user, one agent. Drop `speaker_pubkey`, `speaker_generations`, `active_speaker` ownership arbitration entirely — that's a large share of `tts.rs`'s complexity we don't inherit. |
 
-### The four decisions this research should drive
+### Portability split — what transfers to all three OSes vs. what is macOS-shaped
+
+Cross-platform parity is a **hard requirement** for our plugin, so the transfer matrix above needs
+a second axis. The good news is concrete, not assumed: **`grep -rn 'cfg(target_os' huddle/` returns
+zero hits** — the entire chunking, normalization, queueing, and cancellation stack is written
+without a single platform branch, and its tests are pure-logic unit tests that run on the
+`ubuntu-latest` CI job like any other. That is evidence of portability, not an assumption.
+
+**Tier 1 — pure logic. Ports everywhere, at zero platform cost. Copy first.**
+
+| Mechanism | Why it's portable | Evidence |
+|---|---|---|
+| `preprocess_for_tts` — the 7-stage markdown→speech normalizer | `&str → String`. No I/O, no deps, no `cfg`. | `preprocessing.rs` (whole file); tests `:414-543` run on the Linux CI job |
+| The natural-boundary splitter + abbreviation guard | Pure function over `&str` + a `token_count` closure | `pocket_april.rs:961-1133`; tests `:1440-1518` |
+| "Isolate first sentence, then pack the rest" | One boolean into the same pure function | `pocket_april.rs:1046-1050` |
+| Generation-tagged queue; barge-in-clears vs voice-switch-preserves | Integer comparisons and a `swap` | `tts.rs:604-618`; `tts_voice_transition.rs:484-493` |
+| Playback state as a reducer (PR #3240) | Testable with no audio device at all | `features/message-tts/lib/playbackReducer.test.mjs` |
+| TTS eligibility filter (skip `[System]`, self-authored, attachment lines) | String predicates | `ttsLiveMessages.ts:31-76` |
+| Fade-out-only + lead-in-on-idle-onset policy | Arithmetic over a sample buffer | `tts_audio.rs:40-84` |
+| VAD constants as *values* (16 ms / 0.5 / 304 ms / 192 ms / 30 s) | Numbers | `stt.rs:160-183` |
+
+These are **the highest-value things in the whole repo for us**, and they happen to be the ones
+with no portability risk. That alignment is the main takeaway of this section.
+
+**Tier 2 — portable via a cross-platform library, but the library is the dependency decision.**
+
+| Mechanism | Portable how | Watch out for |
+|---|---|---|
+| Audio output | `rodio` → `cpal` → CoreAudio / WASAPI / ALSA, no branches in Buzz | Linux needs `libasound2-dev` at build time (`linux-canary.yml:65`); Windows output-device selection is *already broken* in Buzz (#6044) |
+| Local ONNX inference | `sherpa-onnx` vendors ONNX Runtime per platform; `ort-sys` pinned `disable-linking` so only one runtime links | The native runtime is the only per-platform artifact; get the packaging right once |
+| Model download + cache | Models are **plain `.onnx`/`.wav`, identical on every OS+arch**; SHA-256 pinned | Buzz caches to `~/.buzz/` even on Windows — prefer the platform app-data dir |
+| Global hotkey | `tauri-plugin-global-shortcut` v2 covers all three | Buzz `#[cfg(test)]`-stubs the plugin out because it fails to load in the **Windows** test binary (`STATUS_ENTRYPOINT_NOT_FOUND`, `ptt_shortcut.rs:14-21`) — so their hotkey path is untested everywhere. Don't inherit that hole. |
+| Barge-in enforcement (10 ms monitor thread + atomic) | No platform branches | — |
+| Companion window | Tauri `WebviewWindowBuilder`, no branches | — |
+| Mic capture via `getUserMedia` + AudioWorklet | One code path on all three | ⚠️ **Three different webview engines.** WKWebView / WebView2 / WebKitGTK. Nominally the same API; issues #4358, #3495, #3118, #2562 are all WebKitGTK. |
+
+**Tier 3 — macOS-shaped in Buzz. Needs a per-OS reimplementation, or is simply missing elsewhere.**
+
+| Mechanism | State in Buzz | What we'd have to build |
+|---|---|---|
+| **Acoustic echo cancellation** | Not theirs at all — two `getUserMedia` booleans, so the real canceller is WKWebView's / Chromium's / WebKitGTK's, three different implementations of differing quality. Plus a `aecMissing` → *"Headphones help prevent echo"* nudge (`MicControls.tsx:351-395`). | If we capture outside a webview, **AEC is entirely unsolved and must be sourced per platform**. If we capture in the renderer, we inherit browser AEC — and ORCA mobile already vendors a real AEC module (`@orca/expo-two-way-audio`) whose iOS engine even handles the "AEC needs time to adapt to playback" warm-up (`AudioEngine.swift:187-189`). Desktop has no equivalent. |
+| **Mic-permission recovery deep link** | macOS only: `x-apple.systempreferences:…Privacy_Microphone`, behind `{isMac && …}` (`MicControls.tsx:300-319`). Windows/Linux get a dead-end card. | Per-OS: `ms-settings:privacy-microphone` on Windows; on Linux there is no single target — surface instructions instead. **A three-line parity fix Buzz never made.** |
+| **Prevent idle sleep during a session** | macOS only via IOKit; the non-macOS arm is a **silent no-op stub** (`prevent_sleep.rs:91-96,187-191`). | Windows `SetThreadExecutionState`, Linux systemd-inhibit / D-Bus. Relevant if huddle mode should survive an idle laptop. |
+| Platform detection | Sniffs deprecated `navigator.platform`; **there is no `isWindowsPlatform()`** — Windows is the else-branch (`platform.ts:7-24`) | Use Tauri/Electron's OS API, and treat all three as first-class. |
+| Tray, app menu, notifications, window chrome | Per-OS `cfg` blocks throughout | Out of scope for a TTS plugin, but note the *cost centre* is the shell, never the audio. |
+| Barge-in triggered by a remote participant | Opus packet counting — portable code, but **the concept doesn't exist for a single-user agent** | Not a portability issue; a product-shape issue (see the transfer matrix above). |
+
+### The one-line conclusion for our parity requirement
+
+**Everything we most want from Buzz is Tier 1 or Tier 2** — the normalizer, the chunker, the queue
+state machine, the barge-in enforcement, and the model-download pattern are all platform-neutral,
+and the models themselves are a single artifact for every OS and arch. **The only genuinely
+macOS-shaped things in Buzz are things they got wrong or skipped** (a macOS-only permission deep
+link, a macOS-only sleep inhibitor with a silent stub elsewhere, and an AEC story that is really
+"whatever webview you're on"). So parity is achievable — provided we (a) decide *where* mic capture
+lives before writing any of it, since that decision alone determines whether AEC is free or
+unsolved, and (b) test the global-hotkey path on Windows, which Buzz never does.
+
+---
+
+### The five decisions this research should drive
 
 1. **Build the provider seam before the first engine.** Buzz's #3720 and #4403 both stall on its
    absence; ORCA's own STT stack already demonstrates the pattern (catalog + downloader + cloud
@@ -1015,5 +1215,12 @@ cloud-provider-with-key-store, which is exactly the TTS provider shape we need.
 4. **One playback owner, acquired by every path, from the first commit** — plus device-loss
    re-initialisation. #4403's author paid for both lessons; Buzz has the first and still lacks the
    second (#6044, #2868).
+5. **Decide where microphone capture lives before writing any of it — it is the parity fork.**
+   In the renderer (`getUserMedia`) we get one code path and free AEC on all three OSes, but we
+   inherit three different webview engines and the WebKitGTK defect cluster (#4358, #3495, #3118).
+   In the main process (native/cpal) we get consistent behaviour but **AEC becomes ours to solve
+   per platform**, and Buzz offers no prior art for that — their entire answer is browser AEC plus
+   a "wear headphones" nudge. Nothing else in the plan depends on this choice; everything about
+   echo, barge-in triggers, and Linux risk does.
 
 ---

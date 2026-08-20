@@ -18,21 +18,71 @@ Two headline features (not the full list):
 | R4 | **Tests + CI/CD + docs before publishing.** CI must run on all three OSes. | Engines that can't be exercised headlessly in GitHub Actions are a flagged risk. |
 | R5 | **Publish to a public GitHub repo** — only once R4 is genuinely satisfied. | Not "tests exist" — tests pass, verified by effect. |
 
-## Current phase
-**Phase 0 — Research.** Nothing implemented. Four research agents running:
+## THE MOST IMPORTANT THING TO KNOW
 
-| Agent | Scope | Output |
+**This is assistive technology, not a novelty.** The user is dyslexic and voice-first. Evidence:
+their own gist *"Engineer↔Agent Workflow Infrastructure for a Dyslexic, Voice-First Operator"*,
+which cites Wood et al. 2018 (d=0.35 TTS comprehension effect across 22 studies) and a Frontiers
+2022 finding that dyslexic adults match controls on *listening* comprehension while lagging on
+reading. Latency, reliability and "never fail silently" are accessibility properties here. Treat
+them as such.
+
+**The user has already specified this project.** `YoraiLevi/TTS-Hotkey-AI-Read-Clipboard-CLI`
+issue #1 is a complete functional spec (R1–R9) plus a source-level survey of 16 projects, and the
+gist *"Reading the Screen Aloud"* catalogues 1,553 tools with per-row evidence tiers. **Read both
+before designing anything.** Our ORCA plugin is a *host* for that design, not a fresh design.
+
+### The user's binding requirements (from TTS-Hotkey issue #1)
+
+| Req | Constraint | Consequence |
 |---|---|---|
-| orca-api-scout | ORCA plugin API; how to tap agent reply markdown; build/dev-loop/install/publish; per-OS paths | `docs/.research/orca-plugin-api.md` |
-| buzz-scout | `block/buzz` architecture: streaming chunker, speech normalization, barge-in, UI inventory, portability | `docs/.research/prior-art-buzz.md` |
-| tts-engine-scout | Engine landscape, cross-platform strategy, audio playback, + mining YoraiLevi's stars/gists | `docs/.research/tts-engine-landscape.md` |
-| speckit-scout | Spec Kit workflow + templates; merge with STATE/HANDOFF/PITFALLS | `docs/.research/speckit-workflow.md` |
+| R3.4 | Default needs **no account, no API key, no network** | Disqualifies Picovoice Orca, ElevenLabs, OpenAI, edge-tts |
+| R3.1/R3.2 | Backend is **configuration, not code**, behind a documented interface | Provider seam exists before the first engine |
+| R4.1 | **Sentence streaming required** — "POST → wait for whole paragraph → play" fails | Huddle mode must synthesize sentence 1 while the agent still types |
+| R4.2 | First audio **< ~500 ms** on the default local backend | |
+| R2.5 | Speech **interruptible** by a second chord | Two-sided cancel: stop the player AND the synthesizer |
+| — | **Two-process rule**: neural model load is seconds; a hotkey must not pay it per press | Resident warm service + thin client |
+| R5.2 | **Playback belongs to the client, not the synthesis service** | Providers emit PCM; a separate sink plays it |
+| R9 | Cross-platform parity | Of 12 candidates surveyed, **zero** satisfied R9 and **zero** satisfied R3. That gap is our contribution. |
 
-## Open questions blocking design
-1. Does ORCA expose a streaming hook for assistant messages, and is the payload markdown or
-   structured blocks? (Everything about huddle mode depends on this.)
-2. Can a plugin register a hotkey and read the editor selection on all three OSes?
-3. One portable neural engine as default, or three OS-native synths behind one interface?
+## Current phase
+**Phase 0 — Research. 4 of 5 agents done.** Nothing implemented.
+
+| Agent | Status | Output |
+|---|---|---|
+| orca-api-scout | done | `docs/.research/orca-plugin-api.md` |
+| buzz-scout | done | `docs/.research/prior-art-buzz.md` |
+| tts-engine-scout | done | `docs/.research/tts-engine-landscape.md` (+ 3 `_track-*` companions) |
+| speckit-scout | done | `docs/.research/speckit-workflow.md` |
+| orca-empiricist | **running** | `docs/.research/orca-empirical-findings.md` — E1/E2 decide the architecture |
+
+## Settled findings
+
+- **ORCA's plugin API cannot deliver agent reply text, selection, or audio-in-panel.** Verified,
+  not merely undiscovered. See `orca-plugin-api.md` "Verdict". Plugin system is off by default.
+- **ORCA already ships first-party STT** (`src/main/speech/`, sherpa-onnx model catalog +
+  downloader + cloud client + key store + Voice settings pane) and **zero TTS**. That is both the
+  precedent to mirror and evidence that ORCA builds voice in the main process, not as a plugin.
+- **Default engine: Piper (VITS) via `sherpa-onnx-node`** — 52–65 ms/sentence measured, no
+  node-gyp, prebuilt binaries. `say` is the never-fails fallback only (its *empty-string spawn*
+  costs 414 ms). **Kokoro is a trap**: measured 16–25× slower than Piper, int8 slower than FP32.
+- **One dependency, `sherpa-onnx-node`, covers TTS + future STT + VAD + keyword spotting.**
+- **No preinstalled macOS binary accepts streaming PCM on stdin.** `afplay` refuses it and gives a
+  ~970 ms inter-sentence gap. The ways out are Web Audio in a renderer, a bundled sidecar, or a
+  Homebrew dependency we cannot assume. **This is the sharpest constraint in the project.**
+- **Barge-in is not "kill the player"** — it must cancel in-flight synthesis *and* flush buffered
+  audio, or the synthesizer keeps producing speech for text the user already interrupted.
+- **Port buzz's `preprocess_for_tts`** (7 stages, no deps, fully tested) and **add the four rows
+  they lack**: headings, lists, tables, file paths. Their own issue #4403 states the target —
+  "headings become pauses, list items become sentences, tables are announced by row".
+- **Thinking blocks are flattened into text blocks** in ORCA's decoder. Filter at the raw JSONL
+  level or huddle mode speaks the model's chain-of-thought aloud.
+
+## Open decisions
+- **D001** `docs/.discussion/001-integration-path.md` — plugin+worker-fs vs upstream-into-ORCA vs
+  hybrid. Recommendation: hybrid, **conditional on E1/E2**.
+- Licensing: Piper voices are GPL-3.0 and espeak-ng is GPL-3.0-or-later. Do not bundle weights.
+- Pocket TTS ONNX export is marked non-commercial though upstream is MIT. Opt-in download only.
 
 ## Where things live
 - `docs/.research/` — raw research artifacts (hot). Promote to `docs/` when settled.
