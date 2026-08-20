@@ -9,7 +9,7 @@
  * Shipping only 'replace' meant huddle silently dropped replies mid-sentence (reported live).
  */
 import { Chunker, PlaybackQueue, normalize, type NormalizeOptions, type PlaybackSink } from '@orca-tts/core'
-import type { TtsProvider } from '@orca-tts/core'
+import type { SynthesizeOptions, TtsProvider } from '@orca-tts/core'
 
 export type SpeakMode = 'replace' | 'queue'
 
@@ -18,6 +18,20 @@ export interface SpeechServiceDeps {
   readonly sink: PlaybackSink
   readonly log?: (m: string) => void
   readonly maxUnits?: number
+  /**
+   * Isolate the first sentence so audio starts sooner (R4.2, first audio < ~500 ms).
+   * The chunker has defaulted this to `true` since it was written; before this was forwarded,
+   * no caller could turn it off. Default stays `true` — omit to keep today's behaviour.
+   */
+  readonly isolateFirstSentence?: boolean
+  /**
+   * Engine voice. Provider-specific and NOT portable across platforms: macOS `Samantha`,
+   * Windows `Microsoft Zira Desktop` and espeak-ng `en-US+f3` share no namespace and no member.
+   * Undefined means "the provider's own default", which is what shipped before.
+   */
+  readonly voice?: string
+  /** 1.0 is the provider's natural rate. Undefined leaves the engine alone. */
+  readonly rate?: number
   readonly normalizeOptions?: NormalizeOptions
   /** Cap on queued utterances; beyond this the OLDEST are dropped (never the newest). */
   readonly maxQueued?: number
@@ -103,14 +117,31 @@ export class SpeechService {
     }
   }
 
+  /**
+   * Voice and rate are the two settings every user asks for first, and until this existed no
+   * caller could reach them: `generate(chunk.text)` was called with no options at all, while
+   * `SynthesizeOptions.voice`/`.rate` and the provider's implementations of both sat unused (H24).
+   * Built fresh per utterance and omitting undefined fields, so "nothing passed" stays byte-for-
+   * byte the request the provider received before.
+   */
+  #synthesizeOptions(): SynthesizeOptions {
+    const opts: { voice?: string; rate?: number } = {}
+    if (this.#deps.voice !== undefined) opts.voice = this.#deps.voice
+    if (this.#deps.rate !== undefined) opts.rate = this.#deps.rate
+    return opts
+  }
+
   async #speakOne(text: string): Promise<void> {
     const spoken = normalize(text, this.#deps.normalizeOptions ?? {})
     if (spoken.length === 0) {
       this.#deps.log?.('nothing speakable in that text')
       return
     }
-    const chunkerOpts: { maxUnits?: number } = {}
+    const chunkerOpts: { maxUnits?: number; isolateFirstSentence?: boolean } = {}
     if (this.#deps.maxUnits !== undefined) chunkerOpts.maxUnits = this.#deps.maxUnits
+    if (this.#deps.isolateFirstSentence !== undefined) {
+      chunkerOpts.isolateFirstSentence = this.#deps.isolateFirstSentence
+    }
     const chunker = new Chunker(chunkerOpts)
     const chunks = [...chunker.addText(spoken), ...chunker.finish()]
 
@@ -118,7 +149,7 @@ export class SpeechService {
     for (const chunk of chunks) {
       if (this.#cancelled || this.#skip || generation !== this.#playback.generation) return
       try {
-        for await (const audio of this.#deps.provider.generate(chunk.text)) {
+        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
           if (!this.#playback.push(generation, audio)) return
         }
       } catch (err) {
