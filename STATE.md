@@ -1,82 +1,66 @@
 # STATE — orca-plugin-tts
 
-**Updated:** 2026-08-20 · **Phase:** 2/3 (implementation) · **Branch:** `main`
-
-## IN PROGRESS (resumption contract, constitution Part III)
-
-| Task | Owner | Gate |
-|---|---|---|
-| **T040-T045** provider seam + OS synth | unassigned — next up | contract suite green per OS; cancel measured < 50 ms |
-
-M1, M2, M3 are **done**: 70 tests green, typecheck clean, both core modules zero-import.
-Subagent spawning is failing on this host (PITFALLS P13) — work is proceeding in-session.
-
-## Assumptions taken by default (T001, unanswered by user; reversible before T082)
-
-- Repo layout: **one repo, two packages** (`packages/core`, `providers`, `plugin`; `service` at M9).
-- Licence: **MIT**. Revisit before T082/publish given Piper GPL-3.0 voice coupling.
-- **v1 is OS-synth-only.** Resident service + Piper is M9, post-v1.
+**Updated:** 2026-08-20 · **Phase:** 5 (implementation) → complete to the approval gate · **Branch:** `main`
 
 ## One-paragraph status
 
-A TTS plugin for ORCA, for a dyslexic voice-first operator. Five research agents have finished or
-are finishing; the ORCA plugin API has been both source-read and **empirically probed inside a real
-running ORCA build**. The architecture is nearly decided and waits on one measurement (E6: can a
-plugin panel play raw PCM through Web Audio?). The constitution is written and ratified at v1.0.0.
-No specs, no code, no tests, no CI yet.
+The plugin is built and tested. 105 tests green, lint clean, typecheck clean, bundle 17 files /
+0.06 MB against ORCA's 2,000-file / 50 MB cap. CI is written for all three OSes but **has never
+run**, because the repo has no remote — pushing it is the approval gate. M9 (resident Piper
+service) is deliberately post-v1.
 
-## Phase status
+## STOPPED AT — approval gate (constitution Part III, STOP condition 1)
 
-| Phase | State | Artifact |
-|---|---|---|
-| 0. Research | **complete except E6/E7** | `docs/.research/*.md` (6 files) |
-| 0.5 Constitution | **complete, v1.0.0** | `.specify/memory/constitution.md` |
-| 1. Spec (`001-speak-selection`) | not started | blocked on D001 |
-| 2. Plan / class design | not started | blocked on spec |
-| 3. FMA | not started | |
-| 4. Tests | not started | |
-| 5. Implementation | not started | |
-| 6. CI (3 OSes) | not started | R4 |
-| 7. Publish public repo | not started | R5, gated on green CI |
+Two things remain and both are irreversible and outward-facing (R056–R058):
 
-## Decisions locked
+| Task | Needs |
+|---|---|
+| **T085** create the public GitHub repo and push | your explicit approval |
+| **T100–T102** three PRs against `stablyai/orca` | your explicit approval |
 
-- **Spec Kit adopted, partially.** Artifacts and templates yes; extensions, presets, issue-sync and
-  branch hooks no. Installed at v0.16.5. Commands are `/speckit-*` (hyphen).
-- **Constitution is hand-maintained.** Never run `/speckit-constitution`. (PITFALLS P2.)
-- **Default engine: Piper via `sherpa-onnx-node`** (52–65 ms/sentence measured). `say` is the
-  never-fails fallback. Kokoro rejected on measurement (16–25× slower). Cloud is opt-in only.
-- **One dependency (`sherpa-onnx-node`) covers TTS + future STT + VAD + keyword spotting.**
-- **Provider seam before the first engine.** Providers emit PCM and never own playback.
-- **Models download at runtime**, never bundled — the plugin has a hard 50 MB / 2,000-file cap.
+Everything reachable without approval is done. `T086` (marketplace entry) and `T087` (tag) follow
+T085 mechanically.
 
-## Decisions open
+## Definition of Done — honest audit
 
-- **D001 — integration path.** `docs/.discussion/001-integration-path.md`. Recommendation: hybrid
-  (ship a plugin, upstream the missing primitives). **Resolvable as soon as E6 lands.**
-- Licensing: Piper voices are GPL-3.0, espeak-ng GPL-3.0-or-later. Do not bundle weights. Plugin
-  licence undecided.
-- Whether "speak selection" ships as speak-the-clipboard, speak-the-last-reply, or waits on an
-  upstream `selection:read`. **No option reads a real editor selection today.**
-- Windows arm64 has no sherpa build (PITFALLS P7) — parity gap needs an explicit spec decision.
+| Criterion | State |
+|---|---|
+| Third party installs from a public repo and hears a reply | ❌ blocked on T085 |
+| No account, key, or network in the default path | ✅ OS synthesizer, zero setup |
+| Hotkey speaks clipboard; second press stops < 50 ms | ✅ cancel measured at 1 ms |
+| Huddle speaks replies, never thinking, never tool noise | ✅ T076 fixtures assert it |
+| First audio < 500 ms | ⚠️ **not met on the OS synth** — 927 ms measured on darwin. M9 (Piper, 52–65 ms) is what meets this. Stated, not hidden. |
+| CI green on three OSes | ⚠️ written, never executed — no remote |
+| README documents limitations verbatim | ✅ |
+| Memory files reconcile | ✅ this file |
 
-## What is measured, not assumed
+## What exists
 
-- Plugin worker Node access: **unrestricted** (fs, child_process, net, fetch; no permission model).
-- `speechSynthesis` in a panel: **works**, 180 voices, zero CSP violations.
-- `<audio>` in a panel: **blocked** by `media-src` for both `data:` and `blob:`.
-- `paneKey` carries no session id; `worktreeId` carries the absolute worktree path.
-- Worker code does not hot-reload; keybindings in the manifest force re-consent on every edit.
-- Plugin logs: 200-line in-memory ring buffer, **no file on disk**.
+- `packages/core` — normalizer (49 tests), chunker (21), queue (3), types. Zero imports, audited.
+- `packages/providers` — `TtsProvider` seam, contract suite, `OsSynthProvider` (mac/win/linux), registry.
+- `packages/plugin` — manifest, `activate`, adapter quarantine, clipboard, huddle + decoders +
+  fixtures, subprocess sink, panel.
+- `scripts/` — build, size-gate, smoke-synth, dev loop.
+- `.github/workflows/ci.yml` — 3-OS matrix.
+
+## Assumptions taken by default (T001, still reversible)
+
+- One repo, two packages. · MIT licence. · v1 is OS-synth-only; Piper service is M9.
+
+## Known gaps, named not hidden
+
+1. **Inter-sentence gap.** One player process per chunk. M9's resident service fixes it.
+2. **Correlation heuristic.** Two agents in one worktree → warns, speaks most recent.
+3. **5 of 14 agents.** Only those with transcript decoders.
+4. **No editor selection.** Clipboard is the honest fallback until upstream `selection:read`.
+5. **Panel is display-only.** No host→panel channel exists; `PanelSink` waits on upstream PR 1.
 
 ## Next action
 
-1. Read E6/E7 in `docs/.research/orca-empirical-findings.md`.
-2. Resolve D001 and record the resolution in that file.
-3. Write `specs/001-*/spec.md` from the Spec Kit template, then plan → FMA → tests.
+Ask the user to approve T085. On approval: create the repo, push, watch CI on three runners, fix
+what the Linux and Windows runners surface (nothing has ever executed there), then T086/T087.
 
 ## Reading order for a new agent
 
-`HANDOFF.md` → `PITFALLS.md` → `.specify/memory/constitution.md` →
-`docs/.research/orca-empirical-findings.md` → `docs/.research/orca-plugin-api.md` →
-`docs/.discussion/001-integration-path.md`. The other research files are reference, read on demand.
+`HANDOFF.md` → `PITFALLS.md` → `.specify/memory/constitution.md` (Part II rules, Part III protocol)
+→ this file → `docs/TASKS.md` → `docs/architecture.md`.
