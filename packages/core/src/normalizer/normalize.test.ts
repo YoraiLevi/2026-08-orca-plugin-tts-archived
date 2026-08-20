@@ -118,7 +118,9 @@ describe('T022b list items become sentences', () => {
   run([
     { name: 'dash list', input: '- alpha\n- beta', expect: 'alpha. beta.' },
     { name: 'asterisk list', input: '* alpha\n* beta', expect: 'alpha. beta.' },
-    { name: 'ordered list drops the numeral marker', input: '1. alpha\n2. beta', expect: 'alpha. beta.' },
+    // CHANGED from v1, which spoke this as "alpha. beta."
+    // See "ordered lists keep their numbers" at the bottom of this file.
+    { name: 'ordered list keeps its ordinals', input: '1. alpha\n2. beta', expect: 'one, alpha. two, beta.' },
     { name: 'item already punctuated is not doubled', input: '- alpha.\n- beta', expect: 'alpha. beta.' }
   ])
 })
@@ -261,4 +263,52 @@ describe('L5 keyboard symbols become words', () => {
     { name: 'command shift', input: 'press ⌘⇧S now', expect: 'press command shift S now' },
     { name: 'option control', input: 'press ⌥⌃X now', expect: 'press option control X now' }
   ])
+})
+
+/**
+ * Ordered-list ordinals.
+ *
+ * v1 discarded them: "1. alpha / 2. beta" was spoken "alpha. beta." For a tool whose main input is
+ * agent replies full of numbered procedures, losing "step 1, step 2" is a comprehension loss, not
+ * a style choice — a numbered list became indistinguishable from a bullet list.
+ *
+ * The DEFAULT CHANGED to 'numeral'. The old behaviour is still reachable as 'drop'. Which of the
+ * three sounds best is taste, and taste is settled in the Voice Lab, so this is an option and not
+ * a new hardcoded opinion.
+ */
+describe('ordered lists keep their numbers', () => {
+  it('default preserves the ordinal', () => {
+    expect(normalize('1. alpha\n2. beta')).toBe('one, alpha. two, beta.')
+  })
+
+  it("'word' speaks it as an ordinal word", () => {
+    expect(normalize('1. alpha\n2. beta', { orderedLists: 'word' })).toBe('first, alpha. second, beta.')
+  })
+
+  it("'drop' is v1's behaviour, still available", () => {
+    expect(normalize('1. alpha\n2. beta', { orderedLists: 'drop' })).toBe('alpha. beta.')
+  })
+
+  it('bullets have no ordinal to keep, and are unchanged by the option', () => {
+    for (const style of ['numeral', 'word', 'drop'] as const) {
+      expect(normalize('- alpha\n- beta', { orderedLists: style })).toBe('alpha. beta.')
+    }
+  })
+
+  it('numbering that does not start at 1 is preserved as written', () => {
+    // Agents renumber and resume lists; speaking "one, two" over "7., 8." would be a lie.
+    expect(normalize('7. seven\n8. eight', { expandNumbers: false })).toBe('7, seven. 8, eight.')
+  })
+
+  it('past the ordinal-word table it falls back to the numeral', () => {
+    expect(normalize('27. late\n', { orderedLists: 'word', expandNumbers: false }))
+      .toBe('number 27, late.')
+  })
+
+  it('the ordinal stays inside the item, so the chunker cannot orphan it', () => {
+    // "1." as its own sentence would be split off and spoken alone. A comma keeps it attached.
+    const out = normalize('1. alpha', { expandNumbers: false })
+    expect(out).toBe('1, alpha.')
+    expect(out).not.toContain('1. ')
+  })
 })

@@ -16,6 +16,8 @@ export type CodeBlockPolicy = 'announce' | 'drop'
 export type PathStyle = 'spoken' | 'terse' | 'verbatim'
 /** Where the file kind lands, or whether it is spoken at all. */
 export type ExtensionStyle = 'word-last' | 'word-first' | 'raw-last' | 'omit'
+/** What happens to the "1." in an ordered list. */
+export type OrderedListStyle = 'numeral' | 'word' | 'drop'
 
 export interface NormalizeOptions {
   /** Fenced code: announce as "code block omitted", or drop silently. Default 'announce'. */
@@ -34,6 +36,19 @@ export interface NormalizeOptions {
   extensionStyle?: ExtensionStyle
   /** Expand integers and clock times to words. Default true. */
   expandNumbers?: boolean
+  /**
+   * Ordered-list ordinals. Default 'numeral' — CHANGED from v1, which dropped them.
+   *
+   * `"1. alpha"` becomes:
+   *   'numeral' -> "1, alpha."       (heard as "one, alpha", since expandNumbers runs after)
+   *   'word'    -> "first, alpha."
+   *   'drop'    -> "alpha."          (v1 behaviour; a numbered procedure loses its numbers and
+   *                                   becomes indistinguishable from a bullet list)
+   *
+   * A comma, not a full stop: "1." as its own sentence would be split off by the chunker and
+   * spoken as a lone utterance. Unordered markers are still dropped — there is nothing to keep.
+   */
+  orderedLists?: OrderedListStyle
 }
 
 /** Extensions worth naming aloud. A listener wants "the python file", not "dot p y". */
@@ -83,7 +98,7 @@ export function normalize(md: string, opts: NormalizeOptions = {}): string {
   s = expandMarkdownLinks(s)
   s = stripUrls(s)
   s = headingsToPauses(s)
-  s = listItemsToSentences(s)
+  s = listItemsToSentences(s, opts.orderedLists ?? 'numeral')
   s = tablesToRows(s)
   if (pathStyle !== 'verbatim') s = speakFilePaths(s, pathStyle, opts.extensionStyle ?? 'word-last')
   s = stripMarkdownMarkers(s)
@@ -226,19 +241,43 @@ function headingsToPauses(src: string): string {
   }).join('\n')
 }
 
-function listMarkerLength(t: string): number {
-  if ((t.startsWith('- ') || t.startsWith('* ') || t.startsWith('+ '))) return 2
-  let k = 0
-  while (k < t.length && t[k]! >= '0' && t[k]! <= '9') k++
-  if (k > 0 && t[k] === '.' && t[k + 1] === ' ') return k + 2
-  return 0
+/** Ordinals worth a word. Past this, the numeral is clearer than "twenty-seventh". */
+const ORDINAL_WORDS = [
+  'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth',
+  'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth',
+  'eighteenth', 'nineteenth', 'twentieth'
+]
+
+function ordinalWord(n: number): string {
+  return ORDINAL_WORDS[n - 1] ?? `number ${n}`
 }
 
-function listItemsToSentences(src: string): string {
+interface ListMarker {
+  /** Characters to strip from the front of the trimmed line. 0 means "not a list item". */
+  readonly length: number
+  /** The ordinal, when the marker was `12. `. `null` for bullets. */
+  readonly ordinal: number | null
+}
+
+function listMarker(t: string): ListMarker {
+  if (t.startsWith('- ') || t.startsWith('* ') || t.startsWith('+ ')) return { length: 2, ordinal: null }
+  let k = 0
+  while (k < t.length && t[k]! >= '0' && t[k]! <= '9') k++
+  if (k > 0 && t[k] === '.' && t[k + 1] === ' ') {
+    return { length: k + 2, ordinal: Number.parseInt(t.slice(0, k), 10) }
+  }
+  return { length: 0, ordinal: null }
+}
+
+function listItemsToSentences(src: string, ordered: OrderedListStyle): string {
   return src.split('\n').map((line) => {
     const t = line.trimStart()
-    const n = listMarkerLength(t)
-    return n === 0 ? line : endWithStop(t.slice(n))
+    const { length, ordinal } = listMarker(t)
+    if (length === 0) return line
+    const body = t.slice(length)
+    if (ordinal === null || ordered === 'drop') return endWithStop(body)
+    const lead = ordered === 'word' ? ordinalWord(ordinal) : String(ordinal)
+    return endWithStop(`${lead}, ${body}`)
   }).join('\n')
 }
 
