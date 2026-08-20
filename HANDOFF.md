@@ -46,15 +46,46 @@ before designing anything.** Our ORCA plugin is a *host* for that design, not a 
 | R9 | Cross-platform parity | Of 12 candidates surveyed, **zero** satisfied R9 and **zero** satisfied R3. That gap is our contribution. |
 
 ## Current phase
-**Phase 0 — Research. 4 of 5 agents done.** Nothing implemented.
 
-| Agent | Status | Output |
-|---|---|---|
-| orca-api-scout | done | `docs/.research/orca-plugin-api.md` |
-| buzz-scout | done | `docs/.research/prior-art-buzz.md` |
-| tts-engine-scout | done | `docs/.research/tts-engine-landscape.md` (+ 3 `_track-*` companions) |
-| speckit-scout | done | `docs/.research/speckit-workflow.md` |
-| orca-empiricist | **running** | `docs/.research/orca-empirical-findings.md` — E1/E2 decide the architecture |
+**Phase 2 — refinement.** v1 ships, works, and is in daily use by the author. It is **usable but
+not refined**, which is the author's own summary after one day of listening.
+
+| | |
+|---|---|
+| Repo | https://github.com/YoraiLevi/orca-plugin-tts (public) |
+| CI | green on macOS, Linux, Windows |
+| Tests | 145 |
+| Verified by a human | huddle mode spoke live agent replies, 2026-08-21 |
+| Next | **M11 Voice Lab** — and nothing else until it exists |
+
+### Why Voice Lab is first
+
+Every remaining quality question — how a path is announced, whether the file kind comes last, how
+much warning an omission needs — is **taste**, settleable only by the listener, only by hearing the
+same sample repeatedly. Tuning it through conversation costs a refresh, a reply and a listen per
+round, and the author correctly called a halt:
+
+> *"I want to refine it myself manually through some kind of a configuration normalization UI with
+> real tests I can hear over and over again."*
+
+Do not tune defaults by ear over chat. Build M11, then let the listener choose.
+
+### Roadmap, M11 to M17
+
+`docs/TASKS.md` "PHASE 2". In order: Voice Lab · settings · the panel that shows what is happening
+(blocked upstream) · an agent-controlled spoken channel · per-agent voices · huddle presence ·
+voice input.
+
+### Upstream, open
+
+| | |
+|---|---|
+| [#15637](https://github.com/stablyai/orca/issues/15637) | no plugin route to assistant text |
+| [#15638](https://github.com/stablyai/orca/issues/15638) | no host→panel channel |
+| [#15639](https://github.com/stablyai/orca/issues/15639) | no session id on the event |
+| [#15640](https://github.com/stablyai/orca/pull/15640) | **PR** — projects `sessionId` |
+| [#15642](https://github.com/stablyai/orca/issues/15642) | keybindings dead in terminal focus |
+| [#15643](https://github.com/stablyai/orca/pull/15643) | **PR** — `storage.get` panel-callable, unblocks M13 |
 
 ## Settled findings
 
@@ -79,10 +110,28 @@ before designing anything.** Our ORCA plugin is a *host* for that design, not a 
   level or huddle mode speaks the model's chain-of-thought aloud.
 
 ## Open decisions
-- **D001** `docs/.discussion/001-integration-path.md` — plugin+worker-fs vs upstream-into-ORCA vs
-  hybrid. Recommendation: hybrid, **conditional on E1/E2**.
-- Licensing: Piper voices are GPL-3.0 and espeak-ng is GPL-3.0-or-later. Do not bundle weights.
-- Pocket TTS ONNX export is marked non-commercial though upstream is MIT. Opt-in download only.
+
+- **How an agent chooses what to speak** (M14). The biggest quality change available and a design
+  problem, not a coding one. `docs/.discussion/002-*` does not exist yet — write it before coding.
+- **Whether the spoken channel replaces or supplements the full reply**, and who decides.
+- **Identifier speech** — `_flush_buffer()` is spoken raw today. Settle in Voice Lab, not by guess.
+- **Deep path depth limit** — "in folder packages core src normalizer" may be too long to follow.
+- **Licence** stays MIT; revisit only if we ever bundle a GPL voice (we do not, and should not).
+
+## What listening taught us that testing could not
+
+Recorded because it is the most transferable lesson in the project. Every one of these came from a
+human hearing real output; none were catchable by reading it or by any test we would have written:
+
+| Heard | Fix |
+|---|---|
+| omissions "abrupt, I didn't expect it" | lead-in sentence, engine pauses either side |
+| URLs vanished without warning | say the destination: "a link to github dot com" |
+| "52 ms was odd to hear" | expand units before numbers |
+| table rows "too quick… not obvious what I am hearing" | pair every value with its header |
+| paths "made no sense whatsoever" | announce the name, kind last, announce the folder |
+| another session's replies hijacked the audio | lock to one session, announce switches |
+| "confusing what it is even reading… feel helpless" | skip/stop/status controls; panel is M13 |
 
 ## Standing rules
 

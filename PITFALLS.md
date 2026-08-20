@@ -22,6 +22,16 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
 
+## P23 — Tuning speech by ear over a chat loop does not converge
+**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
+a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
+**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
+is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
+**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
+*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
+**Worth remembering:** the same shape applies to anything judged by perception rather than
+correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
+
 ## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
 **Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
 read many of its replies and not a single one… this is really confusing what it is even reading."*
@@ -129,6 +139,16 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 **Worth remembering:** an event that means "the turn ended" is not the same as "the text is
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
+
+## P23 — Tuning speech by ear over a chat loop does not converge
+**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
+a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
+**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
+is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
+**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
+*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
+**Worth remembering:** the same shape applies to anything judged by perception rather than
+correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
 
 ## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
 **Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
@@ -250,6 +270,16 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 **Worth remembering:** an event that means "the turn ended" is not the same as "the text is
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
+
+## P23 — Tuning speech by ear over a chat loop does not converge
+**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
+a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
+**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
+is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
+**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
+*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
+**Worth remembering:** the same shape applies to anything judged by perception rather than
+correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
 
 ## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
 **Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
@@ -382,6 +412,16 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 **Worth remembering:** an event that means "the turn ended" is not the same as "the text is
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
+
+## P23 — Tuning speech by ear over a chat loop does not converge
+**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
+a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
+**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
+is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
+**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
+*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
+**Worth remembering:** the same shape applies to anything judged by perception rather than
+correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
 
 ## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
 **Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
@@ -534,6 +574,16 @@ event. Persist spoken ids to plugin storage, bounded to 300.
 **Worth remembering:** an event that means "the turn ended" is not the same as "the text is
 readable". Anywhere we react to a state change by reading a file someone else writes, watch the
 file — the event only says when to start looking.
+
+## P23 — Tuning speech by ear over a chat loop does not converge
+**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
+a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
+**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
+is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
+**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
+*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
+**Worth remembering:** the same shape applies to anything judged by perception rather than
+correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
 
 ## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
 **Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it

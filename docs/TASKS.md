@@ -249,3 +249,156 @@ M0 ──▶ M1 ──▶ M2 ──┐
 
 M0–M6 is a shippable product: a hotkey that speaks your clipboard on three platforms with zero setup.
 M7 makes it the thing you actually asked for. M9 makes it fast. M10 makes it correct.
+
+---
+
+# PHASE 2 — from usable to refined
+
+Opened 2026-08-21 after the first day of real use. v1 works; it is not refined. Roadmap issues
+[#4](https://github.com/YoraiLevi/orca-plugin-tts/issues/4) and
+[#5](https://github.com/YoraiLevi/orca-plugin-tts/issues/5).
+
+**Ordering rule:** M11 first and alone. Every later milestone is cheaper once taste can be settled
+by ear in seconds instead of by conversation in minutes.
+
+---
+
+## Phase M11 — Voice Lab (roadmap item 1)
+
+A local page running the real normalizer and the real provider. No ORCA involvement.
+
+- [ ] **T110** Fixture corpus → `fixtures/*.md`, committed and reviewable
+  - [ ] T110a code-heavy reply (fences, inline code, identifiers with leading underscores)
+  - [ ] T110b table-heavy reply (2-col, 4-col, ragged, one with no header row)
+  - [ ] T110c path-heavy reply (shallow, deep, unknown extensions, paths with trailing punctuation)
+  - [ ] T110d long architecture explanation — the queue/skip stress case
+  - [ ] T110e short answer — the latency case
+  - [ ] T110f hostile: emoji, box-drawing ASCII diagram, URLs, keyboard glyphs, mixed RTL
+- [ ] **T111** Local server → `scripts/voice-lab.mjs`, `pnpm voice-lab`
+  - [ ] T111a serve the page from localhost, bind 127.0.0.1 only
+  - [ ] T111b `POST /normalize` returns spoken text for `{text, options}`
+  - [ ] T111c `POST /speak` synthesizes and plays on this machine
+  - [ ] T111d `POST /stop`
+- [ ] **T112** The page → `voice-lab/index.html`, self-contained, no CDN
+  - [ ] T112a fixture picker plus a free-text box
+  - [ ] T112b every `NormalizeOptions` field as a control, live-updating
+  - [ ] T112c side-by-side: written text vs spoken text, diff-highlighted
+  - [ ] T112d Play / Stop per fixture
+  - [ ] T112e A/B — same fixture under two option sets, back to back
+  - [ ] T112f Export settings as JSON
+- [ ] **T113** Round-trip test: exported JSON, fed to `normalize()`, reproduces the lab's spoken text
+- [ ] **T114** Runs on all three OSes in CI (headless: normalize only, no audio)
+
+**Gate M11:** change a control, hear the difference in under two seconds, without touching ORCA.
+
+---
+
+## Phase M12 — Settings (roadmap item 2)
+
+- [ ] **T120** Settings schema shared by plugin and lab → `packages/core/src/settings/`
+- [ ] **T121** Plugin reads settings via `settings.get` on activate, and on change
+- [ ] **T122** Defaults come from the schema, never hardcoded at a call site
+- [ ] **T123** Invalid/partial settings fall back per-field, never wholesale, and log which field
+- [ ] **T124** Test: every `NormalizeOptions` field is reachable from settings, asserted by iterating
+      the schema — a new option that is not settable fails the test
+
+**Gate M12:** a value exported from Voice Lab, pasted into ORCA settings, produces byte-identical
+spoken text.
+
+---
+
+## Phase M13 — The panel that shows what is happening (roadmap item 3)
+
+**Blocked** on [stablyai/orca#15643](https://github.com/stablyai/orca/pull/15643) (`storage.get`
+panel-callable) or [#15638](https://github.com/stablyai/orca/issues/15638) (host→panel push).
+
+- [ ] **T130** Worker publishes status to plugin storage on every transition
+  - [ ] T130a now reading: text preview, session label, elapsed
+  - [ ] T130b queue: count and per-item session label
+  - [ ] T130c engine and degradation rung
+  - [ ] T130d last 20 spoken replies, for replay
+- [ ] **T131** Panel polls `storage.get` and renders it
+  - [ ] T131a poll interval respects the panel bridge rate limit (30 per 10 s)
+  - [ ] T131b stale-status detection: say "not connected" rather than showing a frozen lie
+- [ ] **T132** Controls in the panel — stop, skip, unfollow, replay item N
+  - [ ] T132a **blocked**: panels cannot invoke commands. Needs an upstream answer or a storage-flag
+        polled by the worker as a command channel. Decide, do not improvise silently.
+- [ ] **T133** Fall back to the current static panel when `storage.get` is not panel-callable, and
+      say why in the panel itself
+- [ ] **T134** Test: status written by the worker parses in the panel's renderer
+
+**Gate M13:** while a reply is being read, the panel names the session and the queue depth, and a
+click stops it.
+
+---
+
+## Phase M14 — A spoken channel the agent controls (roadmap item 4)
+
+The biggest quality change available. `block/buzz` does not read the reply; the agent chooses what
+is said aloud, which is why it can render an ASCII diagram and describe it in one sentence.
+
+- [ ] **T140** Design doc → `docs/.discussion/002-agent-spoken-channel.md`, with Options and a
+      Recommendation. **Do not code before this is settled.**
+  - [ ] T140a Option A: a marker convention in the reply (e.g. a fenced `speak` block) that the
+        plugin extracts and reads instead of the prose
+  - [ ] T140b Option B: an MCP tool the agent calls to speak, so speech is an explicit action
+  - [ ] T140c Option C: a hook/subagent that summarises the reply for the ear
+  - [ ] T140d Option D: heuristic — read the summary sentences, skip the artifact
+  - [ ] T140e How each degrades when the agent does not cooperate (most will not)
+  - [ ] T140f Whether the spoken channel replaces or supplements the full reply, and who chooses
+- [ ] **T141** Implement the chosen option behind the provider-agnostic seam
+- [ ] **T142** Fallback: when no spoken channel is present, today's behaviour is unchanged
+- [ ] **T143** Fixture: a reply with an ASCII diagram plus a one-line description — the motivating case
+- [ ] **T144** Test: the diagram is never spoken; the description always is
+
+**Gate M14:** the motivating fixture is spoken as one sentence, not as box-drawing characters.
+
+---
+
+## Phase M15 — Per-agent voices (roadmap item 5)
+
+- [ ] **T150** Voice assignment: stable per session, from the available voice list
+  - [ ] T150a deterministic from the session id, so the same agent keeps its voice across restarts
+  - [ ] T150b avoid collisions while sessions are concurrent
+  - [ ] T150c user override per session, persisted
+- [ ] **T151** Provider interface carries voice per utterance (already does — verify end to end)
+- [ ] **T152** Announce the speaker on switch, and make the announcement suppressible once voices
+      make it redundant
+- [ ] **T153** Test: two sessions receive different voices; the same session is stable across a
+      worker restart
+
+**Gate M15:** with two agents running, you can tell who is speaking without being told.
+
+---
+
+## Phase M16 — Huddle presence (roadmap item 6)
+
+Depends on M13.
+
+- [ ] **T160** Model: which sessions are "in the huddle", which is speaking, which are queued
+- [ ] **T161** Panel presence list — session label, voice, speaking indicator
+- [ ] **T162** Join / leave a session from the panel, replacing the follow/unfollow chords
+- [ ] **T163** Per-session mute
+- [ ] **T164** Test: presence reflects reality after a session ends mid-utterance
+
+**Gate M16:** the panel shows who is in the room and who is talking, and you can mute one.
+
+---
+
+## Phase M17 — Voice input (roadmap item 8, later)
+
+- [ ] **T170** Decide whether to use ORCA's existing STT stack or our own `sherpa-onnx`
+- [ ] **T171** Push-to-talk before hands-free; barge-in gated behind it
+- [ ] **T172** Half-duplex gate so the mic does not hear the speaker
+
+**Gate M17:** speaking interrupts playback within the barge-in budget, without echo.
+
+---
+
+## Cross-cutting, tracked but unscheduled
+
+- [ ] **T180** Identifiers spoken raw: `_flush_buffer()` gets no treatment. Decide in Voice Lab.
+- [ ] **T181** Deep folder paths read as long flat word lists — depth limit or ellipsis
+- [ ] **T182** Replay the last thing said
+- [ ] **T183** Scrub within a long reply, not only skip
+- [ ] **T184** Re-verify vendored host facts against a newer ORCA (currently pinned to 1.4.185)
