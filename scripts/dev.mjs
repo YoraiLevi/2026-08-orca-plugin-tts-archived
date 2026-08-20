@@ -17,8 +17,8 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const PLUGIN_DIR = resolve('packages/plugin')
-const manifest = JSON.parse(readFileSync(resolve(PLUGIN_DIR, 'orca-plugin.json'), 'utf8'))
+const PLUGIN_DIR = resolve('dist/plugin')   // the ARTIFACT, never the source folder
+const manifest = JSON.parse(readFileSync(resolve('packages/plugin/orca-plugin.json'), 'utf8'))
 const PLUGIN_KEY = `${manifest.publisher}.${manifest.id}`
 
 const steps = [

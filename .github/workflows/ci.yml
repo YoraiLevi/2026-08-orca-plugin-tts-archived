@@ -42,8 +42,15 @@ jobs:
       - name: Size gate (ORCA caps at 2000 files / 50 MB)
         run: pnpm size-gate
 
+      - name: Artifact must be self-contained (no symlinks escape the plugin root)
+        shell: bash
+        run: |
+          found=$(find dist/plugin -type l | wc -l)
+          echo "symlinks in artifact: $found"
+          test "$found" -eq 0
+
       - name: Smoke test — the bundle loads and exports activate
-        run: node -e "import('./packages/plugin/dist/main.mjs').then(m=>{if(typeof m.default!=='function'){console.error('activate missing');process.exit(1)}console.log('bundle ok')})"
+        run: node -e "import('./dist/plugin/main.mjs').then(m=>{if(typeof m.default!=='function'){console.error('activate missing');process.exit(1)}console.log('bundle ok')})"
 
       - name: Smoke test — the OS synthesizer produces real audio bytes
         run: node scripts/smoke-synth.mjs

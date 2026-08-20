@@ -6,6 +6,22 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
+**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
+"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
+itself parses fine against `pluginManifestSchema`.
+**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
+`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
+resolves realpaths and **rejects any artifact escaping the plugin root**
+(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
+One escaping symlink invalidates the plugin, and the message does not say which file.
+**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
+**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
+no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
+**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
+shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
+artifact and adding back, rather than re-reading the manifest.
+
 ## P16 — "Use the OS's built-in voice" is a two-tier trap, not a zero-install win
 **Symptom:** macOS sounds fine in the demo, then Windows and Linux users hear something from 2005.
 **Cause:** the three OS-native synths are not one tier. macOS `say` reaches decent Apple voices.
@@ -18,6 +34,22 @@ Actions runner there is **no speech stack at all** (`actions/runner-images` has 
 **Instead:** one portable neural engine as the default on all platforms; OS-native only as a
 labelled fallback. And do not let "but macOS `say` is pretty good" argue for native-first — the same
 argument fails identically on the other two. Verified 2026-08-20.
+
+## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
+**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
+"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
+itself parses fine against `pluginManifestSchema`.
+**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
+`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
+resolves realpaths and **rejects any artifact escaping the plugin root**
+(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
+One escaping symlink invalidates the plugin, and the message does not say which file.
+**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
+**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
+no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
+**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
+shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
+artifact and adding back, rather than re-reading the manifest.
 
 ## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
 **Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
@@ -44,6 +76,22 @@ like a clean archive-free download path. But sherpa's own `tts-models` release t
 ONNX metadata *and* a `tokens.txt` the HF files do not carry.
 **Instead:** download sherpa's release assets, or convert and re-host the models yourself. Verified
 2026-08-20.
+
+## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
+**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
+"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
+itself parses fine against `pluginManifestSchema`.
+**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
+`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
+resolves realpaths and **rejects any artifact escaping the plugin root**
+(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
+One escaping symlink invalidates the plugin, and the message does not say which file.
+**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
+**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
+no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
+**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
+shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
+artifact and adding back, rather than re-reading the manifest.
 
 ## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
 **Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
@@ -81,6 +129,22 @@ pipeline, not only its units.
 not guaranteed on Windows.
 **Instead:** pure-JS `unbzip2-stream` (1.4.3, `gypfile: false`) piped into `tar-stream`. Verified:
 397 entries / 81 MB decoded in 4.7 s with no native build. Or re-host the models as `.tar.gz`.
+
+## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
+**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
+"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
+itself parses fine against `pluginManifestSchema`.
+**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
+`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
+resolves realpaths and **rejects any artifact escaping the plugin root**
+(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
+One escaping symlink invalidates the plugin, and the message does not say which file.
+**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
+**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
+no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
+**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
+shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
+artifact and adding back, rather than re-reading the manifest.
 
 ## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
 **Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
@@ -138,6 +202,22 @@ own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see
 `npm install` anyway (P5) and must fetch binaries itself, **source from GitHub releases, not npm** —
 then all six platform+arch combos are covered. Those tarballs also contain standalone executables
 (`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
+
+## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
+**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
+"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
+itself parses fine against `pluginManifestSchema`.
+**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
+`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
+resolves realpaths and **rejects any artifact escaping the plugin root**
+(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
+One escaping symlink invalidates the plugin, and the message does not say which file.
+**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
+**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
+no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
+**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
+shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
+artifact and adding back, rather than re-reading the manifest.
 
 ## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
 **Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card

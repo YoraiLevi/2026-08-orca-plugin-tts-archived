@@ -20,7 +20,11 @@ pnpm build
 ```
 
 Then in ORCA: **Settings → Plugins**, enable the plugin system, then **Development → Add**, and
-paste the absolute path to `packages/plugin`. Review and accept the consent prompt.
+paste the absolute path to **`dist/plugin`** — the built artifact, *not* `packages/plugin`.
+
+`packages/plugin` contains `src/` and a workspace `node_modules` whose symlinks point outside the
+folder; ORCA resolves realpaths and rejects the whole plugin as Invalid if anything escapes the
+plugin root. `dist/plugin` is three files and nothing else.
 
 ## Use
 
@@ -68,7 +72,7 @@ the UI states plainly when text would leave your machine.
 pnpm test        # 105 tests
 pnpm typecheck
 pnpm lint
-pnpm build       # bundles to packages/plugin/dist/main.mjs
+pnpm build       # emits the self-contained artifact to dist/plugin/
 pnpm size-gate   # ORCA caps a plugin at 2000 files / 50 MB
 node scripts/dev.mjs   # the reload loop — read docs/dev-loop.md first
 ```

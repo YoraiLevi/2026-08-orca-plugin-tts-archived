@@ -1,0 +1,31 @@
+<!-- Read Aloud status panel. No external resources: panel CSP is default-src 'none'. -->
+<style>
+  :root { color-scheme: light dark; --fg:#1a1c1a; --muted:#6b706a; --line:#dfe2dc; --bg:#fbfcfa; --accent:#0e7c6b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e9ede7; --muted:#8d948b; --line:#2b322b; --bg:#141714; --accent:#4fc7b0; }
+  }
+  body { margin:0; padding:14px; background:var(--bg); color:var(--fg);
+         font:13px/1.5 system-ui,-apple-system,sans-serif; }
+  h1 { font-size:13px; margin:0 0 10px; letter-spacing:.02em; }
+  .row { display:flex; justify-content:space-between; gap:10px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .row:last-of-type { border-bottom:0; }
+  .k { color:var(--muted); }
+  .v { font-variant-numeric:tabular-nums; }
+  .on { color:var(--accent); font-weight:600; }
+  .note { margin-top:12px; padding:9px 10px; border:1px solid var(--line); border-radius:6px;
+          color:var(--muted); font-size:12px; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; }
+</style>
+<h1>Read Aloud</h1>
+<div class="row"><span class="k">Status</span><span class="v" id="status">idle</span></div>
+<div class="row"><span class="k">Engine</span><span class="v" id="engine">system voice</span></div>
+<div class="row"><span class="k">Huddle mode</span><span class="v" id="huddle">off</span></div>
+<div class="row"><span class="k">Speak clipboard</span><span class="v"><code>Mod+Shift+S</code></span></div>
+<div class="row"><span class="k">Stop</span><span class="v"><code>Mod+Shift+X</code></span></div>
+<div class="row"><span class="k">Toggle huddle</span><span class="v"><code>Mod+Shift+H</code></span></div>
+<div class="note">
+  <strong>Known limits.</strong> ORCA exposes no way for a plugin to read your editor selection, so
+  the hotkey speaks the <em>clipboard</em>. Huddle mode reads agent transcripts and supports Claude,
+  Codex, Grok and omp only. Audio plays from the plugin worker, so there is a short pause between
+  sentences.
+</div>

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 const MAX_FILES = 2000
 const MAX_BYTES = 50 * 1024 * 1024
-const root = process.argv[2] ?? 'packages/plugin/dist'
+const root = process.argv[2] ?? 'dist/plugin'
 
 let files = 0
 let bytes = 0
