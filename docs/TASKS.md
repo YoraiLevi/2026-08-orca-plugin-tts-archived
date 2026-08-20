@@ -79,15 +79,15 @@ value that must move.
 
 ## Phase M3 — Chunker (TEST-FIRST)
 
-- [ ] **T030** Invariant test FIRST: `chunks.join('') === input` for 500 generated inputs → `core/src/chunker/chunker.test.ts`
-- [ ] **T031** [P] Boundary ladder tests: sentence → clause → word → scalar
-- [ ] **T032** [P] Abbreviation guard: `e.g.` `i.e.` `Dr.` `1.` do not end a sentence
-- [ ] **T033** [P] First-sentence-alone policy: chunk 1 = earliest sentence end
-- [ ] **T034** [P] Greedy packing: chunks 2..n = latest boundary that fits the limit
-- [ ] **T035** [P] Streaming equivalence: text fed 5 chars at a time == whole string at once
-- [ ] **T036** [P] Single word exceeding the limit does not deadlock (scalar fallback)
-- [ ] **T037** Implement `SentenceBoundaryDetector` with `addText()` / `finish()` → `core/src/chunker/index.ts`
-- [ ] **T038** Implement the limit strategy as an injected function (tokens for local, chars for cloud)
+- [x] **T030** Invariant test FIRST: `chunks.join('') === input` for 500 generated inputs → `core/src/chunker/chunker.test.ts`
+- [x] **T031** [P] Boundary ladder tests: sentence → clause → word → scalar
+- [x] **T032** [P] Abbreviation guard: `e.g.` `i.e.` `Dr.` `1.` do not end a sentence
+- [x] **T033** [P] First-sentence-alone policy: chunk 1 = earliest sentence end
+- [x] **T034** [P] Greedy packing: chunks 2..n = latest boundary that fits the limit
+- [x] **T035** [P] Streaming equivalence: text fed 5 chars at a time == whole string at once
+- [x] **T036** [P] Single word exceeding the limit does not deadlock (scalar fallback)
+- [x] **T037** Implement `SentenceBoundaryDetector` with `addText()` / `finish()` → `core/src/chunker/index.ts`
+- [x] **T038** Implement the limit strategy as an injected function (tokens for local, chars for cloud)
 
 **Gate M3:** T030 and T035 green — streaming and batch produce identical chunks.
 

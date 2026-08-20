@@ -6,11 +6,10 @@
 
 | Task | Owner | Gate |
 |---|---|---|
-| **T020-T027** normalizer | agent `normalizer-dev` | all normalizer tests green; T021f (`snake_case` intact) passes |
-| **T030-T038** chunker | agent `chunker-dev` | T030 `chunks.join('')===input` and T035 streaming==batch both green |
+| **T040-T045** provider seam + OS synth | unassigned — next up | contract suite green per OS; cancel measured < 50 ms |
 
-Both are pure-logic packages with no shared files — the M2 ∥ M3 parallel pair.
-Next after both land: **T040** (provider seam) on the critical path.
+M1, M2, M3 are **done**: 70 tests green, typecheck clean, both core modules zero-import.
+Subagent spawning is failing on this host (PITFALLS P13) — work is proceeding in-session.
 
 ## Assumptions taken by default (T001, unanswered by user; reversible before T082)
 
