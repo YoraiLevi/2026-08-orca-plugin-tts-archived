@@ -84,6 +84,10 @@ before designing anything.** Our ORCA plugin is a *host* for that design, not a 
 - Licensing: Piper voices are GPL-3.0 and espeak-ng is GPL-3.0-or-later. Do not bundle weights.
 - Pocket TTS ONNX export is marked non-commercial though upstream is MIT. Opt-in download only.
 
+## Standing rules
+
+`RULES.md` at the repo root. Read it on spawn, with this file and `PITFALLS.md`.
+
 ## Where things live
 - `docs/.research/` — raw research artifacts (hot). Promote to `docs/` when settled.
 - `docs/.discussion/` — open questions with Question + Options + Recommendation + Engineer-prompt bodies.
