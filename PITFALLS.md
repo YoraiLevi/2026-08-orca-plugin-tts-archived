@@ -19,6 +19,24 @@ Actions runner there is **no speech stack at all** (`actions/runner-images` has 
 labelled fallback. And do not let "but macOS `say` is pretty good" argue for native-first — the same
 argument fails identically on the other two. Verified 2026-08-20.
 
+## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
+**Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
+appeared, no consent prompt fired, and nothing said why.
+**Cause:** our `orca-plugin.json` did not satisfy `pluginManifestSchema`. Three faults:
+- `capabilities` were bare strings; the schema is `z.object({ kind: ... }).strict()`
+- `engines: { orca: ">=x.y.z" }` missing — **required**, not optional
+- `pluginApi: 1` missing — **required**
+Also missing `contributes.events`, without which `agent.status.changed` never arrives even with the
+`events:subscribe` capability granted.
+**Instead:** validate the manifest against the host's own parser before trusting it:
+```
+npx tsx validate-manifest.mts /path/to/orca-plugin.json   # imports pluginManifestSchema from the orca clone
+```
+`packages/plugin/src/manifest/manifest.test.ts` now pins the shape in CI so this cannot regress.
+**Worth remembering:** I wrote that manifest from research notes and never parsed it. Reading the
+schema is not the same as running it — the canonical example at `examples/plugins/hello-orca/` was
+sitting right there and would have shown every one of these in ten seconds.
+
 ## P15 — Bare Piper `.onnx` files from Hugging Face do not work with sherpa-onnx
 **Symptom:** `'sample_rate' does not exist in the metadata` at model load.
 **Cause:** `rhasspy/piper-voices` serves `.onnx`/`.onnx.json` directly over HTTP 200, which looks
@@ -26,6 +44,24 @@ like a clean archive-free download path. But sherpa's own `tts-models` release t
 ONNX metadata *and* a `tokens.txt` the HF files do not carry.
 **Instead:** download sherpa's release assets, or convert and re-host the models yourself. Verified
 2026-08-20.
+
+## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
+**Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
+appeared, no consent prompt fired, and nothing said why.
+**Cause:** our `orca-plugin.json` did not satisfy `pluginManifestSchema`. Three faults:
+- `capabilities` were bare strings; the schema is `z.object({ kind: ... }).strict()`
+- `engines: { orca: ">=x.y.z" }` missing — **required**, not optional
+- `pluginApi: 1` missing — **required**
+Also missing `contributes.events`, without which `agent.status.changed` never arrives even with the
+`events:subscribe` capability granted.
+**Instead:** validate the manifest against the host's own parser before trusting it:
+```
+npx tsx validate-manifest.mts /path/to/orca-plugin.json   # imports pluginManifestSchema from the orca clone
+```
+`packages/plugin/src/manifest/manifest.test.ts` now pins the shape in CI so this cannot regress.
+**Worth remembering:** I wrote that manifest from research notes and never parsed it. Reading the
+schema is not the same as running it — the canonical example at `examples/plugins/hello-orca/` was
+sitting right there and would have shown every one of these in ten seconds.
 
 ## P15 — An unmatched emphasis marker was stripped, mangling `_private` identifiers
 **Symptom:** running the pipeline for real, `_flush_buffer()` was spoken as "flush_buffer()".
@@ -45,6 +81,24 @@ pipeline, not only its units.
 not guaranteed on Windows.
 **Instead:** pure-JS `unbzip2-stream` (1.4.3, `gypfile: false`) piped into `tar-stream`. Verified:
 397 entries / 81 MB decoded in 4.7 s with no native build. Or re-host the models as `.tar.gz`.
+
+## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
+**Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
+appeared, no consent prompt fired, and nothing said why.
+**Cause:** our `orca-plugin.json` did not satisfy `pluginManifestSchema`. Three faults:
+- `capabilities` were bare strings; the schema is `z.object({ kind: ... }).strict()`
+- `engines: { orca: ">=x.y.z" }` missing — **required**, not optional
+- `pluginApi: 1` missing — **required**
+Also missing `contributes.events`, without which `agent.status.changed` never arrives even with the
+`events:subscribe` capability granted.
+**Instead:** validate the manifest against the host's own parser before trusting it:
+```
+npx tsx validate-manifest.mts /path/to/orca-plugin.json   # imports pluginManifestSchema from the orca clone
+```
+`packages/plugin/src/manifest/manifest.test.ts` now pins the shape in CI so this cannot regress.
+**Worth remembering:** I wrote that manifest from research notes and never parsed it. Reading the
+schema is not the same as running it — the canonical example at `examples/plugins/hello-orca/` was
+sitting right there and would have shown every one of these in ten seconds.
 
 ## P15 — An unmatched emphasis marker was stripped, mangling `_private` identifiers
 **Symptom:** running the pipeline for real, `_flush_buffer()` was spoken as "flush_buffer()".
@@ -84,6 +138,24 @@ own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see
 `npm install` anyway (P5) and must fetch binaries itself, **source from GitHub releases, not npm** —
 then all six platform+arch combos are covered. Those tarballs also contain standalone executables
 (`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
+
+## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
+**Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
+appeared, no consent prompt fired, and nothing said why.
+**Cause:** our `orca-plugin.json` did not satisfy `pluginManifestSchema`. Three faults:
+- `capabilities` were bare strings; the schema is `z.object({ kind: ... }).strict()`
+- `engines: { orca: ">=x.y.z" }` missing — **required**, not optional
+- `pluginApi: 1` missing — **required**
+Also missing `contributes.events`, without which `agent.status.changed` never arrives even with the
+`events:subscribe` capability granted.
+**Instead:** validate the manifest against the host's own parser before trusting it:
+```
+npx tsx validate-manifest.mts /path/to/orca-plugin.json   # imports pluginManifestSchema from the orca clone
+```
+`packages/plugin/src/manifest/manifest.test.ts` now pins the shape in CI so this cannot regress.
+**Worth remembering:** I wrote that manifest from research notes and never parsed it. Reading the
+schema is not the same as running it — the canonical example at `examples/plugins/hello-orca/` was
+sitting right there and would have shown every one of these in ten seconds.
 
 ## P15 — An unmatched emphasis marker was stripped, mangling `_private` identifiers
 **Symptom:** running the pipeline for real, `_flush_buffer()` was spoken as "flush_buffer()".

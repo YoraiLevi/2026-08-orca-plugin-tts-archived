@@ -35,7 +35,7 @@ export default async function activate(ctx: OrcaActivateContext): Promise<void> 
     speech.speak(text)
   }
 
-  host.registerCommand('orca-tts.speakClipboard', async () => {
+  host.registerCommand('read-aloud.speak-clipboard', async () => {
     // A second press stops, rather than overlapping (single-flight, R022).
     if (speech.isSpeaking) { await speech.stop(); return }
     try {
@@ -48,7 +48,7 @@ export default async function activate(ctx: OrcaActivateContext): Promise<void> 
     }
   })
 
-  host.registerCommand('orca-tts.stop', async () => { await speech.stop() })
+  host.registerCommand('read-aloud.stop', async () => { await speech.stop() })
 
   const huddle = new HuddleController({
     speech,
@@ -59,12 +59,12 @@ export default async function activate(ctx: OrcaActivateContext): Promise<void> 
     }
   })
 
-  host.registerCommand('orca-tts.toggleHuddle', () => {
+  host.registerCommand('read-aloud.toggle-huddle', () => {
     const on = huddle.toggle()
     host.notify(`Read Aloud: huddle mode ${on ? 'on' : 'off'}`)
   })
 
-  host.registerCommand('orca-tts.speakLastReply', async () => {
+  host.registerCommand('read-aloud.speak-last-reply', async () => {
     const text = await huddle.lastReply()
     await speakOrExplain(text ?? '', 'Read Aloud: no agent reply to read yet.')
   })

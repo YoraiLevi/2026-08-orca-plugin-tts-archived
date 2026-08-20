@@ -1,26 +1,35 @@
 {
   "manifestVersion": 1,
-  "id": "orca-tts",
+  "id": "read-aloud",
   "publisher": "yorailevi",
   "name": "Read Aloud",
   "version": "0.1.0",
   "description": "Speaks agent replies and your clipboard aloud. Local, cross-platform, no account or API key.",
+  "repository": "https://github.com/YoraiLevi/orca-plugin-tts",
+  "engines": { "orca": ">=1.4.0" },
+  "pluginApi": 1,
   "main": "dist/main.mjs",
-  "capabilities": ["events:subscribe", "storage", "settings:own", "notifications:show"],
   "contributes": {
-    "commands": [
-      { "id": "orca-tts.speakClipboard", "title": "Read Aloud: speak clipboard" },
-      { "id": "orca-tts.speakLastReply", "title": "Read Aloud: speak last agent reply" },
-      { "id": "orca-tts.stop", "title": "Read Aloud: stop speaking" },
-      { "id": "orca-tts.toggleHuddle", "title": "Read Aloud: toggle huddle mode" }
-    ],
-    "keybindings": [
-      { "command": "orca-tts.speakClipboard", "key": "mod+shift+s" },
-      { "command": "orca-tts.stop", "key": "mod+shift+x" },
-      { "command": "orca-tts.toggleHuddle", "key": "mod+shift+h" }
-    ],
     "panels": [
-      { "id": "orca-tts.status", "title": "Read Aloud", "entry": "panel.html" }
+      { "id": "read-aloud", "title": "Read Aloud", "icon": "volume-2", "entry": "panel.html" }
+    ],
+    "commands": [
+      { "id": "read-aloud.speak-clipboard", "title": "Read Aloud: speak clipboard" },
+      { "id": "read-aloud.speak-last-reply", "title": "Read Aloud: speak last agent reply" },
+      { "id": "read-aloud.stop", "title": "Read Aloud: stop speaking" },
+      { "id": "read-aloud.toggle-huddle", "title": "Read Aloud: toggle huddle mode" }
+    ],
+    "events": [{ "on": "agent.status.changed" }],
+    "keybindings": [
+      { "command": "read-aloud.speak-clipboard", "key": "mod+shift+s", "when": "global" },
+      { "command": "read-aloud.stop", "key": "mod+shift+x", "when": "global" },
+      { "command": "read-aloud.toggle-huddle", "key": "mod+shift+h", "when": "global" }
     ]
-  }
+  },
+  "capabilities": [
+    { "kind": "events:subscribe" },
+    { "kind": "storage" },
+    { "kind": "settings:own" },
+    { "kind": "notifications:show" }
+  ]
 }
