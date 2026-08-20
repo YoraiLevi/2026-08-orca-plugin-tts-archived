@@ -48,30 +48,30 @@ value that must move.
 
 ### Tests first — all must fail before any implementation
 
-- [ ] **T020** Test harness: table-driven cases, one named case per construct → `core/src/normalizer/normalize.test.ts`
-- [ ] **T021** [P] Ported-from-buzz cases (must fail)
-  - [ ] T021a Fenced code ``` and ~~~ → "code block omitted"; unclosed fence omits remainder
-  - [ ] T021b Inline code: backticks stripped, content KEPT
-  - [ ] T021c URLs → "link omitted"; trailing `.!?` preserved for prosody
-  - [ ] T021d `**bold**` `__x__` `~~strike~~` markers deleted, text kept
-  - [ ] T021e `_emphasis_` stripped ONLY when wrapping a word
-  - [ ] T021f `snake_case`, `foo_bar()` survive untouched ← the anti-goal case
-  - [ ] T021g Emoji deleted; ASCII emoticons `:)` left alone
-  - [ ] T021h Integers 0–999999 → words; `9:05` → "nine oh five"; decimals left alone
-  - [ ] T021i Whitespace collapsed; result of length ≤1 suppressed entirely
-- [ ] **T022** [P] Our four additions buzz lacks (must fail)
-  - [ ] T022a Headings → pause, not "hash hash Foo"
-  - [ ] T022b List items → sentences
-  - [ ] T022c Tables → announced by row
-  - [ ] T022d File paths → spoken sensibly, not slash-by-slash garbage
-- [ ] **T023** [P] Tool-call noise and system messages produce empty output
-- [ ] **T024** [P] Property test: output contains no residual markdown metacharacters for 500 generated inputs
+- [x] **T020** Test harness: table-driven cases, one named case per construct → `core/src/normalizer/normalize.test.ts`
+- [x] **T021** [P] Ported-from-buzz cases (must fail)
+  - [x] T021a Fenced code ``` and ~~~ → "code block omitted"; unclosed fence omits remainder
+  - [x] T021b Inline code: backticks stripped, content KEPT
+  - [x] T021c URLs → "link omitted"; trailing `.!?` preserved for prosody
+  - [x] T021d `**bold**` `__x__` `~~strike~~` markers deleted, text kept
+  - [x] T021e `_emphasis_` stripped ONLY when wrapping a word
+  - [x] T021f `snake_case`, `foo_bar()` survive untouched ← the anti-goal case
+  - [x] T021g Emoji deleted; ASCII emoticons `:)` left alone
+  - [x] T021h Integers 0–999999 → words; `9:05` → "nine oh five"; decimals left alone
+  - [x] T021i Whitespace collapsed; result of length ≤1 suppressed entirely
+- [x] **T022** [P] Our four additions buzz lacks (must fail)
+  - [x] T022a Headings → pause, not "hash hash Foo"
+  - [x] T022b List items → sentences
+  - [x] T022c Tables → announced by row
+  - [x] T022d File paths → spoken sensibly, not slash-by-slash garbage
+- [x] **T023** [P] Tool-call noise and system messages produce empty output
+- [x] **T024** [P] Property test: output contains no residual markdown metacharacters for 500 generated inputs
 
 ### Then implement until green
 
-- [ ] **T025** Implement 11 stages in fixed order → `core/src/normalizer/index.ts`
-- [ ] **T026** [P] `NormalizeOptions` (verbosity, path style, code-block policy)
-- [ ] **T027** Zero-dependency audit: no imports at all in this module
+- [x] **T025** Implement 11 stages in fixed order → `core/src/normalizer/index.ts`
+- [x] **T026** [P] `NormalizeOptions` (verbosity, path style, code-block policy)
+- [x] **T027** Zero-dependency audit: no imports at all in this module
 
 **Gate M2:** all normalizer tests green; T021f passes (identifiers intact); `pnpm test --filter core` on 3 OSes.
 
