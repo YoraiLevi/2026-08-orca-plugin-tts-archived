@@ -105,7 +105,7 @@ Mechanics that matter:
 
 ### 3.1 `packages/core/` — pure logic, zero dependencies
 
-- `normalizer/` — 11 stages, options object, one exported `normalize(md, opts): string`.
+- `normalizer/` — 15 transforms in a fixed order (2 conditional), options object, one exported `normalize(md, opts): string`. Planned as 11; grew to 15 through M10.
 - `chunker/` — `SentenceBoundaryDetector` with `addText(chunk)` / `finish()`, the boundary ladder, the
   abbreviation table, and the first-sentence-alone flag.
 - `queue/` — generation-tagged playback queue; barge-in clears, voice-switch preserves.
