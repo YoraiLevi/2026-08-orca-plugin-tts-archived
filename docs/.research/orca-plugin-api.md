@@ -41,6 +41,20 @@ Paths are relative to the ORCA repo root.
   and the correlation from the plugin's `paneKey` to a transcript file is an **unsolved gap** — no
   plugin-visible payload carries a sessionId or transcript path.
 
+**On the two new hard requirements.**
+
+- **Cross-platform parity is achievable, and the plugin API is not the obstacle.** The manifest,
+  loader, and path validation are deliberately platform-portable — Windows filename rules are even
+  enforced on macOS. The obstacles are all downstream: voice model caching (a Windows non-ASCII-path
+  bug ORCA already hit), macOS library validation for native modules, a Linux `GLIBCXX_3.4.29`
+  floor, and cross-plugin keybinding conflicts that resolve **differently on macOS than on
+  Windows/Linux**.
+- **The build and install story is unusually thin.** There is no plugin SDK, no CLI, no build step,
+  and no registry. A plugin is a git repo containing runnable ESM; a user installs it by pasting
+  `https://…git#ref` into a settings dialog. **The dev loop has a sharp edge: editing worker code
+  does not reload it** — only a manifest change re-forks the worker. And `execArgv: []` means no
+  debugger can attach.
+
 **Also worth knowing up front:** ORCA already ships a complete first-party *speech-to-text* stack
 (`src/main/speech/`, ~5.7k LOC, local Whisper plus OpenAI) with a dictation UI, a `Mod+E` shortcut,
 and a Voice settings pane — but **zero** text-to-speech. It built voice as main-process code with a
@@ -867,6 +881,232 @@ subscription all work"* (`:1-4`), including an assertion that the panel document
 `examples/` demo has a worker. The plugin system in production use today is far simpler than what a
 TTS plugin needs. INFERRED from the four manifests.
 
+## Cross-platform parity
+
+**Verdict: the plugin API itself is platform-portable by deliberate design. The risk is not the API
+— it is everything a TTS plugin must do *outside* it: voice model caching, native backends, and
+keybinding conflicts.**
+
+### Platforms and distribution
+
+macOS, Windows, and Linux (`README.md:11`). `appId: com.stablyai.orca`, `productName: 'Orca'`
+(`config/electron-builder.config.cjs:61,106`).
+
+| Platform | Artifacts | Install channels |
+|---|---|---|
+| macOS | `dmg` + `zip`, **x64 and arm64** (`electron-builder.config.cjs:440-456`) | Direct download; Homebrew cask `brew install --cask stablyai/orca/orca` (`README.md:221-222`, `Casks/orca.rb`) |
+| Windows | NSIS `orca-windows-setup.exe` (`:355-364`) | Direct download only. **x64 only — no Windows arm64 build.** |
+| Linux | AppImage + deb (declared `:489`); rpm also release-required | Direct download; Arch AUR `stably-orca-bin` (`README.md:224-226`) |
+
+Not present: winget, Chocolatey, MSI, Snap, Flatpak, npm. VERIFIED.
+
+Signing: macOS uses hardened runtime + notarization on release only
+(`electron-builder.config.cjs:394,402`); Windows is signed post-packaging by SignPath (`:318-331`).
+Both apply to **ORCA**, not to plugins — see "Signing and review" in the distribution section:
+plugins are never signed.
+
+**Linux floor:** Ubuntu 20.04 / glibc 2.31, enforced by an `afterPack` gate
+(`docs/reference/linux-glibc-compatibility.md:1-7`). **Directly relevant to us:** the sherpa-onnx
+prebuilt needs `GLIBCXX_3.4.29` (Ubuntu 22.04+) and is exempted only because it loads lazily in the
+speech worker (`docs/reference/linux-glibc-compatibility.md:79-86`). A TTS backend on the same
+runtime inherits that floor — ORCA's own STT already does.
+
+### Where data lives, per OS
+
+Everything hangs off `app.getPath('userData')`, which resolves to `<appData>/Orca`:
+
+| OS | `userData` |
+|---|---|
+| macOS | `~/Library/Application Support/Orca` (confirmed by the cask zap list, `Casks/orca.rb:42`) |
+| Windows | `%APPDATA%\Orca` |
+| Linux | `$XDG_CONFIG_HOME/Orca` → `~/.config/Orca` |
+
+(macOS VERIFIED via the cask; Windows/Linux INFERRED from Electron's documented `appData` defaults.)
+
+The two plugin roots (`src/main/plugins/plugin-discovery.ts:67-73`):
+
+```ts
+export function getUserPluginsDir(userDataPath: string): string {
+  return join(userDataPath, 'plugins')
+}
+export function getPluginsDataDir(userDataPath: string): string {
+  return join(userDataPath, 'plugins-data')
+}
+```
+
+- **Install (immutable, hash-addressed):** `<userData>/plugins/<publisher>.<id>/<hash>/`
+- **Per-plugin data (writable):** `<userData>/plugins-data/<publisher>.<id>/`, holding `storage.json`
+  and `settings.json` (`src/main/plugins/plugin-storage-store.ts:19-36`)
+
+`PluginService` is constructed with a late `app.getPath('userData')`
+(`src/main/index.ts:2804-2805`) — **not** the `getCanonicalUserDataPath()` that other subsystems use
+to dodge an `app.setName()` case-flip hazard on case-sensitive filesystems
+(`src/main/persistence/loading-store/user-data-path.ts:8-9,53-58`). INFERRED: a latent Linux-only
+inconsistency. Not observed failing; worth knowing if plugin data ever appears to vanish.
+
+> **Hard rule for us: never write into the install directory.**
+> `verifyHashAddressedPluginContent` re-hashes the entire tree on refresh and fails on mismatch
+> (`src/main/plugins/plugin-content-integrity.ts:17-31`). Writing a downloaded voice model there
+> breaks the plugin with `content hash mismatch`. Cache goes in `plugins-data/`.
+
+**There is no plugin-facing path API.** The worker is not told the userData path — `init` carries
+only `pluginId`, `pluginRoot`, `mainEntry`, `grantedCapabilities`
+(`src/shared/plugins/plugin-host-protocol.ts:11-20`). And `buildPluginWorkerEnv` gives the worker
+**no `APPDATA`, no `LOCALAPPDATA`, no `XDG_*`** (`src/main/plugins/plugin-worker-env.ts:8-27`).
+INFERRED: we must derive a cache dir from `HOME`/`USERPROFILE` and re-implement Electron's
+per-OS `appData` convention ourselves, or navigate up from `pluginRoot`. Both are fragile. **Flag
+this as a design question, not a solved problem.**
+
+### The STT model cache — our precedent, and its Windows landmine
+
+Default root (`src/main/speech/model-manager.ts:162`):
+
+```ts
+const requestedModelsDir = customModelsDir || join(app.getPath('userData'), 'speech-models')
+```
+
+But on Windows, if that path contains **non-ASCII characters** — a user named `Björn`, or any
+non-Latin username — the cache is relocated
+(`src/main/speech/model-cache-path.ts:46-66`), because:
+
+> *"sherpa-onnx 1.12.x cannot load model files from non-ASCII Windows paths."* (`:62-65`)
+
+The fallback hashes the requested path and relocates under an ASCII shared root — `%PROGRAMDATA%`,
+`%ALLUSERSPROFILE%`, `%PUBLIC%`, `C:\ProgramData` — as
+`<root>\Orca\speech-models\<sha256-prefix-16>` (`:22-44,53-60`), migrating existing files with a
+`.partial` + atomic-rename copy (`:84-86`).
+
+> **If our TTS uses onnxruntime or sherpa-onnx, we hit this identical bug**, and cross-platform
+> parity is a hard requirement. We must mirror this logic. There is an existing regression test to
+> model ours on: `src/main/speech/model-manager-windows-path.test.ts`.
+
+Native addon resolution per platform (`src/main/speech/stt-service.ts:556-577`) is
+`sherpa-onnx-${process.platform}-${process.arch}`, except Windows which is **x64-only**
+(`sherpa-onnx-win-x64`).
+
+### Platform-conditional code in the plugin host — the complete list
+
+`grep 'process.platform|darwin|win32|linux'` over `src/main/plugins/` and `src/shared/plugins/`
+(excluding tests) yields **exactly 6 hits in 4 files**. That is all of it:
+
+1. **`plugin-worker-env.ts:31-51`** — Windows env handling. Keys are looked up case-insensitively
+   *only* on Windows, deliberately not on POSIX where "folding on every platform could promote an
+   attacker-set `path`" (`:36-37`). `SYSTEMROOT` is re-emitted as canonical `SystemRoot` (`:47`).
+   Windows-only allowlist additions (`SYSTEMDRIVE`, `WINDIR`, `COMSPEC`, `PATHEXT`, …) exist because
+   "Windows Node/libuv need these to resolve DLLs and the machine root" (`:19`).
+2. **`plugin-atomic-file-write.ts:32-54`** — Windows-only retry loop on `EPERM`/`EACCES`/`EBUSY`
+   during rename (the antivirus-holds-the-file problem). POSIX throws immediately. Also used for the
+   install publish rename (`plugin-install-staging.ts:196`).
+3. **`plugin-command-registry.ts:58,81`** — cross-plugin keybinding conflict identity is computed
+   for the **running** platform only.
+4. **`plugin-manifest-contribution-validation.ts:73-85`** — within a single manifest, duplicates are
+   checked against **all three** platforms at once.
+
+Everything else in the plugin host is written to be separator- and platform-agnostic **on purpose**:
+
+- Worker entry import: `pathToFileURL(join(pluginRoot, ...mainEntry.split(/[\/]/))).href`, with the
+  stated intent that "a Windows-authored plugin also imports on macOS/Linux and vice versa"
+  (`plugin-host-runtime.ts:78-82`).
+- Artifact resolution splits on both separators (`plugin-artifact-validation.ts:104`).
+- Content hashing sorts by codepoint, not `localeCompare`, because "content addresses must sort
+  identically on macOS, Linux, and Windows", and normalizes `\` to `/`
+  (`plugin-content-hash.ts:31-33,106-107`).
+- **Windows filename rules are enforced on every OS** (`plugin-path-safety.ts:1-24`): forbidden
+  chars `<>:"|?*`, control chars, reserved device names (`con`, `aux`, `nul`, `com1`…), no trailing
+  dot or space. **A file named `aux.wav` or `voice:en.onnx` is rejected on macOS too.** Good — it
+  means a manifest that validates anywhere validates everywhere.
+- `resolvePluginHostEntryPath` redirects into `app.asar.unpacked` via a separator-agnostic string
+  replace (`plugin-host-process.ts:64-71`).
+
+### Keybindings: Windows == Linux, macOS differs
+
+`Mod` survives normalization as a literal token and is resolved at **match** time
+(`src/shared/keybindings.ts:1396-1418`). Resolution (`:2079-2094`, `:1916-1927`):
+
+```ts
+case 'Mod': return platform === 'darwin' ? 'meta' : 'control'
+```
+
+So `Mod+Shift+S` fires on `Cmd+Shift+S` (macOS) and `Ctrl+Shift+S` (Windows *and* Linux).
+`normalizeKeybinding` rejects mixing `Mod` with `Cmd`/`Ctrl` (`:1455-1457`) and requires at least
+one modifier (`:1466-1481`).
+
+> **Rule for us: declare `Mod+` only, never `Cmd+`.** A `Cmd+` binding resolves to `meta` on every
+> platform — physically unreachable on most Windows and Linux keyboards.
+
+**The real parity trap is conflict handling, and it is genuinely asymmetric:**
+
+- *Within our manifest*: rejected if it collides on **any** of darwin/linux/win32
+  (`plugin-manifest-contribution-validation.ts:74-75`) — uniform, safe.
+- *Between installed plugins*: computed on the **running platform only**
+  (`plugin-command-registry.ts:58,81`), and a conflict **disables both plugins**
+  (`:96-110`).
+
+Consequence: our `Mod+K` and another plugin's `Ctrl+K` produce the same identity `Control+K` on
+Windows/Linux — both plugins silently disabled — but different identities on macOS (`Meta+K` vs
+`Control+K`), where both work. **Same installed set, different outcome per OS.** VERIFIED.
+
+### Shipping or downloading native binaries
+
+**Can a plugin ship a native binary?** Technically yes — nothing validates file *kind*. Declared
+artifacts are size- and containment-checked (`plugin-artifact-validation.ts:9-14,97-123`), but
+undeclared files ride along unvalidated; the header says presence checks are "bounded by the
+manifest's declared artifacts" (`:127`). There is no extension allowlist.
+
+**But the tree-wide gate makes it impractical** (`plugin-content-hash.ts`):
+
+- ≤ **2,000** filesystem entries (`:15,45-47`)
+- ≤ **50 MB** total (`:16,57-60`)
+- **Symlinks refused outright** — "installed trees must be self-contained" (`:11-12,48-50`). This
+  kills the `.so.1 → .so.1.2.3` symlink farms shared libraries ship with.
+- Only regular files and directories (`:62-64`)
+
+The exec bit is **not** hashed (`:99-111` hashes path + size + bytes only) and ORCA never chmods
+plugin content (`grep chmod src/main/plugins/` → zero hits). INFERRED: exec bits survive because git
+preserves mode 100755 and `fs.cp` preserves permissions — **not asserted by any test; verify before
+depending on it.**
+
+**No plugin code signing, no signature verification, no quarantine/notarization handling exists**
+(`grep quarantine|xattr src/ config/` → nothing relevant).
+
+> **The macOS library-validation risk, and it is real.** A binary our worker downloads over HTTP
+> gets **no** `com.apple.quarantine` xattr (that is applied by LaunchServices and browsers, not raw
+> sockets), so Gatekeeper will not block *executing* it as a child process. But the plugin worker is
+> a **forked Electron binary** and on macOS inherits the app's signature and entitlements — and
+> `com.apple.security.cs.disable-library-validation` is **absent** from
+> `resources/build/entitlements.mac.plist`. So `dlopen`-ing an unsigned `.node`/`.dylib`
+> **in-process** is expected to fail on a notarized release build, while spawning a separate child
+> process is fine. INFERRED. *A human must verify this on a real notarized build before we choose an
+> in-process native TTS backend.*
+
+**ORCA's own precedent shows what a plugin does not get.** ORCA ships six native units under
+`native/` — Swift for macOS, PowerShell for Windows, Python for Linux
+(`config/electron-builder.config.cjs:339-350,415-436,479-482`) — by compiling per-host in CI
+(`config/scripts/build-native-for-platform.mjs:5-18`, which is a pure host switch and does **not**
+cross-compile), declaring per-platform `extraResources`, and chmod'ing plus code-signing in
+`afterPack`. **A plugin gets none of that:** no build hook, no signing hook, no chmod, no
+per-platform manifest fields.
+
+### What this means for a cross-platform TTS plugin
+
+INFERRED, but forced by the verified constraints above:
+
+1. **Ship JavaScript only.** Download voice models and any native backend at runtime.
+2. **Cache in `plugins-data/`, never the install dir** — or break the content-hash integrity check.
+3. **Mirror the Windows non-ASCII path workaround** if routing through sherpa-onnx/onnxruntime.
+4. **Derive the cache path without env help** — the worker gets no `APPDATA`/`XDG_*`. Unsolved.
+5. **Declare `Mod+` bindings only**, and accept that cross-plugin conflict outcomes differ per OS.
+6. **Prefer a spawned child process over an in-process native module** on macOS, pending the
+   library-validation check.
+7. **Linux users below Ubuntu 22.04** may lack `GLIBCXX_3.4.29` — the same limit that already
+   constrains ORCA's STT.
+8. **Windows is x64-only.** Do not plan a Windows-arm64 voice backend.
+
+The safest cross-platform TTS backend is therefore an **OS-native subprocess** — `say` on macOS,
+PowerShell `System.Speech` on Windows, `spd-say`/`espeak-ng` on Linux — because it needs no
+downloads, no native modules, and no entitlement relief. It costs voice quality and adds a Linux
+dependency that may not be installed. That trade-off belongs in a discussion doc, not here.
+
 ## Plugin build, dev loop, and distribution
 
 ### Building a plugin: there is no build system, and that is the point
@@ -1186,3 +1426,28 @@ Ordered by how badly each could sink the project.
 15. **Storage is far too small for audio.** 256 KB per value, 5 MB total
     (`plugin-host-api.ts:68-70`). Any caching of synthesized speech must go to the worker's own
     `TMPDIR` — which is, again, outside the capability model.
+
+16. **The worker cannot locate its own cache directory.** `init` carries only `pluginId`,
+    `pluginRoot`, `mainEntry`, `grantedCapabilities`
+    (`plugin-host-protocol.ts:11-20`), and the scrubbed env has no `APPDATA` / `LOCALAPPDATA` /
+    `XDG_*` (`plugin-worker-env.ts:8-27`). We must re-derive the per-OS `plugins-data` path from
+    `HOME`/`USERPROFILE`, or walk up from `pluginRoot`. **Both are fragile and neither is a
+    supported contract.** *A human must pick an approach.*
+
+17. **macOS library validation vs. a native TTS backend.** `com.apple.security.cs.disable-library-validation`
+    is absent from the entitlements, and the plugin worker is a forked Electron binary inheriting
+    the app's signature. INFERRED that in-process `dlopen` of an unsigned `.node`/`.dylib` fails on
+    a notarized build while a spawned child process succeeds. *Must be verified empirically on a
+    real release build* — a dev build will not reproduce it, which makes this exactly the kind of
+    thing that ships broken.
+
+18. **Keybinding conflicts resolve differently per OS.** Our binding can be silently disabled on
+    Windows/Linux (alongside the plugin it collides with) while working fine on macOS
+    (`plugin-command-registry.ts:58,81`). Cross-platform QA must cover all three, not just the
+    developer's machine.
+
+19. **Exec-bit survival through install is unverified.** INFERRED from git mode preservation plus
+    `fs.cp` semantics; no test asserts it. Only matters if we ship an in-tree executable, which the
+    50 MB / 2,000-file cap mostly rules out anyway.
+
+20. **Windows is x64-only** — no arm64 ORCA build. Any Windows voice backend must be x64.

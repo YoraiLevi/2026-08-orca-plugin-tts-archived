@@ -30,6 +30,52 @@ node-gyp build *and* has a documented multi-second `end()` hang; `naudiodon` is 
 **Instead:** plan for a bundled Swift audio sidecar or Web Audio in an ORCA renderer. Do not plan
 around an npm audio-output package.
 
+## P8 — `sherpa-onnx` cannot load models from non-ASCII Windows paths
+**Symptom:** TTS works everywhere, then fails for a user named `Björn` or any non-Latin username.
+**Cause:** sherpa-onnx 1.12.x cannot open model files under a non-ASCII Windows path. ORCA already
+hit this for STT and wrote a workaround: `src/main/speech/model-cache-path.ts:46-66` relocates the
+cache under an ASCII shared root (`%PROGRAMDATA%` etc.) as `<root>\Orca\speech-models\<sha256-16>`,
+migrating existing files with `.partial` + atomic rename.
+**Instead:** if we use sherpa-onnx or onnxruntime, **mirror that logic and its regression test**
+(`src/main/speech/model-manager-windows-path.test.ts`). Cross-platform parity is R1; this is the
+exact bug that quietly breaks it.
+
+## P7 — `sherpa-onnx-win-x64` is the only Windows build: **no Windows arm64**
+**Symptom:** the default engine has no binary on Windows-on-ARM.
+**Cause:** ORCA resolves `sherpa-onnx-${process.platform}-${process.arch}` but Windows is x64-only
+(`src/main/speech/stt-service.ts:556-577`).
+**Instead:** this is a real R1 parity gap, not a theoretical one. Windows arm64 must fall back to
+the OS synthesizer (SAPI) and the UI must say why. Decide this in the spec; do not discover it in CI.
+
+## P6 — Editing worker code does NOT hot-reload; the running worker keeps the old code
+**Symptom:** you edit `main.mjs`, the watcher fires, nothing changes, and you debug a stale build
+for an hour.
+**Cause:** `pluginWorkerSpawnSpecsEqual` compares `pluginKey`/`rootDir`/`mainEntry`/
+`manifestRevision`/capabilities — where `manifestRevision` is `JSON.stringify(manifest)`
+(`plugin-worker-spawn-spec.ts:18,23-41`). **Nothing hashes the worker file.** Both restart paths
+skip when specs match (`plugin-worker-manager.ts:89-91`, `plugin-worker-controller.ts:119-131`).
+**Instead:** make the dev build script **bump the manifest `version` on every build**, so
+`manifestRevision` changes and the worker is re-forked. Alternatives: toggle the plugin off/on, or
+wait out the 5-minute idle reap. A TTS plugin is almost entirely worker code, so this is our
+single biggest inner-loop risk.
+
+## P5 — A plugin is a directory that is NEVER built at install time
+**Symptom:** plugin installs, then fails at runtime on a missing import.
+**Cause:** install is `git clone --depth 1` then a recursive copy filtering only `.git`
+(`plugin-git-repository.ts:33-41`, `plugin-install-staging.ts:165-174`). **No `npm install`, no
+compile, ever.** There is no plugin SDK, no scaffolding CLI, no published types package, and the
+`orca` CLI has no plugin subcommand.
+**Instead:** commit runnable ESM on the published ref. Bundle TypeScript + all deps into a single
+`main.mjs` (esbuild/rollup). Must default-export the activate function.
+
+## P4 — Hard caps: 2,000 files and 50 MB per plugin
+**Symptom:** plugin refuses to install after you commit `node_modules`.
+**Cause:** `MAX_PLUGIN_FILES = 2_000`, `MAX_PLUGIN_TOTAL_BYTES = 50 * 1024 * 1024`
+(`plugin-content-hash.ts:15-16`). A typical `node_modules` blows the file count instantly.
+**Instead:** bundle to one file. And **a neural voice model cannot ship inside the plugin** — 50 MB
+is at or below one decent voice. Models download at runtime into a cache **outside** the immutable,
+content-hash-verified install tree, mirroring `src/main/speech/model-manager.ts`.
+
 ## P3 — Spec Kit command names are `speckit-*`, not `speckit.*`
 **Symptom:** docs and the spec-kit README show `/speckit.constitution`; typing that does nothing.
 **Cause:** the Claude Code integration installs them as *skills* under `.claude/skills/speckit-<name>/`,

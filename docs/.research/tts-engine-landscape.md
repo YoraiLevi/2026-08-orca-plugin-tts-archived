@@ -1,7 +1,9 @@
 # TTS engine landscape for the ORCA TTS plugin
 
 **Scout:** TTS-engine research track · **Date:** 2026-08-20 · **Phase:** 0 (research)
-**Target:** macOS (darwin) primary, Linux/Windows stretch. Node/TypeScript host process.
+**Target:** **macOS, Linux and Windows at parity — a hard requirement, not a stretch goal.**
+Six platform+arch combos: darwin-arm64 · darwin-x64 · linux-x64 · linux-arm64 · win32-x64 · win32-arm64.
+Node/TypeScript host process. Public repo with CI on all three OS runners.
 **Driving features:** (1) hotkey speaks selected text, (2) "huddle" mode speaks streaming agent replies.
 
 Every latency number below is labelled `[measured-here]` (run on this machine today),
@@ -22,16 +24,32 @@ April."* → ≈2.0 s of audio. 3–5 repetitions each, spread reported.
 
 ## Recommendation
 
-- **Default engine: Piper (VITS) running inside `sherpa-onnx-node`.** It synthesised a full
-  sentence in **52–65 ms** `[measured-here]` — RTF 0.025, roughly 40× real time — from a plain
-  `npm install` that took **3 seconds and 32 MB with no node-gyp compile** `[measured-here]`. That
-  is 8× faster than the macOS `say` binary can even *start* (see next bullet), and it clears the
-  user's own stated `<500 ms` first-audio bar (`R4.2`) by an order of magnitude.
-- **Do not make macOS `say` the default; keep it only as the never-fails fallback.** `say` with an
-  empty string — pure process spawn, zero synthesis — costs **414 ms median over 5 runs**
-  `[measured-here]`. Every hotkey press pays that. It is the right *degraded* path (`R5.4`: never
-  fail silently) and the right zero-download first-run bridge, but it is the slowest option
-  measured here, not the fastest, and it cannot stream partial audio into a pipe.
+**The headline call, now that parity is a hard requirement: use ONE portable neural engine on all
+three OSes, not a trio of OS-native synths.** Reasoning in [Cross-platform strategy](#cross-platform-strategy);
+the short version is that the OS-native trio is not a trio — macOS has decent voices, Windows fences
+its modern voices off from third-party apps, and a stock Linux box has robotic formant synthesis or
+nothing at all. Shipping that as "the default" means the default sounds completely different on each
+of the three machines, which is exactly what the requirement forbids.
+
+- **Default engine: Piper (VITS) running inside `sherpa-onnx-node`, on every platform.** It
+  synthesised a full sentence in **52–65 ms** `[measured-here]` — RTF 0.025, ~40× real time — and
+  `npm install sherpa-onnx-node` took **3 seconds / 32 MB / zero node-gyp** `[measured-here]`. It
+  clears the user's own `<500 ms` first-audio bar (`R4.2`) by an order of magnitude, and it is the
+  same engine, same voice, same latency profile on all three OSes — which is the requirement.
+- **The install story is portable because there is no compile step anywhere.**
+  `sherpa-onnx-node`'s `package.json` has **no `gypfile`, no `binary` field and no install script**
+  `[measured-here]`; it is pure `optionalDependencies` onto prebuilt platform packages. Verified
+  present on npm at 1.13.6: `darwin-arm64` (33 MB), `darwin-x64` (37 MB), `linux-x64` (33 MB),
+  `linux-arm64` (40 MB), `win-x64` (23 MB), `win-ia32` (20 MB) `[measured-here]`.
+- **⚠ The one gap: `sherpa-onnx-win-arm64` does not exist** `[measured-here]`. Five of the six
+  target combos are covered natively; Windows-on-ARM is not. Windows 11 on ARM emulates x64, so
+  `win-x64` will probably run there — **unverified**, and it will be slower. This is the single
+  open risk in the recommendation and needs a real test on a Surface/Snapdragon device.
+- **OS-native synths are the per-OS fallback chain, never the default.** They are the honest answer
+  to `R5.4` ("degrades usefully… never a silent failure") and the right bridge while the model
+  downloads on first run. But macOS `say` with an **empty string** — zero synthesis — costs
+  **414 ms median over 5 runs** `[measured-here]`, 8× Piper's entire synthesis, and it cannot stream
+  into a pipe at all.
 - **Upgrade 1 — Kyutai Pocket TTS**, also via `sherpa-onnx-node`: **210–278 ms per sentence**
   `[measured-here]`, 96 MB int8, far more natural than Piper, with voice cloning from a reference
   clip. **Licence landmine:** the ONNX export sherpa ships is marked *"It is for non-commercial"*
@@ -46,6 +64,9 @@ April."* → ≈2.0 s of audio. 3–5 repetitions each, spread reported.
   (wrong codepath?)" report in [hexgrad/kokoro#291](https://github.com/hexgrad/kokoro/issues/291).
   This settles open question 4 in the user's own requirements issue, which asked for exactly this
   comparison "on measurement, not reputation": **Piper, by 16×.**
+- **Model files are platform-neutral, so first-run download is one artifact for six platforms.**
+  The ONNX weights plus the shared `espeak-ng-data` phonemiser tables (**18 MB, 355 files**
+  `[measured-here]`) are plain data. One 67 MB voice download serves every OS and arch.
 - **One dependency covers TTS *and* the whole future STT/barge-in story.** `sherpa-onnx-node`
   exports `OfflineTts`, `OnlineRecognizer` (streaming ASR), `OfflineRecognizer`, `Vad`,
   `KeywordSpotter` and `CircularBuffer` from the same prebuilt binary `[measured-here]`. Choosing
