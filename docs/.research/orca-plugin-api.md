@@ -961,10 +961,27 @@ What actually reloads:
 The reason is the spawn-spec equality check. `pluginWorkerSpawnSpecsEqual` compares
 `pluginKey`, `rootDir`, `mainEntry`, `manifestRevision`, and capabilities
 (`src/main/plugins/plugin-worker-spawn-spec.ts:23-41`), where `manifestRevision` is
-`JSON.stringify(plugin.manifest)` (`:18`) — **the manifest, not the code**. `ensureActive` returns
-the existing handle whenever the specs match (`src/main/plugins/plugin-worker-manager.ts:89-91`).
+`JSON.stringify(plugin.manifest)` (`:18`) — **the manifest, not the code**. Nothing in the spec
+hashes the worker file's bytes or mtime.
+
+This gates **both** paths that could have restarted the worker:
+
+- `PluginWorkerManager.ensureActive` returns the existing handle when specs match
+  (`src/main/plugins/plugin-worker-manager.ts:89-91`).
+- `PluginWorkerController.reconcile` — which the dev watcher's refresh ultimately drives
+  (`plugin-service.ts:171-174`) — skips deactivation entirely when specs match
+  (`src/main/plugins/plugin-worker-controller.ts:119-131`):
+
+```ts
+const next = nextSpecs.get(pluginKey)
+if (next && pluginWorkerSpawnSpecsEqual(spec, next)) {
+  continue
+}
+```
+
 The comment at `plugin-worker-spawn-spec.ts:16-17` confirms the intent: the manifest is included so
-"hot reload cannot reuse a worker with stale *contributions*" — contributions, not code.
+"hot reload cannot reuse a worker with stale *contributions*" — contributions, not code. **The file
+watcher fires, the refresh runs, and the worker is deliberately left alone.**
 
 **Workarounds for a worker-code edit (INFERRED from the mechanism):**
 - Touch the manifest (bump `version`) to change `manifestRevision` and force a re-fork.
