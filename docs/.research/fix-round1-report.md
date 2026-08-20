@@ -260,6 +260,140 @@ Two things I could not settle at all from here:
   cannot exercise rungs 3–5; it can only exercise the pure command builder and the failure path,
   which is what the new tests do.
 
+## Round 2 — the two leads from the design round
+
+Both were run down against upstream source. **Neither opens a capture path, and one of them is a
+trap.** Everything here is DOCUMENTED (upstream source at `master`, `file:line` given); nothing in
+this section was executed, because it needs Linux.
+
+### Lead 1 — `espeak-ng --stdout`: do NOT adopt it in the current architecture
+
+The flag exists and does what the help text says. But the WAV it writes is malformed in a way that
+matters to us, and this is visible in `espeak-ng/espeak-ng` `src/espeak-ng.c`:
+
+```c
+static int OpenWavFile(char *path, int rate) {
+    static const unsigned char wave_hdr[44] = {
+        'R','I','F','F', 0x24,0xf0,0xff,0x7f, 'W','A','V','E', ...   // RIFF size 0x7ffff024
+        ...                                   0x00,0xf0,0xff,0x7f };  // data size 0x7ffff000
+    if (strcmp(path, "stdout") == 0) { ... f_wavfile = stdout; }      // :224-229
+    fwrite(wave_hdr, 1, 24, f_wavfile); ...                           // :239-242
+}
+static void CloseWavFile() {
+    if ((f_wavfile == NULL) || (f_wavfile == stdout)) return;         // :250  <-- early return
+    ... fseek(f_wavfile, 4,  SEEK_SET); Write4Bytes(f_wavfile, pos - 8);   // :256-257
+    ... fseek(f_wavfile, 40, SEEK_SET); Write4Bytes(f_wavfile, pos - 44);  // :259-260
+}
+```
+
+`--stdout` writes the header **template** and then returns early from `CloseWavFile`, so the RIFF
+and data lengths are **never backpatched** — every `--stdout` stream declares roughly **2 GB of
+audio**. `-w <file>` is seekable, so it does backpatch them and produces a correct WAV.
+
+We hand complete WAV bytes to a sink today and, per P9/E6e, to `decodeAudioData` in a renderer
+later. A data chunk claiming 2 GB is a decoder problem, not a saved syscall. **So the invocation we
+document stays `-w <file>`.** `--stdout` becomes the right call only for a streaming consumer that
+ignores the declared lengths — that is an M9 change, and it needs its own header fixup (patch the
+two length fields, or strip the 44-byte header and treat the rest as raw `LEI16@22050`).
+
+This is the same shape as P10 (`say -o /dev/stdout` emits no bytes because the CAF/WAVE writers
+need a seekable file): **on both platforms the file-writing path and the streaming path are not the
+same path.** Recorded as P29 so the next person to try to remove the temp file finds it first.
+
+`AVSpeechSynthesizer.write(_:toBufferCallback:)` on macOS is real and is the right long-term
+answer there, but it is a Swift API — it needs the bundled sidecar HANDOFF already contemplates,
+not a flag change. Out of scope here.
+
+**Probe that settles it in one command** (Linux):
+```
+espeak-ng --stdout "one two three" > /tmp/s.wav &&   python3 -c "import struct,sys;d=open('/tmp/s.wav','rb').read();print('declared riff',struct.unpack('<I',d[4:8])[0],'declared data',struct.unpack('<I',d[40:44])[0],'actual bytes',len(d))"
+# expect: declared ~2147479588 / ~2147479552, actual a few tens of kB
+espeak-ng -w /tmp/f.wav "one two three" && python3 -c "...same..."   # expect: declared == actual-8 / actual-44
+```
+
+### Lead 2 — the SSIP socket: richer than the CLI, still no bytes
+
+The lead is right that SSIP exposes more than `spd-say`, and wrong that it might expose audio.
+The complete top-level verb list, `speechd` `src/server/parse.c:98-110` plus `:128`:
+
+```
+set · history · stop · cancel · pause · resume · sound_icon · char · key · list · get · help ·
+block · speak · bye/quit
+```
+
+There is **no audio-retrieval verb of any kind**. `SET` (`:424-680`) accepts priority, language,
+synthesis_voice, client_name, rate, pitch, pitch_range, volume, voice_type, punctuation,
+output_module, cap_let_recogn, pause_context, notification — and **no audio-output parameter**, so
+audio routing is daemon/module configuration only and is not settable per connection.
+
+I then closed the one route that was still theoretically open. speech-dispatcher's audio plugins
+are `spd_alsa.so`, `spd_libao.so`, `spd_oss.so`, `spd_pulse.so`, and libao *does* have file drivers
+(`wav`, `raw`, `au`), so "set `AudioOutputMethod libao` and point `~/.libao` at the wav driver"
+looks plausible. It cannot work: `src/audio/libao.c:75` calls **`ao_open_live()`**, and libao's file
+drivers are reachable only through `ao_open_file()`. A live-open against a file driver fails.
+`src/modules/module_utils.c` `module_audio_init()` confirms the same list and explicitly rejects
+`"server"` with *"server audio is not supported"*.
+
+`sd_generic` is shipped and can run an arbitrary command from a `.conf`, which is the only
+user-reachable escape hatch — but a generic module's command is itself a synthesizer, so it needs a
+synthesizer we do not have. It is not a capture path.
+
+**What SSIP would genuinely buy us, if we ever want it:** `PAUSE`/`RESUME` (which `spd-say` cannot
+do at all), index marks via SSML for word-level progress, and per-connection voice/rate/pitch
+without a process spawn per utterance. That is a real upgrade to the floor's *control*, and zero
+help to its *architecture*.
+
+**Probe that settles it in one command** (Linux):
+```
+printf 'SET SELF CLIENT_NAME orca:tts:probe\r\nHELP\r\nQUIT\r\n' \
+  | socat - UNIX-CONNECT:"${XDG_RUNTIME_DIR}/speech-dispatcher/speechd.sock"
+# expect: the verb list above, and nothing resembling an audio/capture command
+```
+
+### The design finding: our provider seam is wrong for Linux
+
+This is the part that outlives the bug fix, and it should go to the design round rather than be
+solved here.
+
+Our contract is **"the provider produces audio, the client plays it"** (R023, and R5.2 in the
+user's own spec: *"playback belongs to the client, not the synthesis service"*). Speech-dispatcher's
+contract is the exact inverse: **"I speak; you do not touch the audio."** Those are not reconcilable
+by any flag, and the evidence above says the second contract is the *only* one available on a stock
+Ubuntu desktop.
+
+Three concrete consequences, none of which the current code models:
+
+1. **`cancel()` is not two-sided on this rung, it is two-*process*.** Killing our client leaves the
+   daemon speaking. The fix in this commit — also issuing `spd-say --cancel` — works, but it is a
+   *global* cancel: it cancels every message that client sent, and via SSIP `CANCEL ALL` would
+   cancel other applications' speech too. A screen reader sharing the daemon is a real scenario on
+   this exact desktop (`orca` is in the manifest). Cancel semantics need a design decision, not a
+   flag.
+2. **`PlaybackQueue` has nothing to schedule.** Our pacing, our queue depth, our barge-in flush and
+   the ~970 ms inter-chunk gap all live in a layer that this rung bypasses entirely. The rung is
+   sequenced only by `--wait` blocking. Any timing the Voice Lab tunes on macOS means nothing here.
+3. **`ProviderCapabilities` cannot express it.** There is no `ownsPlayback` flag, so a caller cannot
+   tell that `generate()` will yield zero chunks *and* that this is success rather than failure.
+   Today that distinction is carried only by a comment and by `notify()`.
+
+**The shape of the answer, for the design round to weigh:** either `TtsProvider` grows an explicit
+`ownsPlayback: true` rung (honest, and forces every caller to handle both), or Linux gets a
+*separate provider* (`SpeechDispatcherProvider`) selected by the registry, so `OsSynthProvider`
+keeps the one clean contract and the exception is visible in the type system rather than inside a
+branch. I did not choose between them; both change the seam, and that is a design decision.
+
+### The honest bottom line
+
+**A stock Ubuntu 24.04 desktop cannot produce a captured WAV without installing a package.** There
+is no second synthesizer on the image, speech-dispatcher has no file output at any layer, and its
+one file-capable plugin is opened in live mode. What the image *can* do is speak, through
+speech-dispatcher, on a rung where the system owns the audio.
+
+So the shipped behaviour is: use `espeak-ng` when it is there; speak through speech-dispatcher when
+it is not; and when neither exists, fail **loudly** with the binary name and
+`sudo apt install espeak-ng`. That last outcome is not a fallback we are embarrassed by — it is the
+correct end of the ladder, and it is now the only one that says so out loud.
+
 ## Notes for whoever picks this up
 
 - `docs/.research/pitfalls-pending.md` (written by another agent, staged to avoid the P24 collision)
@@ -271,3 +405,6 @@ Two things I could not settle at all from here:
   Small, real, not in my brief — left alone deliberately.
 - `expandNumbers` is still one flag driving two behaviours (H16). Untouched; it should be split
   before M12 freezes the settings schema.
+- **P29** records the `--stdout` trap. Anyone optimizing the temp file away needs to read it first.
+- The provider-seam question in "Round 2" is the one item here that is design work, not a fix. It
+  belongs in `docs/.discussion/`, and I deliberately did not write there — other agents are.

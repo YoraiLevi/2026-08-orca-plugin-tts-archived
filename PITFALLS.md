@@ -6,6 +6,31 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P29 — `espeak-ng --stdout` emits a WAV that claims 2 GB, and nothing ever fixes it
+**Symptom:** you remove the `mkdtemp` -> synthesize-to-file -> `readFile` -> `rm` round trip by
+switching to `--stdout`, the audio still plays through `aplay`, and later `decodeAudioData` in a
+renderer rejects or mis-decodes the same bytes. The saving was real and the regression is silent
+until it reaches a strict decoder.
+**Cause:** `espeak-ng/espeak-ng` `src/espeak-ng.c` writes a static 44-byte header template whose
+RIFF size is `0x7ffff024` and data size `0x7ffff000` (`:211-215`), then backpatches both with
+`fseek` when the file is closed (`:256-260`) — except `CloseWavFile()` **returns early when the
+output is stdout** (`:250`). A pipe is not seekable, so the lengths stay at ~2 GB forever. With
+`-w <file>` they are corrected.
+**Instead:** keep `-w <file>` while we hand whole WAVs to a sink or a decoder. `--stdout` is correct
+only for a *streaming* consumer that ignores the declared lengths, and even then patch the two
+length fields or strip the 44-byte header and treat the rest as raw `LEI16@22050`.
+**Verify by effect:**
+```
+espeak-ng --stdout "one two three" > /tmp/s.wav
+python3 -c "import struct;d=open('/tmp/s.wav','rb').read();print(struct.unpack('<I',d[4:8])[0], struct.unpack('<I',d[40:44])[0], len(d))"
+# stdout: ~2147479588 ~2147479552 <a few tens of kB>   |   -w file: actual-8 actual-44 actual
+```
+**Worth remembering:** this is P10's twin on the other platform — macOS `say -o /dev/stdout` emits
+no bytes at all because its writers need a seekable file. **On every OS-native synthesizer we have
+looked at, the file path and the stream path are not the same path**, and the stream path is always
+the one with the caveat. Assume that for the next engine too, and check the header before trusting
+a pipe.
+
 ## P28 — Voice names do not port across platforms, and there is zero overlap
 **Symptom:** a persisted voice preference is meaningless on another machine, and a design sized on
 one platform collapses on another.

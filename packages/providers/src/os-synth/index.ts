@@ -80,6 +80,22 @@ export class OsSynthTimeoutError extends Error {
  *   In this mode the provider yields no audio and speech-dispatcher owns playback — a deliberate,
  *   announced exception to R023, taken because silence is worse for assistive tech.
  *
+ * DO NOT "optimize" the espeak-ng rung to `--stdout` to skip the temp file. `--stdout` writes the
+ * 44-byte header template verbatim — RIFF size 0x7ffff024, data size 0x7ffff000, ~2 GB — and
+ * `CloseWavFile()` returns early for stdout (`espeak-ng/espeak-ng` `src/espeak-ng.c:250`), so those
+ * lengths are NEVER backpatched. `-w <file>` does backpatch them (`:256-260`). We hand complete WAV
+ * bytes to a sink and, later, to `decodeAudioData`; a data chunk claiming 2 GB is a decoder
+ * problem, not a saved syscall. `--stdout` becomes correct only for a streaming consumer that
+ * ignores the declared lengths — that is an M9 change, with its own header fixup.
+ *
+ * The speech-dispatcher SSIP socket was evaluated as a richer alternative to the spd-say CLI and
+ * gives no audio either: the full SSIP verb list is set/history/stop/cancel/pause/resume/
+ * sound_icon/char/key/list/get/help/block/speak/quit (`speechd` `src/server/parse.c:98-110`) with
+ * no audio-retrieval verb, and `SET` has no audio-output parameter (`:424-680`). The one remaining
+ * theoretical capture route — point the libao plugin at libao's wav driver — is closed at the
+ * source: `src/audio/libao.c:75` calls `ao_open_live()`, which cannot open a file driver.
+ * SSIP is still worth having for PAUSE/RESUME and index marks; it is not a way to get bytes.
+ *
  * Probes that need a real Linux box (cannot be run from macOS):
  *   command -v espeak-ng espeak spd-say
  *   espeak-ng -w /tmp/a.wav -s 260 "one two three" && ls -l /tmp/a.wav
