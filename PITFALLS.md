@@ -6,21 +6,19 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
-## P20 — Speaking on the `done` edge reads the PREVIOUS reply
-**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
-spoken. Consistently one behind.
-**Cause:** two faults compounding.
-1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
-   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
-   the previous turn.
-2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
-   the dedup set was empty, so already-spoken replies looked new again.
-**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
-and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
-event. Persist spoken ids to plugin storage, bounded to 300.
-**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
-readable". Anywhere we react to a state change by reading a file someone else writes, watch the
-file — the event only says when to start looking.
+## P24 — `str.replace` duplicated every pitfall in this very file
+**Symptom:** `PITFALLS.md` held **62 entries where 24 existed** — every entry from P13 up repeated
+three or four times. Nobody noticed for hours because the file is only ever appended to and read
+from the top.
+**Cause:** each new pitfall was inserted with `t.replace('## P22 —', new + '## P22 —')`. Python's
+`str.replace` replaces **every** occurrence, not the first. Once one duplicate existed, each later
+insert multiplied all of them.
+**Instead:** pass a count — `t.replace(old, new, 1)` — or split on the first index. And **verify by
+effect**: `grep -c '^## P[0-9]' PITFALLS.md` should equal the highest number plus one. It did not,
+and a wrong count nearly went into a compaction document as fact.
+**Worth remembering:** the memory files are the one thing a fresh agent trusts completely. A silent
+corruption there is worse than a bug in the product, because everything downstream is derived from
+it. Check the count whenever you write to them.
 
 ## P23 — Tuning speech by ear over a chat loop does not converge
 **Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
@@ -57,6 +55,22 @@ decision — it was an accident of having one caller when it was written.
 **Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
 the newest and drops the oldest so a fast agent can never block. Documented in the README, because
 "what happens if it is already talking" is the first thing a user asks.
+
+## P20 — Speaking on the `done` edge reads the PREVIOUS reply
+**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
+spoken. Consistently one behind.
+**Cause:** two faults compounding.
+1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
+   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
+   the previous turn.
+2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
+   the dedup set was empty, so already-spoken replies looked new again.
+**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
+and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
+event. Persist spoken ids to plugin storage, bounded to 300.
+**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
+readable". Anywhere we react to a state change by reading a file someone else writes, watch the
+file — the event only says when to start looking.
 
 ## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
 **Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
@@ -124,129 +138,6 @@ Actions runner there is **no speech stack at all** (`actions/runner-images` has 
 labelled fallback. And do not let "but macOS `say` is pretty good" argue for native-first — the same
 argument fails identically on the other two. Verified 2026-08-20.
 
-## P20 — Speaking on the `done` edge reads the PREVIOUS reply
-**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
-spoken. Consistently one behind.
-**Cause:** two faults compounding.
-1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
-   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
-   the previous turn.
-2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
-   the dedup set was empty, so already-spoken replies looked new again.
-**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
-and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
-event. Persist spoken ids to plugin storage, bounded to 300.
-**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
-readable". Anywhere we react to a state change by reading a file someone else writes, watch the
-file — the event only says when to start looking.
-
-## P23 — Tuning speech by ear over a chat loop does not converge
-**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
-a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
-**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
-is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
-**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
-*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
-**Worth remembering:** the same shape applies to anything judged by perception rather than
-correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
-
-## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
-**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
-read many of its replies and not a single one… this is really confusing what it is even reading."*
-**Cause:** three faults compounding.
-1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
-   busy session stole the audio mid-reply.
-2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
-   "already primed", so every reply in it counted as fresh and the whole history was read out.
-3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
-   for — with no signal.
-**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
-every utterance with its session; announce switches aloud; tell the user when replies were skipped;
-and add a skip control so the wrong thing can always be abandoned.
-**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
-worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
-must say *whose* words these are before speaking them.
-
-## P21 — One speak() mode cannot serve both callers
-**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
-**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
-*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
-decision — it was an accident of having one caller when it was written.
-**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
-the newest and drops the oldest so a fast agent can never block. Documented in the README, because
-"what happens if it is already talking" is the first thing a user asks.
-
-## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
-**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
-never fires. Nothing in the manifest or the build warns you.
-**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
-time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
-(`src/shared/keybindings.ts`).
-**Instead:** pick from the free set and pin it in a test.
-`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
-commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
-ORCA version:
-```
-grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
-```
-Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
-**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
-cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
-keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
-
-## P18 — Guessed host API names + a defensive adapter = silent no-op
-**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
-*"Could not run the plugin command."* The hotkey does nothing at all.
-**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
-`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
-`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
-`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
-**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
-robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
-Zero commands were registered and the plugin reported itself ready.
-**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
-the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
-fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
-in CI, asserting every manifest-declared command is actually registered.
-**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
-harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
-help either: they mocked the same invented shape they were written against. Only running the real
-artifact against the real contract catches this.
-
-## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
-**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
-"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
-itself parses fine against `pluginManifestSchema`.
-**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
-`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
-resolves realpaths and **rejects any artifact escaping the plugin root**
-(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
-One escaping symlink invalidates the plugin, and the message does not say which file.
-**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
-**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
-no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
-**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
-shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
-artifact and adding back, rather than re-reading the manifest.
-
-## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
-**Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
-appeared, no consent prompt fired, and nothing said why.
-**Cause:** our `orca-plugin.json` did not satisfy `pluginManifestSchema`. Three faults:
-- `capabilities` were bare strings; the schema is `z.object({ kind: ... }).strict()`
-- `engines: { orca: ">=x.y.z" }` missing — **required**, not optional
-- `pluginApi: 1` missing — **required**
-Also missing `contributes.events`, without which `agent.status.changed` never arrives even with the
-`events:subscribe` capability granted.
-**Instead:** validate the manifest against the host's own parser before trusting it:
-```
-npx tsx validate-manifest.mts /path/to/orca-plugin.json   # imports pluginManifestSchema from the orca clone
-```
-`packages/plugin/src/manifest/manifest.test.ts` now pins the shape in CI so this cannot regress.
-**Worth remembering:** I wrote that manifest from research notes and never parsed it. Reading the
-schema is not the same as running it — the canonical example at `examples/plugins/hello-orca/` was
-sitting right there and would have shown every one of these in ten seconds.
-
 ## P15 — Bare Piper `.onnx` files from Hugging Face do not work with sherpa-onnx
 **Symptom:** `'sample_rate' does not exist in the metadata` at model load.
 **Cause:** `rhasspy/piper-voices` serves `.onnx`/`.onnx.json` directly over HTTP 200, which looks
@@ -255,298 +146,12 @@ ONNX metadata *and* a `tokens.txt` the HF files do not carry.
 **Instead:** download sherpa's release assets, or convert and re-host the models yourself. Verified
 2026-08-20.
 
-## P20 — Speaking on the `done` edge reads the PREVIOUS reply
-**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
-spoken. Consistently one behind.
-**Cause:** two faults compounding.
-1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
-   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
-   the previous turn.
-2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
-   the dedup set was empty, so already-spoken replies looked new again.
-**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
-and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
-event. Persist spoken ids to plugin storage, bounded to 300.
-**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
-readable". Anywhere we react to a state change by reading a file someone else writes, watch the
-file — the event only says when to start looking.
-
-## P23 — Tuning speech by ear over a chat loop does not converge
-**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
-a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
-**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
-is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
-**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
-*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
-**Worth remembering:** the same shape applies to anything judged by perception rather than
-correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
-
-## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
-**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
-read many of its replies and not a single one… this is really confusing what it is even reading."*
-**Cause:** three faults compounding.
-1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
-   busy session stole the audio mid-reply.
-2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
-   "already primed", so every reply in it counted as fresh and the whole history was read out.
-3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
-   for — with no signal.
-**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
-every utterance with its session; announce switches aloud; tell the user when replies were skipped;
-and add a skip control so the wrong thing can always be abandoned.
-**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
-worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
-must say *whose* words these are before speaking them.
-
-## P21 — One speak() mode cannot serve both callers
-**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
-**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
-*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
-decision — it was an accident of having one caller when it was written.
-**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
-the newest and drops the oldest so a fast agent can never block. Documented in the README, because
-"what happens if it is already talking" is the first thing a user asks.
-
-## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
-**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
-never fires. Nothing in the manifest or the build warns you.
-**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
-time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
-(`src/shared/keybindings.ts`).
-**Instead:** pick from the free set and pin it in a test.
-`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
-commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
-ORCA version:
-```
-grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
-```
-Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
-**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
-cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
-keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
-
-## P18 — Guessed host API names + a defensive adapter = silent no-op
-**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
-*"Could not run the plugin command."* The hotkey does nothing at all.
-**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
-`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
-`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
-`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
-**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
-robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
-Zero commands were registered and the plugin reported itself ready.
-**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
-the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
-fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
-in CI, asserting every manifest-declared command is actually registered.
-**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
-harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
-help either: they mocked the same invented shape they were written against. Only running the real
-artifact against the real contract catches this.
-
-## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
-**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
-"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
-itself parses fine against `pluginManifestSchema`.
-**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
-`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
-resolves realpaths and **rejects any artifact escaping the plugin root**
-(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
-One escaping symlink invalidates the plugin, and the message does not say which file.
-**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
-**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
-no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
-**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
-shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
-artifact and adding back, rather than re-reading the manifest.
-
-## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
-**Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
-appeared, no consent prompt fired, and nothing said why.
-**Cause:** our `orca-plugin.json` did not satisfy `pluginManifestSchema`. Three faults:
-- `capabilities` were bare strings; the schema is `z.object({ kind: ... }).strict()`
-- `engines: { orca: ">=x.y.z" }` missing — **required**, not optional
-- `pluginApi: 1` missing — **required**
-Also missing `contributes.events`, without which `agent.status.changed` never arrives even with the
-`events:subscribe` capability granted.
-**Instead:** validate the manifest against the host's own parser before trusting it:
-```
-npx tsx validate-manifest.mts /path/to/orca-plugin.json   # imports pluginManifestSchema from the orca clone
-```
-`packages/plugin/src/manifest/manifest.test.ts` now pins the shape in CI so this cannot regress.
-**Worth remembering:** I wrote that manifest from research notes and never parsed it. Reading the
-schema is not the same as running it — the canonical example at `examples/plugins/hello-orca/` was
-sitting right there and would have shown every one of these in ten seconds.
-
-## P15 — An unmatched emphasis marker was stripped, mangling `_private` identifiers
-**Symptom:** running the pipeline for real, `_flush_buffer()` was spoken as "flush_buffer()".
-Not caught by 106 passing tests, because every test case used *matched* markers.
-**Cause:** the marker stripper decided "is this an opener?" and "is this a closer?" independently,
-so a lone leading `_` looked like an opener and was dropped with no partner. Python privates are
-everywhere in agent replies.
-**Instead:** markers are now stripped only as a MATCHED PAIR within one line. Five regression cases
-cover leading, trailing, and unmatched markers.
-**Worth remembering:** the test suite was table-driven and thorough, and still only tested the
-shapes I thought of. Running the actual thing and listening found it in one pass. Exercise the real
-pipeline, not only its units.
-
 ## P14 — Node cannot decompress bzip2, and sherpa ships models as `.tar.bz2`
 **Symptom:** first-run model download works on macOS/Linux (shell out to `tar xj`) and dies on Windows.
 **Cause:** Node 26's `zlib` exposes gzip, brotli and zstd — **no bzip2**. `tar` with bz2 support is
 not guaranteed on Windows.
 **Instead:** pure-JS `unbzip2-stream` (1.4.3, `gypfile: false`) piped into `tar-stream`. Verified:
 397 entries / 81 MB decoded in 4.7 s with no native build. Or re-host the models as `.tar.gz`.
-
-## P20 — Speaking on the `done` edge reads the PREVIOUS reply
-**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
-spoken. Consistently one behind.
-**Cause:** two faults compounding.
-1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
-   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
-   the previous turn.
-2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
-   the dedup set was empty, so already-spoken replies looked new again.
-**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
-and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
-event. Persist spoken ids to plugin storage, bounded to 300.
-**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
-readable". Anywhere we react to a state change by reading a file someone else writes, watch the
-file — the event only says when to start looking.
-
-## P23 — Tuning speech by ear over a chat loop does not converge
-**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
-a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
-**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
-is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
-**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
-*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
-**Worth remembering:** the same shape applies to anything judged by perception rather than
-correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
-
-## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
-**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
-read many of its replies and not a single one… this is really confusing what it is even reading."*
-**Cause:** three faults compounding.
-1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
-   busy session stole the audio mid-reply.
-2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
-   "already primed", so every reply in it counted as fresh and the whole history was read out.
-3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
-   for — with no signal.
-**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
-every utterance with its session; announce switches aloud; tell the user when replies were skipped;
-and add a skip control so the wrong thing can always be abandoned.
-**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
-worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
-must say *whose* words these are before speaking them.
-
-## P21 — One speak() mode cannot serve both callers
-**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
-**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
-*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
-decision — it was an accident of having one caller when it was written.
-**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
-the newest and drops the oldest so a fast agent can never block. Documented in the README, because
-"what happens if it is already talking" is the first thing a user asks.
-
-## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
-**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
-never fires. Nothing in the manifest or the build warns you.
-**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
-time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
-(`src/shared/keybindings.ts`).
-**Instead:** pick from the free set and pin it in a test.
-`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
-commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
-ORCA version:
-```
-grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
-```
-Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
-**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
-cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
-keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
-
-## P18 — Guessed host API names + a defensive adapter = silent no-op
-**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
-*"Could not run the plugin command."* The hotkey does nothing at all.
-**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
-`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
-`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
-`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
-**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
-robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
-Zero commands were registered and the plugin reported itself ready.
-**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
-the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
-fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
-in CI, asserting every manifest-declared command is actually registered.
-**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
-harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
-help either: they mocked the same invented shape they were written against. Only running the real
-artifact against the real contract catches this.
-
-## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
-**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
-"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
-itself parses fine against `pluginManifestSchema`.
-**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
-`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
-resolves realpaths and **rejects any artifact escaping the plugin root**
-(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
-One escaping symlink invalidates the plugin, and the message does not say which file.
-**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
-**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
-no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
-**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
-shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
-artifact and adding back, rather than re-reading the manifest.
-
-## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
-**Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
-appeared, no consent prompt fired, and nothing said why.
-**Cause:** our `orca-plugin.json` did not satisfy `pluginManifestSchema`. Three faults:
-- `capabilities` were bare strings; the schema is `z.object({ kind: ... }).strict()`
-- `engines: { orca: ">=x.y.z" }` missing — **required**, not optional
-- `pluginApi: 1` missing — **required**
-Also missing `contributes.events`, without which `agent.status.changed` never arrives even with the
-`events:subscribe` capability granted.
-**Instead:** validate the manifest against the host's own parser before trusting it:
-```
-npx tsx validate-manifest.mts /path/to/orca-plugin.json   # imports pluginManifestSchema from the orca clone
-```
-`packages/plugin/src/manifest/manifest.test.ts` now pins the shape in CI so this cannot regress.
-**Worth remembering:** I wrote that manifest from research notes and never parsed it. Reading the
-schema is not the same as running it — the canonical example at `examples/plugins/hello-orca/` was
-sitting right there and would have shown every one of these in ten seconds.
-
-## P15 — An unmatched emphasis marker was stripped, mangling `_private` identifiers
-**Symptom:** running the pipeline for real, `_flush_buffer()` was spoken as "flush_buffer()".
-Not caught by 106 passing tests, because every test case used *matched* markers.
-**Cause:** the marker stripper decided "is this an opener?" and "is this a closer?" independently,
-so a lone leading `_` looked like an opener and was dropped with no partner. Python privates are
-everywhere in agent replies.
-**Instead:** markers are now stripped only as a MATCHED PAIR within one line. Five regression cases
-cover leading, trailing, and unmatched markers.
-**Worth remembering:** the test suite was table-driven and thorough, and still only tested the
-shapes I thought of. Running the actual thing and listening found it in one pass. Exercise the real
-pipeline, not only its units.
-
-## P14 — Windows PowerShell helpers hang instead of failing, and nothing had a deadline
-**Symptom:** CI green on macOS and Ubuntu, `windows-latest` times out on both the clipboard read and
-the OS-synth contract. Locally everything passed — the Windows path had never executed anywhere.
-**Cause:** two compounding faults.
-1. `Get-Clipboard` drives the Windows clipboard COM API, which **requires single-threaded apartment
-   mode**. Without `-STA`, PowerShell 5.1 can block indefinitely rather than erroring.
-2. More seriously: **not one spawned process in the codebase had a timeout.** A helper that never
-   exits would have hung the plugin worker forever on a real user's machine, with no error and no
-   audio — the exact "fails silently" failure principle I forbids.
-**Instead:** every `spawn` now carries a hard deadline that kills the child and rejects
-(`DEFAULT_SPAWN_TIMEOUT_MS`, `DEFAULT_CLIPBOARD_TIMEOUT_MS`), and all PowerShell invocations pass
-`-STA -NoProfile -NonInteractive`. A test with a 1 ms deadline exercises the timeout path on every
-platform, so this cannot regress unnoticed.
-**Worth remembering:** this is the value of CI on all three OSes. A hang-forever bug in the default
-path was invisible to 105 passing local tests, because the platform that triggers it was never run.
 
 ## P13 — `sherpa-onnx-win-arm64` is missing from **npm**, but upstream does build it
 **Symptom:** you conclude Windows-on-ARM is unsupported and design a fallback you don't need.
@@ -558,166 +163,6 @@ own STT hit this and hardcoded Windows to x64 (`stt-service.ts:556-577`, and see
 `npm install` anyway (P5) and must fetch binaries itself, **source from GitHub releases, not npm** —
 then all six platform+arch combos are covered. Those tarballs also contain standalone executables
 (`bin/sherpa-onnx-offline-tts`, 2.1 MB), which the npm packages do not. Verified 2026-08-20.
-
-## P20 — Speaking on the `done` edge reads the PREVIOUS reply
-**Symptom:** reply 2 read reply 1 aloud, reply 3 read reply 2, and the newest reply was never
-spoken. Consistently one behind.
-**Cause:** two faults compounding.
-1. `agent.status.changed` fires on the working→done edge, but the agent CLI flushes its final
-   message to the transcript JSONL *after* that. Reading "the newest reply on disk" at `done` gets
-   the previous turn.
-2. Spoken-reply ids lived in worker memory. ORCA reaps an idle worker after 5 minutes; on re-fork
-   the dedup set was empty, so already-spoken replies looked new again.
-**Instead:** do not speak on the edge. **Watch the transcript file** (`fs.watch`, 250 ms debounce)
-and speak replies when they actually appear, keeping the watch open `WATCH_WINDOW_MS` past the
-event. Persist spoken ids to plugin storage, bounded to 300.
-**Worth remembering:** an event that means "the turn ended" is not the same as "the text is
-readable". Anywhere we react to a state change by reading a file someone else writes, watch the
-file — the event only says when to start looking.
-
-## P23 — Tuning speech by ear over a chat loop does not converge
-**Symptom:** six rounds of "does this sound better?", each costing a rebuild, a refresh, a reply and
-a listen. Feedback arrived after the context had gone, and defaults were still unsettled.
-**Cause:** the loop was minutes long and the judgement is subjective. Every normalization question
-is taste, and taste needs immediate repetition to settle — hear it, tweak it, hear it again.
-**Instead:** build the tuning surface before tuning (`docs/TASKS.md` M11 Voice Lab). Ship the
-*mechanism* and let the listener choose the *values*. Do not argue defaults into place over chat.
-**Worth remembering:** the same shape applies to anything judged by perception rather than
-correctness. If a human must say "better", give them a control and a replay button, not a dialogue.
-
-## P22 — Huddle followed whatever transcript was touched last, and dumped each new session's backlog
-**Symptom, reported live:** *"the message you just sent was cut off by another session's reply… it
-read many of its replies and not a single one… this is really confusing what it is even reading."*
-**Cause:** three faults compounding.
-1. Every `agent.status.changed` re-picked the most-recently-modified transcript, so an unrelated
-   busy session stole the audio mid-reply.
-2. Backlog priming was a single global boolean, not per file. Switching to a new session found it
-   "already primed", so every reply in it counted as fresh and the whole history was read out.
-3. Queue overflow dropped the OLDEST utterance silently — the reply the user was actually waiting
-   for — with no signal.
-**Instead:** lock onto ONE session and stay there until explicitly switched; prime per file; label
-every utterance with its session; announce switches aloud; tell the user when replies were skipped;
-and add a skip control so the wrong thing can always be abandoned.
-**Worth remembering:** for assistive tech, "reading something you didn't ask for and can't stop" is
-worse than silence. Every autonomous speech path needs an interrupt reachable in one keystroke, and
-must say *whose* words these are before speaking them.
-
-## P21 — One speak() mode cannot serve both callers
-**Symptom:** with huddle on, a reply arriving mid-utterance truncated the one being read.
-**Cause:** `speak()` always began a new generation, which is correct for a hotkey (you asked for
-*this* text now) and wrong for huddle (replies must not cut each other off). The mode was never a
-decision — it was an accident of having one caller when it was written.
-**Instead:** `speak(text, 'replace' | 'queue')`. Hotkey replaces; huddle queues; the queue keeps
-the newest and drops the oldest so a fast agent can never block. Documented in the README, because
-"what happens if it is already talking" is the first thing a user asks.
-
-## P19 — Plugin chords silently lose to ORCA's built-in shortcuts
-**Symptom:** ORCA shows *"⌘⇧I conflicts with Show Ports, Read Aloud: say status"* and the command
-never fires. Nothing in the manifest or the build warns you.
-**Cause:** a plugin cannot query the host's keybindings, and there is no conflict check at install
-time. ORCA's defaults already claim 22 `Mod+Shift+*` chords, `I` among them
-(`src/shared/keybindings.ts`).
-**Instead:** pick from the free set and pin it in a test.
-`packages/plugin/src/manifest/keybindings.test.ts` vendors ORCA's claimed chords (extracted at
-commit 0f26ff4a / v1.4.185) and fails CI if we declare one. Re-extract when bumping the supported
-ORCA version:
-```
-grep -oE "'Mod\+Shift\+[A-Za-z0-9]+'" src/shared/keybindings.ts | sort -u
-```
-Free at that version: `C H K L P Q S U W X Y`. We use `S`, `X`, `H`, `U`.
-**Worth remembering:** this is the fourth thing in a row that failed silently because a plugin
-cannot see the host's state (manifest schema P16, file containment P17, host API names P18, now
-keybindings). Whenever the host holds a list the plugin must agree with, vendor it and test it.
-
-## P18 — Guessed host API names + a defensive adapter = silent no-op
-**Symptom:** plugin valid, enabled, shortcuts listed in the consent dialog — and ORCA reports
-*"Could not run the plugin command."* The hotkey does nothing at all.
-**Cause:** I invented the host API from research notes: `orca.registerCommand`, `orca.onEvent`,
-`orca.notify`, `orca.storageGet`, and `activate(ctx)` reading `ctx.orca`. The real API is
-`activate(orca)` with `orca.commands.register(id, fn)`, `orca.events.on(name, fn)`,
-`orca.host.call('notifications.show' | 'storage.get' | ...)`, `orca.log(msg)`.
-**The adapter made it worse.** It wrapped every call in `fn?.bind(o)` with a no-op fallback for
-robustness, so *every wrong name degraded silently to success*. Nothing threw. Nothing logged.
-Zero commands were registered and the plugin reported itself ready.
-**Instead:** `examples/plugins/hello-orca/main.mjs` shows the whole contract in 24 lines and was in
-the clone the entire time. Now: `makeHost` counts registrations, `activate()` logs a WARNING if
-fewer than 4 land, and `scripts/smoke-activate.mjs` drives the **built artifact** with a fake host
-in CI, asserting every manifest-declared command is actually registered.
-**Worth remembering:** defensive fallbacks are correct for a *transient* failure and actively
-harmful for a *wrong name* — they convert a loud crash into a silent nothing. Unit tests did not
-help either: they mocked the same invented shape they were written against. Only running the real
-artifact against the real contract catches this.
-
-## P17 — A workspace `node_modules` symlink makes the whole plugin "Invalid"
-**Symptom:** the plugin is discovered (`yorailevi.read-aloud`, Dev) but shows **Invalid**, `v0.0.0`,
-"No description provided", and *"The plugin manifest or installed files are invalid."* The manifest
-itself parses fine against `pluginManifestSchema`.
-**Cause:** we pointed ORCA at `packages/plugin`, a pnpm workspace package. It contains
-`node_modules/@orca-tts/core -> ../../../core` and `.../providers -> ../../../providers`. ORCA
-resolves realpaths and **rejects any artifact escaping the plugin root**
-(`plugin-manifest-fields.ts:23-24`: *"realpath containment separately rejects symlink escapes"*).
-One escaping symlink invalidates the plugin, and the message does not say which file.
-**Instead:** never point ORCA at a source folder. `pnpm build` emits a self-contained artifact to
-**`dist/plugin/`** — exactly three files: `orca-plugin.json`, `main.mjs`, `panel.html`. No `src/`,
-no `node_modules`, no tsconfig. CI now fails if any symlink appears in the artifact.
-**Worth remembering:** "Invalid" covered two completely different faults in a row (P16 manifest
-shape, P17 file containment) with the same opaque wording. Bisect by building the smallest possible
-artifact and adding back, rather than re-reading the manifest.
-
-## P16 — An invalid manifest fails SILENTLY: no plugin, no consent prompt, no error
-**Symptom:** added the dev plugin path in Settings, the "Installed" count went up, but no card
-appeared, no consent prompt fired, and nothing said why.
-**Cause:** our `orca-plugin.json` did not satisfy `pluginManifestSchema`. Three faults:
-- `capabilities` were bare strings; the schema is `z.object({ kind: ... }).strict()`
-- `engines: { orca: ">=x.y.z" }` missing — **required**, not optional
-- `pluginApi: 1` missing — **required**
-Also missing `contributes.events`, without which `agent.status.changed` never arrives even with the
-`events:subscribe` capability granted.
-**Instead:** validate the manifest against the host's own parser before trusting it:
-```
-npx tsx validate-manifest.mts /path/to/orca-plugin.json   # imports pluginManifestSchema from the orca clone
-```
-`packages/plugin/src/manifest/manifest.test.ts` now pins the shape in CI so this cannot regress.
-**Worth remembering:** I wrote that manifest from research notes and never parsed it. Reading the
-schema is not the same as running it — the canonical example at `examples/plugins/hello-orca/` was
-sitting right there and would have shown every one of these in ten seconds.
-
-## P15 — An unmatched emphasis marker was stripped, mangling `_private` identifiers
-**Symptom:** running the pipeline for real, `_flush_buffer()` was spoken as "flush_buffer()".
-Not caught by 106 passing tests, because every test case used *matched* markers.
-**Cause:** the marker stripper decided "is this an opener?" and "is this a closer?" independently,
-so a lone leading `_` looked like an opener and was dropped with no partner. Python privates are
-everywhere in agent replies.
-**Instead:** markers are now stripped only as a MATCHED PAIR within one line. Five regression cases
-cover leading, trailing, and unmatched markers.
-**Worth remembering:** the test suite was table-driven and thorough, and still only tested the
-shapes I thought of. Running the actual thing and listening found it in one pass. Exercise the real
-pipeline, not only its units.
-
-## P14 — Windows PowerShell helpers hang instead of failing, and nothing had a deadline
-**Symptom:** CI green on macOS and Ubuntu, `windows-latest` times out on both the clipboard read and
-the OS-synth contract. Locally everything passed — the Windows path had never executed anywhere.
-**Cause:** two compounding faults.
-1. `Get-Clipboard` drives the Windows clipboard COM API, which **requires single-threaded apartment
-   mode**. Without `-STA`, PowerShell 5.1 can block indefinitely rather than erroring.
-2. More seriously: **not one spawned process in the codebase had a timeout.** A helper that never
-   exits would have hung the plugin worker forever on a real user's machine, with no error and no
-   audio — the exact "fails silently" failure principle I forbids.
-**Instead:** every `spawn` now carries a hard deadline that kills the child and rejects
-(`DEFAULT_SPAWN_TIMEOUT_MS`, `DEFAULT_CLIPBOARD_TIMEOUT_MS`), and all PowerShell invocations pass
-`-STA -NoProfile -NonInteractive`. A test with a 1 ms deadline exercises the timeout path on every
-platform, so this cannot regress unnoticed.
-**Worth remembering:** this is the value of CI on all three OSes. A hang-forever bug in the default
-path was invisible to 105 passing local tests, because the platform that triggers it was never run.
-
-## P13 — Subagent spawn can fail on the host runtime, not on your prompt
-**Symptom:** `Agent` returns *"Failed to create teammate pane: Timed out waiting for the Orca runtime
-to respond"* or *"tmux: Timed out waiting for split pane handle"*. Nothing about the brief is wrong.
-**Cause:** the teammate pane is created through the host runtime / tmux; when that is busy or wedged,
-spawning fails regardless of the task.
-**Instead:** this is an environment failure, not a code failure (R072) — do not rewrite the brief.
-Retry once, then route around by doing the work in-session (R070) and record it here. Parallelism is
-an optimization; the tasks and gates are the contract, and they do not care who ran them.
 
 ## P12 — Two agents appending to PITFALLS.md at once produce duplicate numbers
 **Symptom:** the file contains two `## P4`, two `## P5`, two `## P6`, and cross-references become

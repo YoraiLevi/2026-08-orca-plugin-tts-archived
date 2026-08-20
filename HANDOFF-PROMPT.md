@@ -15,7 +15,7 @@ survey gist. **Read those before designing anything.**
 ## Read these, in order, before acting
 
 1. `HANDOFF.md` — hard requirements, the user's binding R1–R9, current phase
-2. `PITFALLS.md` — **P0–P23**. Nearly every one cost real time. P13–P22 are ORCA-specific traps
+2. `PITFALLS.md` — **P0–P24**. Nearly every one cost real time. P13–P22 are ORCA-specific traps
 3. `.specify/memory/constitution.md` — 9 principles, 86 numbered rules (R001–R086), and **Part III:
    the autonomous operating protocol, its five STOP conditions, and the resumption contract**
 4. `STATE.md` — phase board
