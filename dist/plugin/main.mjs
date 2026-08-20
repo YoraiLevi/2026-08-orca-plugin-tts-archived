@@ -1114,6 +1114,7 @@ function decodeClaudeLine(line) {
 }
 
 // packages/plugin/src/huddle/index.ts
+var HUDDLE_STATE_KEY = "huddle.enabled";
 var HuddleController = class {
   #deps;
   #enabled = false;
@@ -1126,9 +1127,19 @@ var HuddleController = class {
   get enabled() {
     return this.#enabled;
   }
+  /**
+   * Restore the persisted setting. The worker is reaped after 5 minutes idle and re-forked on the
+   * next trigger, so without this huddle mode silently switches itself off between uses.
+   */
+  async restore() {
+    const saved = await this.#deps.store?.get(HUDDLE_STATE_KEY);
+    this.#enabled = saved === true;
+    return this.#enabled;
+  }
   toggle() {
     this.#enabled = !this.#enabled;
     if (!this.#enabled) void this.#deps.speech.stop();
+    void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled);
     return this.#enabled;
   }
   async lastReply() {
@@ -1288,11 +1299,21 @@ function activate(orca) {
     log: host.log,
     notify: (m) => {
       host.notify("Read Aloud", m);
-    }
+    },
+    store: { get: host.storageGet, set: host.storageSet }
+  });
+  void huddle.restore().then((on) => {
+    host.log(`read-aloud: huddle mode restored to ${on ? "on" : "off"}`);
   });
   host.registerCommand("read-aloud.toggle-huddle", () => {
     const on = huddle.toggle();
-    host.notify("Read Aloud", `huddle mode ${on ? "on" : "off"}`);
+    host.notify("Read Aloud", `Huddle mode ${on ? "ON" : "OFF"}`);
+    if (speech !== null) speech.speak(on ? "Huddle mode on." : "Huddle mode off.");
+  });
+  host.registerCommand("read-aloud.status", async () => {
+    await withSpeech((s) => {
+      s.speak(huddle.enabled ? "Read Aloud is on. Huddle mode is on, so agent replies are spoken as they arrive." : "Read Aloud is on. Huddle mode is off.");
+    });
   });
   host.registerCommand("read-aloud.speak-last-reply", async () => {
     await withSpeech(async (s) => {

@@ -11,6 +11,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { decodeClaudeLine } from './decoders.js';
+export const HUDDLE_STATE_KEY = 'huddle.enabled';
 export class HuddleController {
     #deps;
     #enabled = false;
@@ -19,10 +20,20 @@ export class HuddleController {
     #warnedAmbiguous = false;
     constructor(deps) { this.#deps = deps; }
     get enabled() { return this.#enabled; }
+    /**
+     * Restore the persisted setting. The worker is reaped after 5 minutes idle and re-forked on the
+     * next trigger, so without this huddle mode silently switches itself off between uses.
+     */
+    async restore() {
+        const saved = await this.#deps.store?.get(HUDDLE_STATE_KEY);
+        this.#enabled = saved === true;
+        return this.#enabled;
+    }
     toggle() {
         this.#enabled = !this.#enabled;
         if (!this.#enabled)
             void this.#deps.speech.stop();
+        void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled);
         return this.#enabled;
     }
     async lastReply() {

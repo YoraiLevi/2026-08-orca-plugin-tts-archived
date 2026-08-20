@@ -18,8 +18,17 @@ export interface SpeechPort {
 import type { AgentStatusChanged } from '../adapter/index.js'
 import { decodeClaudeLine, type DecodedReply } from './decoders.js'
 
+export interface HuddleStore {
+  get(key: string): Promise<unknown>
+  set(key: string, value: unknown): Promise<void>
+}
+
+export const HUDDLE_STATE_KEY = 'huddle.enabled'
+
 export interface HuddleDeps {
   readonly speech: SpeechPort
+  /** Persisted so the setting survives the 5-minute idle worker reap. */
+  readonly store?: HuddleStore
   readonly log: (m: string) => void
   readonly notify: (m: string) => void
     /** Override for tests. */
@@ -37,9 +46,20 @@ export class HuddleController {
 
   get enabled(): boolean { return this.#enabled }
 
+  /**
+   * Restore the persisted setting. The worker is reaped after 5 minutes idle and re-forked on the
+   * next trigger, so without this huddle mode silently switches itself off between uses.
+   */
+  async restore(): Promise<boolean> {
+    const saved = await this.#deps.store?.get(HUDDLE_STATE_KEY)
+    this.#enabled = saved === true
+    return this.#enabled
+  }
+
   toggle(): boolean {
     this.#enabled = !this.#enabled
     if (!this.#enabled) void this.#deps.speech.stop()
+    void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled)
     return this.#enabled
   }
 

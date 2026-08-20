@@ -80,12 +80,30 @@ export default function activate(orca: OrcaApi): void {
       stop: async () => { await speech?.stop() }
     },
     log: host.log,
-    notify: (m: string) => { host.notify('Read Aloud', m) }
+    notify: (m: string) => { host.notify('Read Aloud', m) },
+    store: { get: host.storageGet, set: host.storageSet }
+  })
+
+  // Survive the idle worker reap: without this, huddle mode silently turns itself off.
+  void huddle.restore().then((on) => {
+    host.log(`read-aloud: huddle mode restored to ${on ? 'on' : 'off'}`)
   })
 
   host.registerCommand('read-aloud.toggle-huddle', () => {
     const on = huddle.toggle()
-    host.notify('Read Aloud', `huddle mode ${on ? 'on' : 'off'}`)
+    host.notify('Read Aloud', `Huddle mode ${on ? 'ON' : 'OFF'}`)
+    // Say it out loud. This is a text-to-speech plugin talking to a voice-first user: speech is
+    // the one status channel that always works. The panel cannot be updated (no host->panel
+    // channel, orca#15638) and a desktop notification is transient and easy to miss.
+    if (speech !== null) speech.speak(on ? 'Huddle mode on.' : 'Huddle mode off.')
+  })
+
+  host.registerCommand('read-aloud.status', async () => {
+    await withSpeech((s) => {
+      s.speak(huddle.enabled
+        ? 'Read Aloud is on. Huddle mode is on, so agent replies are spoken as they arrive.'
+        : 'Read Aloud is on. Huddle mode is off.')
+    })
   })
 
   host.registerCommand('read-aloud.speak-last-reply', async () => {
