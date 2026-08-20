@@ -12,3 +12,8 @@ Thumbs.db
 
 # Local agent settings
 .claude/settings.local.json
+
+# Per-package TypeScript build output. Regenerable, and a trap when stale: a plain .mjs
+# importing the built JS gets a different normalizer than the one that ships (see PITFALLS).
+# The shipped plugin artifact at /dist/plugin is NOT this — it stays tracked (PITFALLS P5).
+packages/*/dist/
