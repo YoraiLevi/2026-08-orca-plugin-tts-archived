@@ -1,0 +1,2 @@
+{"type":"assistant","uuid":"c1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"SECRET_REASONING only, no reply yet"}]}}
+{"type":"assistant","uuid":"c2","isMeta":true,"message":{"role":"assistant","content":[{"type":"text","text":"META_INJECTED should never be spoken"}]}}

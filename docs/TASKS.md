@@ -121,21 +121,21 @@ value that must move.
 
 ## Phase M5 — Plugin skeleton + scripted dev loop (lands before any feature)
 
-- [ ] **T050** `orca-plugin.json` manifest → `plugin/orca-plugin.json`
-  - [ ] T050a Capabilities: `events:subscribe`, `storage`, `settings:own`, `notifications:show`
-  - [ ] T050b Commands + rebindable keybindings
-  - [ ] T050c Panel declaration
-- [ ] **T051** `activate()` + one command that speaks a fixed string → `plugin/src/main.ts`
-- [ ] **T052** `adapter/` — every ORCA API call isolated here, nowhere else → `plugin/src/adapter/`
-- [ ] **T053** esbuild → single `main.mjs`, ESM, default-exporting activate
-- [ ] **T054** **Scripted dev loop** → `scripts/dev.mjs`
-  - [ ] T054a Build
-  - [ ] T054b `plugins.list()` → read the LIVE `consentFingerprint`
-  - [ ] T054c `plugins.consent({ reviewedFingerprint })`
-  - [ ] T054d `setEnabled` off → on, forcing the worker re-fork
-  - [ ] T054e Print the plugin's log ring buffer (there is no log file on disk)
-- [ ] **T055** [P] Size gate script: fail if > 2000 files or > 50 MB → `scripts/size-gate.mjs`
-- [ ] **T056** [P] `docs/dev-loop.md` — why the naive edit-and-reload silently runs stale code
+- [x] **T050** `orca-plugin.json` manifest → `plugin/orca-plugin.json`
+  - [x] T050a Capabilities: `events:subscribe`, `storage`, `settings:own`, `notifications:show`
+  - [x] T050b Commands + rebindable keybindings
+  - [x] T050c Panel declaration
+- [x] **T051** `activate()` + one command that speaks a fixed string → `plugin/src/main.ts`
+- [x] **T052** `adapter/` — every ORCA API call isolated here, nowhere else → `plugin/src/adapter/`
+- [x] **T053** esbuild → single `main.mjs`, ESM, default-exporting activate
+- [x] **T054** **Scripted dev loop** → `scripts/dev.mjs`
+  - [x] T054a Build
+  - [x] T054b `plugins.list()` → read the LIVE `consentFingerprint`
+  - [x] T054c `plugins.consent({ reviewedFingerprint })`
+  - [x] T054d `setEnabled` off → on, forcing the worker re-fork
+  - [x] T054e Print the plugin's log ring buffer (there is no log file on disk)
+- [x] **T055** [P] Size gate script: fail if > 2000 files or > 50 MB → `scripts/size-gate.mjs`
+- [x] **T056** [P] `docs/dev-loop.md` — why the naive edit-and-reload silently runs stale code
 
 **Gate M5:** change a string in `main.ts`, run `scripts/dev.mjs`, hear the NEW string. Proves the re-fork happened — the old string playing is the failure this gate exists to catch.
 
@@ -143,16 +143,16 @@ value that must move.
 
 ## Phase M6 — US1: clipboard hotkey
 
-- [ ] **T060** Clipboard read per OS from the worker → `plugin/src/clipboard.ts`
-  - [ ] T060a macOS `pbpaste` · Windows `Get-Clipboard` · Linux `wl-paste` → `xclip` → `xsel`
-  - [ ] T060b Empty clipboard → spoken notice, not silence
-  - [ ] T060c Oversized clipboard → truncate at a stated limit and say so
-- [ ] **T061** Command handler: normalize → chunk → provider → sink
-- [ ] **T062** Second press stops; assert measured stop latency < 50 ms
-- [ ] **T063** [P] "Speak last agent reply" command (the other honest selection fallback)
+- [x] **T060** Clipboard read per OS from the worker → `plugin/src/clipboard.ts`
+  - [x] T060a macOS `pbpaste` · Windows `Get-Clipboard` · Linux `wl-paste` → `xclip` → `xsel`
+  - [x] T060b Empty clipboard → spoken notice, not silence
+  - [x] T060c Oversized clipboard → truncate at a stated limit and say so
+- [x] **T061** Command handler: normalize → chunk → provider → sink
+- [x] **T062** Second press stops; assert measured stop latency < 50 ms
+- [x] **T063** [P] "Speak last agent reply" command (the other honest selection fallback)
 - [ ] **T064** [P] Settings: engine, voice, rate, enabled → `settings:own`
 - [ ] **T065** [P] Panel v1: what is speaking, stop button, engine picker, limitation notice
-- [ ] **T066** Integration test against a fake provider, asserting the ordered call sequence
+- [x] **T066** Integration test against a fake provider, asserting the ordered call sequence
 
 **Gate M6:** on each OS, hotkey speaks clipboard; second press silences within a measured 50 ms.
 
@@ -160,21 +160,21 @@ value that must move.
 
 ## Phase M7 — US2: huddle mode
 
-- [ ] **T070** Subscribe `agent.status.changed`, capture `worktreeId` → `plugin/src/huddle/`
-- [ ] **T071** Session correlation heuristic from the worktree path
-  - [ ] T071a Resolve project slug → transcript directory
-  - [ ] T071b Most-recently-modified selection
-  - [ ] T071c Detect the two-agents-one-worktree ambiguity and DEGRADE LOUDLY, not silently
-- [ ] **T072** JSONL tailer with debounce → `plugin/src/huddle/tailer.ts`
-- [ ] **T073** **Thinking-block filter at the RAW record level, before flattening** ← load-bearing ordering
-- [ ] **T074** [P] Vendored decoders: claude, openclaude, codex, grok, omp
-- [ ] **T075** [P] Fixture transcripts committed as test data
-  - [ ] T075a Fixture containing BOTH thinking and reply blocks
-  - [ ] T075b Fixture with tool calls and tool results
-  - [ ] T075c Fixture with an unclosed code fence
-- [ ] **T076** Test: fixture T075a speaks ONLY the reply — the fixture exists to make this failable
+- [x] **T070** Subscribe `agent.status.changed`, capture `worktreeId` → `plugin/src/huddle/`
+- [x] **T071** Session correlation heuristic from the worktree path
+  - [x] T071a Resolve project slug → transcript directory
+  - [x] T071b Most-recently-modified selection
+  - [x] T071c Detect the two-agents-one-worktree ambiguity and DEGRADE LOUDLY, not silently
+- [x] **T072** JSONL tailer with debounce → `plugin/src/huddle/tailer.ts`
+- [x] **T073** **Thinking-block filter at the RAW record level, before flattening** ← load-bearing ordering
+- [x] **T074** [P] Vendored decoders: claude, openclaude, codex, grok, omp
+- [x] **T075** [P] Fixture transcripts committed as test data
+  - [x] T075a Fixture containing BOTH thinking and reply blocks
+  - [x] T075b Fixture with tool calls and tool results
+  - [x] T075c Fixture with an unclosed code fence
+- [x] **T076** Test: fixture T075a speaks ONLY the reply — the fixture exists to make this failable
 - [ ] **T077** [P] Mute / pause / skip controls in the panel
-- [ ] **T078** [P] Unsupported-agent detection → tell the user, don't fail silently
+- [x] **T078** [P] Unsupported-agent detection → tell the user, don't fail silently
 
 **Gate M7:** T076 green. A real agent turn is spoken end to end and no thinking text is audible.
 
@@ -182,13 +182,13 @@ value that must move.
 
 ## Phase M8 — CI, docs, publish
 
-- [ ] **T080** CI matrix `[macos, ubuntu, windows] × Node 24` → `.github/workflows/ci.yml`
-  - [ ] T080a install → typecheck → lint → unit → contract → bundle
-  - [ ] T080b Size gate enforced in CI, not just locally
-  - [ ] T080c Headless smoke: OS synth yields non-empty audio bytes on each runner
-- [ ] **T081** [P] `README.md`: install, config, engines, limitations verbatim from the blocked table
-- [ ] **T082** [P] `LICENSE` per T001b
-- [ ] **T083** [P] `CONTRIBUTING.md` + the dev-loop pointer
+- [x] **T080** CI matrix `[macos, ubuntu, windows] × Node 24` → `.github/workflows/ci.yml`
+  - [x] T080a install → typecheck → lint → unit → contract → bundle
+  - [x] T080b Size gate enforced in CI, not just locally
+  - [x] T080c Headless smoke: OS synth yields non-empty audio bytes on each runner
+- [x] **T081** [P] `README.md`: install, config, engines, limitations verbatim from the blocked table
+- [x] **T082** [P] `LICENSE` per T001b
+- [x] **T083** [P] `CONTRIBUTING.md` + the dev-loop pointer
 - [ ] **T084** Reconcile `STATE.md`, `HANDOFF.md`, `PITFALLS.md` against the shipped system
 - [ ] **T085** Create the public GitHub repo and push
 - [ ] **T086** Marketplace entry `{kind:git, url, ref}` pinned to an exact commit

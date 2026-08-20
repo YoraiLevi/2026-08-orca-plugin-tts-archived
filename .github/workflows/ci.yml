@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # Cross-platform parity is a hard requirement (constitution principle III).
+      # A feature that works on one OS and degrades on another is not done.
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.24.0 }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Linux runners have no speech synthesizer or audio sink preinstalled.
+      # Installing them is what makes the OS-synth contract suite meaningful here rather than skipped.
+      - name: Install Linux speech and audio
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng alsa-utils pulseaudio-utils xclip
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+      - name: Size gate (ORCA caps at 2000 files / 50 MB)
+        run: pnpm size-gate
+
+      - name: Smoke test — the bundle loads and exports activate
+        run: node -e "import('./packages/plugin/dist/main.mjs').then(m=>{if(typeof m.default!=='function'){console.error('activate missing');process.exit(1)}console.log('bundle ok')})"
+
+      - name: Smoke test — the OS synthesizer produces real audio bytes
+        run: node scripts/smoke-synth.mjs

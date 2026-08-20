@@ -6,14 +6,6 @@ import { runProviderContract } from '../contract.js'
 runProviderContract('OsSynthProvider', () => new OsSynthProvider())
 
 describe('T042 per-platform command construction', () => {
-  const cmdFor = (platform: 'darwin' | 'win32' | 'linux', text: string, opts = {}) => {
-    const p = new OsSynthProvider({ platform })
-    // @ts-expect-error — reaching into the private builder is the point of this test
-    return p['#command'] !== undefined ? null : (p as unknown as {
-      command: (t: string, o: string, x: object) => { cmd: string; args: string[] }
-    })
-  }
-  void cmdFor
 
   it('T042e reports unavailability rather than failing silently', async () => {
     // A platform whose binary does not exist must yield no voices, not throw into the caller.

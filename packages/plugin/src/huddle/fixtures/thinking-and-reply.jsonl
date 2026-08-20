@@ -1,0 +1,3 @@
+{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"What is 2+2?"}]}}
+{"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"thinking","thinking":"SECRET_REASONING the user wants arithmetic, let me carefully consider"},{"type":"text","text":"It is four."}]}}
+{"type":"assistant","uuid":"a2","message":{"role":"assistant","content":[{"type":"redacted_thinking","data":"SECRET_REASONING encrypted"},{"type":"text","text":"Anything else?"}]}}

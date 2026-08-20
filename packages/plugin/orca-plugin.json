@@ -1,0 +1,26 @@
+{
+  "manifestVersion": 1,
+  "id": "orca-tts",
+  "publisher": "yorailevi",
+  "name": "Read Aloud",
+  "version": "0.1.0",
+  "description": "Speaks agent replies and your clipboard aloud. Local, cross-platform, no account or API key.",
+  "main": "dist/main.mjs",
+  "capabilities": ["events:subscribe", "storage", "settings:own", "notifications:show"],
+  "contributes": {
+    "commands": [
+      { "id": "orca-tts.speakClipboard", "title": "Read Aloud: speak clipboard" },
+      { "id": "orca-tts.speakLastReply", "title": "Read Aloud: speak last agent reply" },
+      { "id": "orca-tts.stop", "title": "Read Aloud: stop speaking" },
+      { "id": "orca-tts.toggleHuddle", "title": "Read Aloud: toggle huddle mode" }
+    ],
+    "keybindings": [
+      { "command": "orca-tts.speakClipboard", "key": "mod+shift+s" },
+      { "command": "orca-tts.stop", "key": "mod+shift+x" },
+      { "command": "orca-tts.toggleHuddle", "key": "mod+shift+h" }
+    ],
+    "panels": [
+      { "id": "orca-tts.status", "title": "Read Aloud", "entry": "panel.html" }
+    ]
+  }
+}

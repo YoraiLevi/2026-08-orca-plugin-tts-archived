@@ -40,7 +40,7 @@ export function runProviderContract(
       const p = make()
       await p.prepare()
       let chunks = 0
-      for await (const _c of p.generate('')) chunks++
+      for await (const c of p.generate('')) { void c; chunks++ }
       expect(chunks).toBe(0)
     }, 30_000)
 

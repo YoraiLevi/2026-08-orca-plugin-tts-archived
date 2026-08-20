@@ -1,0 +1,3 @@
+{"type":"assistant","uuid":"b1","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"rm -rf /tmp/x"}}]}}
+{"type":"user","uuid":"b2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"deleted 4000 files"}]}}
+{"type":"assistant","uuid":"b3","message":{"role":"assistant","content":[{"type":"text","text":"Done, the files are gone."}]}}

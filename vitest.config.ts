@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 export default defineConfig({
   resolve: {
     alias: {
-      '@orca-tts/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url))
+      '@orca-tts/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
+      '@orca-tts/providers': fileURLToPath(new URL('./packages/providers/src/index.ts', import.meta.url))
     }
   },
   test: {

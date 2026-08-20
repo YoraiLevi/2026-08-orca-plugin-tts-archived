@@ -1,8 +1,12 @@
 {
   "name": "@orca-tts/plugin",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
-  "types": "./src/index.ts"
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@orca-tts/core": "workspace:*",
+    "@orca-tts/providers": "workspace:*"
+  }
 }
