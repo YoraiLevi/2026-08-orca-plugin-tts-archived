@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "sherpa-onnx streaming ASR node.js macOS",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:32:00.634310+0300",
+  "status": "ok",
+  "message": null,
+  "count": 10,
+  "payload": [
+    {
+      "title": "GitHub - k2-fsa/sherpa-onnx: Speech-to-text, text-to-speech, speaker...",
+      "url": "https://github.com/k2-fsa/sherpa-onnx",
+      "snippet": "Speech-to-text, text-to-speech, speaker diarization, speech enhancement, source separation, and VAD using next-gen Kaldi with onnxruntime without Internet connection.Linux, macOS, Windows, openKylin. Android, WearOS."
+    },
+    {
+      "title": "Streaming ASR — sherpa 1.3 documentation",
+      "url": "https://k2-fsa.github.io/sherpa/onnx/javascript-api/examples/streaming_asr.html",
+      "snippet": "nodejs-addon-examples/test_asr_streaming_transducer.js.Install the package: npm install sherpa-onnx-node. Download the model and test files"
+    },
+    {
+      "title": "WebAssembly (Browser and Node.js) | k2-fsa/sherpa-onnx | DeepWiki",
+      "url": "https://deepwiki.com/k2-fsa/sherpa-onnx/4.1-webassembly-(browser-and-node.js)",
+      "snippet": "The WebAssembly (WASM) implementation of `sherpa-onnx` enables high-performance speech processing directly in web browsers and Node.js environments. By leveraging Emscripten and ONNX Runtime's WASM ba."
+    },
+    {
+      "title": "sherpa-onnx - npm",
+      "url": "https://www.npmjs.com/package/sherpa-onnx",
+      "snippet": "Speech-to-text, text-to-speech, speaker diarization, and speech enhancement using Next-gen Kaldi without internet connection. Latest version: 1.13.4, last published: a month ago. Start using sherpa-onnx in your project by running `npm i sherpa-onnx`."
+    },
+    {
+      "title": "jspm-packages.deno.dev/search?keyword=asr&page=4",
+      "url": "https://jspm-packages.deno.dev/search?keyword=asr&page=4",
+      "snippet": "JavaScript ONNX ASR for Node.js and browser.@anyshu/easy-asr. Browser-based real-time speech recognition using sherpa-onnx WebAssembly."
+    },
+    {
+      "title": "Sherpa-ONNX: Unified Speech Recognition, Synthesis, and Audio...",
+      "url": "https://www.blog.brightcoding.dev/2025/09/11/sherpa-onnx-unified-speech-recognition-synthesis-and-audio-processing-for-every-platform/",
+      "snippet": "Speech Recognition (ASR) – streaming & non-streamingText-to-Speech (TTS) – high-quality neural voicesemcmake cmake -DBUILD_WASM=ON .. node sherpa-onnx-wasm.js # 50 KB gzipped."
+    },
+    {
+      "title": "sherpa-onnx-node CDN by jsDelivr - A CDN for npm and GitHub",
+      "url": "https://www.jsdelivr.com/package/npm/sherpa-onnx-node",
+      "snippet": "A free, fast, and reliable CDN for sherpa-onnx-node. Speech-to-text, text-to-speech, speaker diarization, and speech enhancement using Next-gen Kaldi without internet connection."
+    },
+    {
+      "title": "Sherpa-ONNX | decibri docs",
+      "url": "https://decibri.com/docs/integrations/stt/sherpa-onnx",
+      "snippet": "$ npm install decibri sherpa-onnx. Download a streaming ASR model. Sherpa-ONNX requires a pre-trained model."
+    },
+    {
+      "title": "windows - Unleashing Local AI: Integrating k2-fsa/sherpa-onnx Across...",
+      "url": "https://typevar.dev/articles/k2-fsa/sherpa-onnx",
+      "snippet": "Versatility: Combines ASR (Speech-to-Text), TTS (Text-to-Speech), Speaker Diarization, VAD (Voice Activity Detection), and more.Download Get a model, for example, an ASR model like sherpa-onnx-streaming-zipformer-bilingual-zh-en."
+    },
+    {
+      "title": "Sherpa-ONNX - Open Source | Evermx | Evermx",
+      "url": "https://evermx.com/open-source/sherpa-onnx-offline-speech-toolkit",
+      "snippet": "Both streaming (real-time) and non-streaming (batch) ASR modes. Rich pre-trained model ecosystem including Zipformer, Paraformer, Moonshine, Cohere Transcribe. Cross-platform deployment: Linux, macOS, Windows, Android, iOS, HarmonyOS, WebAssembly."
+    }
+  ]
+}

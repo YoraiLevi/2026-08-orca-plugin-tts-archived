@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "skill": "web-scraper",
+  "kind": "document",
+  "query": "https://www.cartesia.ai/sonic",
+  "args": {
+    "links": false,
+    "images": false,
+    "tables": true,
+    "language": null
+  },
+  "generated_at": "2026-08-20T18:30:53.577250+0300",
+  "status": "ok",
+  "message": null,
+  "count": null,
+  "payload": {
+    "url": "https://www.cartesia.ai/sonic",
+    "title": "Cartesia | Real-time TTS API with AI laughter and emotion",
+    "author": null,
+    "date": "2000-01-01",
+    "sitename": "",
+    "description": "",
+    "content": "---\ntitle: Cartesia | Real-time TTS API with AI laughter and emotion\nurl: https://www.cartesia.ai/sonic\nhostname: cartesia.ai\ndescription: Integrate real-time text-to-speech with Sonic-3, Cartesia's streaming TTS API. Generate natural, expressive voices with laughter in 40+ languages—built for AI agents and interactive apps.\nsitename: Cartesia\ndate: 2000-01-01\n---\nSonic: The fastest and most natural text to speech model\nJoin the teams making the switch to Cartesia\nBuilt for Voice Agents\nSeven capabilities that make Sonic the voice layer production agents rely on.\nA voice that reads the room.\nIn practice\nThe best voice interactions feel effortless — tone adjusts to context, pacing stays consistent, and the speech moves with the natural rhythm of how people actually talk.\nSonic's approach\nBy default, Sonic interprets the emotional subtext in the transcript and calibrates delivery automatically. Non-verbal expressions like laughter can be inserted directly into the transcript.\nI can't believe we actually made it. [laughter] Finally!\nSonic features built for your voice\nClone your voice, localize it into 42 languages, and fine-tune every word.\nVoice cloning\nClone any voice instantly with 10 seconds of audio. High speaker similarity means the brand voice you love stays true, even at scale.\nLocalization\nLocalize any audio clip with native-speaker quality. Emotion, tone, and speaker identity carry through — nothing gets lost in translation.\n- Skylar - American English\n- Skylar - Canadian French\n- Skylar - Castilian Spanish\nCustom Pronunciation Dictionaries\nSpecify custom pronunciations for proper nouns, domain terms, and anything else that needs to sound exactly right.\n- WordPronunciation\n- charcuterieshar-koo-terie\n- subpoena<<s|ə|ˈ|p|i|n|ə>>\n- epinephrine<<ˌ|ɛ|p|ɪ|ˈ|n|ɛ|f|ɹ|ɪ|n>>\nOne voice model for your entire business.\nSee how enterprise teams use Sonic across every use case — and hear it for yourself.\nCalls warm leads the day a campaign fires, personalizes the opener, and books meetings in the CRM.\nCalls warm leads the day a campaign fires, personalizes the opener, and books meetings in the CRM.\nCalls signups within seconds, qualifies them, and books a meeting before the prospect checks their phone.\nAuthenticates callers, pulls live account data, and resolves billing questions, order status, and account issues without hold times or transfers.\nSpins up a realistic prospect persona that reps can practice live sales calls against, handling objections, pushback, and curveballs on demand.\nCalls applicants instantly, screens them, and pushes a qualification summary to the ATS before the call ends.\nCalls customers at key lifecycle moments — onboarding check-ins, renewal reminders, post-support follow-ups.\nFluent and native, worldwide\nReach international markets with Sonic — 40+ languages and a wide range of accents, all with native-speaker quality voices.\nEnterprise-grade security.From Cloud to Local.\n- HIPAA compliant \n- SOC 2 Type 2 \n- GDPR \n- PCI \nTrusted by leading enterprises. Speaking from experience.\nDiscover success stories“Cartesia Sonic has become one of the top-performing models for us by combining low latency with natural pacing… helping us deliver strong voice quality across a growing set of languages where other models often fall short.”\nLydia Zarcone\nVoice Product Manager\n“We didn’t switch to Sonic because it was incrementally better, we switched because nothing else came close… we’ve seen a 2.9% lift in our conversion and a 12.2% increase in customer engagement.”\nAkshay Ramaswamy\nStaff Product Manager\nFAQs\nGet started today\nTalk to an expert. Connect with a member of our team and learn how Cartesia can help you build world-class voice experiences.\nContact SalesStart building. Access our models via API and bring an agent into production with our robust SDKs and developer tools.\nTry CartesiaCapabilities"
+  }
+}

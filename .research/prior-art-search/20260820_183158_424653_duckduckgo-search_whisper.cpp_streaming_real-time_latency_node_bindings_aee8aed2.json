@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "whisper.cpp streaming real-time latency node bindings",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:58.424579+0300",
+  "status": "ok",
+  "message": null,
+  "count": 15,
+  "payload": [
+    {
+      "title": "GitHub - ggml-org/whisper.cpp: Port of OpenAI's Whisper model in...",
+      "url": "https://github.com/ggml-org/whisper.cpp",
+      "snippet": "whisper.cpp supports integer quantization of the Whisper ggml models. Quantized models require less memory and disk space and depending on the hardware can be processed more efficiently. Here are the steps for creating and using a quantized model"
+    },
+    {
+      "title": "Mastering Whisper.cpp Streaming in CPP: A Quick Guide",
+      "url": "https://cppscripts.com/whispercpp-streaming",
+      "snippet": "Whisper.cpp streaming allows for real-time audio transcription using the Whisper model's streaming capabilities, enabling low-latency processing of incoming audio data.Whisper.cpp is particularly well-suited for a range of real-time streaming applications. Examples include"
+    },
+    {
+      "title": "Streaming Applications | ggml-org/whisper.cpp | DeepWiki",
+      "url": "https://deepwiki.com/ggml-org/whisper.cpp/3.3-streaming-applications",
+      "snippet": "May 23, 2026 · This page documents the real-time streaming applications in whisper.cpp that perform continuous transcription from microphone input. These applications capture audio from a microphone, process it in chunks, and produce transcriptions with minimal latency."
+    },
+    {
+      "title": "whisper.cpp/examples/stream/stream.cpp at master · ggml-org ...",
+      "url": "https://github.com/ggml-org/whisper.cpp/blob/master/examples/stream/stream.cpp",
+      "snippet": "Port of OpenAI's Whisper model in C/C++. Contribute to ggml-org/whisper.cpp development by creating an account on GitHub."
+    },
+    {
+      "title": "Whisper.cpp | decibri docs",
+      "url": "https://decibri.com/docs/integrations/stt/whisper-cpp",
+      "snippet": "Whisper.cpp Real-time local speech-to-text transcription using decibri and whisper.cpp in Node.js. Runs entirely offline with no API key, no cloud service, and no network dependency. What this does This integration captures live audio from your microphone using decibri, buffers it into segments, and feeds each segment to whisper.cpp for transcription. Text appears in your terminal as you speak ..."
+    },
+    {
+      "title": "Real-Time Streaming with Whisper: Guide to Low-Latency Speech ...",
+      "url": "https://www.saytowords.com/blogs/Real-Time-Streaming-with-Whisper",
+      "snippet": "Dec 30, 2025 · Learn how to use OpenAI Whisper for real-time streaming transcription. Explore architecture, tools, latency optimization, and code examples to build live speech-to-text applications."
+    },
+    {
+      "title": "Applications | ggml-org/whisper.cpp | DeepWiki",
+      "url": "https://deepwiki.com/ggml-org/whisper.cpp/3-applications",
+      "snippet": "May 23, 2026 · This page documents the application ecosystem built on top of the whisper.cpp library. It covers the command-line tools, servers, real-time applications, and specialized integrations that demonstrate practical uses of the speech recognition capabilities."
+    },
+    {
+      "title": "Streaming ASR vs Whisper on mobile: when to... - DEV Community",
+      "url": "https://dev.to/voxrtio/streaming-asr-vs-whisper-on-mobile-when-to-switch-5cm7",
+      "snippet": "Voice agents, real-time captions, live meeting transcription, voice notes with instant feedback. Developers building this new generation of apps typically look at Whisper first (whisper.cpp, faster-whisper). It is the de facto default for on-device speech-to-text."
+    },
+    {
+      "title": "Real-Time Speech-to-Text on Raspberry Pi using Whisper.cpp...",
+      "url": "https://www.youtube.com/watch?v=NmH2CwsRzyk",
+      "snippet": "In this tutorial, we explore real-time speech-to-text on Raspberry Pi using Whisper.cpp."
+    },
+    {
+      "title": "Whisper.cpp Streaming Benchmark - Picovoice Docs",
+      "url": "https://picovoice.ai/docs/benchmark/stt-whisper-cpp-streaming-speech-to-text/",
+      "snippet": "Whisper.cpp Streaming Benchmark. Prerequisites. Usage. Setup. Word Accuracy Benchmark."
+    },
+    {
+      "title": "Self-Hosted Speech-to-Text: Running OpenAI Whisper on Your VPS",
+      "url": "https://www.interserver.net/tips/kb/self-hosted-speech-to-text-running-openai-whisper-on-your-vps/",
+      "snippet": "Run OpenAI Whisper on your own VPS for free, private transcription. Build whisper.cpp, pick a model, and transcribe audio to text and SRT on plain CPU."
+    },
+    {
+      "title": "Whisper Large-v3-turbo на русском: разбор модели в 2026 | Диктуй",
+      "url": "https://diktuy.ru/blog/whisper-large-v3-turbo-russkiy-2026",
+      "snippet": "Whisper Large-v3-turbo на русском: архитектура, WER 5,6% через Groq против 8,1% у Large-v3, альтернативы GigaAM v3 и faster-whisper, когда выбирать каждую."
+    },
+    {
+      "title": "whisper.cpp : WASM example",
+      "url": "https://ggml.ai/whisper.cpp/",
+      "snippet": "Minimal whisper.cpp example running fully in the browser. Usage instructions: Load a ggml model file (you can obtain one from here, recommended: tiny or base)."
+    },
+    {
+      "title": "Which open-source Whisper should you use? 8 compared (2026)",
+      "url": "https://whipscribe.com/whisper-implementations-compared",
+      "snippet": "faster-whisper or WhisperX? faster-whisper is the fast engine; WhisperX wraps it and adds diarization + aligned word timestamps. Use WhisperX only when you need those. Which runs on a Raspberry Pi? whisper.cpp — no GPU or Python needed."
+    },
+    {
+      "title": "Заводим у себя нейронку OpenAI для локального распознавания...",
+      "url": "https://vas3k.club/post/18916/",
+      "snippet": "Скачиваем репозиторий с whisper.cpp, собираем программу и скачиваем самую большую (large-v1) модель от OpenAI"
+    }
+  ]
+}

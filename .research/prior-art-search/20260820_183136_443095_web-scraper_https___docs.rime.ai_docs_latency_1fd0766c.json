@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "skill": "web-scraper",
+  "kind": "document",
+  "query": "https://docs.rime.ai/docs/latency",
+  "args": {
+    "links": false,
+    "images": false,
+    "tables": true,
+    "language": null
+  },
+  "generated_at": "2026-08-20T18:31:36.443037+0300",
+  "status": "ok",
+  "message": null,
+  "count": null,
+  "payload": {
+    "url": "https://docs.rime.ai/docs/latency",
+    "title": "Low-latency TTS for real-time voice agents - Rime Docs",
+    "author": null,
+    "date": "2026-08-12",
+    "sitename": "",
+    "description": "",
+    "content": "---\ntitle: Low-latency TTS for real-time voice agents - Rime Docs\nurl: https://docs.rime.ai/docs/latency\nhostname: rime.ai\ndescription: Rime TTS latency benchmarks, the factors that affect response time, and practical ways to reduce it.\nsitename: Rime Docs\ndate: 2026-08-12\n---\nLatency at a glance\nRime’s cloud API delivers sub-200ms end-to-end latency under typical conditions. Coda reaches sub-100ms model latency on the GPU engine when self-hosted or on-prem, while Mist v3 has the lowest measured time to first audio. Via the cloud API, the total time you measure also includes network round-trip: typically 25–50ms from most of the continental US when you pick the closest regional endpoint. Contact Rime support to optimize further.Real-time performance benchmarks\nThese numbers were measured on a single Lambda H100 SXM machine with an H100 SXM5 GPU, 26 vCPUs, 221 GiB RAM, Ubuntu 24.04, and NVIDIA driver \n595.58.03.\nTTFA = Time-to-First-Audio. RTF = Real-Time Factor (synthesis time ÷ audio duration; values below 1.0 mean synthesis is faster than playback).\nReduce latency\n- Choose the model for the constraint. Use mistv3for the lowest cloud time to first audio. Choose Coda when voice quality is the priority and sub-100ms engine latency meets the target.\n- Consume the response as a stream. Start playback from the first bytes instead of buffering the complete response.\n- Use the nearest regional endpoint. Route East Coast traffic to US East and West Coast traffic to US West.\n- Request only the audio you need. Smaller payloads cross the network faster. Telephony applications should request 8kHz audio directly.\n- Skip normalization only for already normalized text. noTextNormalizationremoves preprocessing, but it is safe only when the input has no digits, abbreviations, or ambiguous punctuation.\nWhat affects latency\nFactors that affect API response time\n- Server processing: Model inference, text preprocessing, and audio postprocessing all contribute to the first response byte.\n- Payload size: Larger audio responses take longer to transmit.\n- Network distance: A longer route between the application and Rime increases round-trip time.\nStream the response\nStreaming reduces time to first playback because the client can consume the first chunk before Rime finishes generating the complete response. Buffering the whole body delays playback until synthesis and transfer are complete. The chart uses this request body:Python\nRime’s models produce PCM audio by default, and conversion and resampling must take place for sampling rates other than the model’s native rate (24kHz for Coda, 22.05kHz for Mist). For low-bandwidth applications, the smaller payload usually outweighs the added server processing.\nNetwork latency by region\nRime serves the API from multiple regions so you can route requests to the data center closest to your application. Picking the closest endpoint typically shaves tens of milliseconds off round-trip time. These are rough round-trip times (RTT), the back-and-forth network delay between your application and Rime, from major US metros to each region:\nRules of thumb:\n- Same region (your app and the Rime endpoint in the same AWS region): typically 1–10 ms.\n- Coast-to-coast: ~60 ms is the physical floor, set by the speed of light in fiber across ~2,500 miles. 60–85 ms is normal.\n- Above 90 ms between major US metros usually points to a suboptimal network route, not Rime.\nrime speedtest."
+  }
+}

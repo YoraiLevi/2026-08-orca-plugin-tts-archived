@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "skill": "web-scraper",
+  "kind": "document",
+  "query": "https://docs.rime.ai/docs/streaming",
+  "args": {
+    "links": false,
+    "images": false,
+    "tables": true,
+    "language": null
+  },
+  "generated_at": "2026-08-20T18:31:36.536101+0300",
+  "status": "ok",
+  "message": null,
+  "count": null,
+  "payload": {
+    "url": "https://docs.rime.ai/docs/streaming",
+    "title": "Streaming TTS - Rime Docs",
+    "author": null,
+    "date": "2026-08-07",
+    "sitename": "",
+    "description": "",
+    "content": "---\ntitle: Streaming TTS - Rime Docs\nurl: https://docs.rime.ai/docs/streaming\nhostname: rime.ai\ndescription: Choose HTTP or WebSockets for real-time Rime speech, with runnable examples for low-latency voice agents.\nsitename: Rime Docs\ndate: 2026-08-07\n---\ntl;dr: All Rime models stream.\nRime’s TTS API streams audio as it is generated rather than waiting for the full utterance. Coda and Mist stream over HTTP and WebSockets. Under typical conditions, the cloud API delivers sub-200ms end-to-end latency when an application uses the nearest regional endpoint. For real-time voice agents, streaming is the default mode of operation.Choosing a transport\nRules of thumb:\n- Building a voice agent? Use the WebSocket API. A persistent connection avoids per-utterance handshakes, you can feed text in as your LLM generates it, and word-level timestamps tell you exactly what was spoken when a caller interrupts.\n- Synthesizing complete sentences server-side? HTTP streaming is the simplest path: one POST, audio bytes stream back in the response body.\n- Already using LiveKit, Pipecat, Vapi, or Daily? The integrations handle transport for you. Rime plugs in as the TTS stage of the pipeline.\nHTTP streaming\nA singlePOST to https://users.rime.ai/v1/rime-tts returns audio bytes in the response body as they are generated. The Accept header controls the format: Opus, MP3, WAV, PCM, or G.711 μ-law. See the full format table.\ncURL\nPython\nWebSocket streaming\nRime’s WebSocket API (wss://users-ws.rime.ai/ws3) holds a persistent connection: send text messages as your application produces them and receive structured JSON events back, including base64 audio chunks, word-level timestamps, and a done event per synthesis batch.\nPython\nchunk (base64 audio), timestamps (word-level timing), done (synthesis batch complete), and error. The segment parameter controls text buffering and when synthesis starts. See Segmentation & behavior settings.\nWebSocket API overview\nChoosing between /ws3, /ws2, and /ws, the full event schema, context IDs, and interruption handling.\nServer-sent events (SSE)\nFor clients built aroundEventSource, Mist v2 supports server-sent events: the same POST /v1/rime-tts endpoint with Accept: text/event-stream streams audio as events over a standard HTTP response. SSE is only available for Mist v2; for other models, use HTTP or WebSocket streaming.\nStreaming for telephony and IVR\nFor phone-based voice agents and IVR systems, request audio that matches the telephony codec directly. Rime synthesizes G.711 μ-law (audio/PCMU) and 8kHz-sampled audio natively, so no transcoding step sits between synthesis and the caller:\n- Set Accept: audio/PCMU(HTTP) oraudioFormat=mulaw(WebSocket) for μ-law output.\n- Set samplingRate: 8000to match the telephony stream and shrink payloads.\nLatency\nListeners experience time to first audio, not total synthesis time, so streaming has the largest effect on perceived responsiveness. Under typical conditions, Rime’s cloud API delivers sub-200ms end-to-end latency when an application uses the nearest regional endpoint. Withmistv3, typical time to first byte is well below 100ms. Coda achieves sub-100ms model latency on the GPU engine when self-hosted or on-prem.\nLatency\nMeasured benchmarks per model, what affects response time, and how to reduce it; regional endpoints, payload sizing, and text normalization."
+  }
+}

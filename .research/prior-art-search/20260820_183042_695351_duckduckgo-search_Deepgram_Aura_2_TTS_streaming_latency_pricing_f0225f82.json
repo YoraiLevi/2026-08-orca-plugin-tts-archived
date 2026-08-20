@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Deepgram Aura 2 TTS streaming latency pricing",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:30:42.695196+0300",
+  "status": "ok",
+  "message": null,
+  "count": 15,
+  "payload": [
+    {
+      "title": "Deepgram (Aura) Review: Pricing, Features & Test Results",
+      "url": "https://knowara.com/ai-tools/voice/deepgram-aura-review/",
+      "snippet": "Tested by the Knowara AI Tools team using 40+ text-to-speech generations across Aura-1 and Aura-2, plus live streaming transcription tests with Nova-3, to verify latency, pricing, and voice quality claims first-hand. Deepgram is a developer-focused voice AI platform combining Nova-3 speech-to-text (STT) and Aura text-to-speech (TTS) into one API."
+    },
+    {
+      "title": "Aura-2 - API Pricing & Providers | OpenRouter",
+      "url": "https://openrouter.ai/deepgram/aura-2",
+      "snippet": "Aura-2 is a multilingual text-to-speech model from Deepgram. It supports Deepgram’s canonical Aura-2 voice catalog for speech synthesis across multiple languages."
+    },
+    {
+      "title": "Deepgram Pricing | Scalable Speech-to-Text, Text-to-Speech ...",
+      "url": "https://deepgram.com/pricing",
+      "snippet": "How is Text-to-Speech billed? Deepgram Text-to-Speech is billed per 1,000 characters of input text. This applies to Flux TTS, Aura-2, and Aura-1. Pricing varies by model and plan, see the Text to Speech table above for current rates. Can I deploy Deepgram on-premise or in a private cloud? Yes."
+    },
+    {
+      "title": "Introducing Aura-2: Enterprise-Grade Text-to-Speech",
+      "url": "https://deepgram.com/learn/introducing-aura-2-enterprise-text-to-speech",
+      "snippet": "Apr 15, 2025 · Discover Aura-2, Deepgram’s next-gen text-to-speech API designed for enterprise-grade voice AI. Deliver natural, real-time speech with sub-200ms latency, domain-specific accuracy, and scalable performance for production environments."
+    },
+    {
+      "title": "AWS Marketplace: Deepgram Voice AI Aura-2 Text-to-Speech (TTS)",
+      "url": "https://aws.amazon.com/marketplace/pp/prodview-53fbbb6iqhkim",
+      "snippet": "Jul 28, 2026 · Real time STT for human like conversations: Sub 300 ms streaming latency with industry leading accuracy (Nova 3: 6.84% median WER streaming; 5.26% batch) to keep pace with fast, noisy speech. Natural, low latency TTS: Sub 250 ms responses with lifelike speech and streaming delivery for natural turn taking in real time. Production ready voice agents on AWS: Combine Deepgram STT/TTS with Amazon ..."
+    },
+    {
+      "title": "Deepgram Pricing Explained (2026): STT, Aura & Voice Agent ...",
+      "url": "https://dynalord.com/blog/deepgram-pricing",
+      "snippet": "Jul 19, 2026 · Deepgram pricing for 2026, explained clearly. Nova-3 from $0.0043/min, Aura TTS at $0.030/1k chars, the Growth plan, $200 free credit — and what a real bill looks like."
+    },
+    {
+      "title": "Deepgram API 2026: Nova-3 STT & Aura-2 TTS | APIRank",
+      "url": "https://apirank.vip/tutorials/deepgram-api-review/",
+      "snippet": "Jun 21, 2026 · This review covers the full Deepgram API platform, Nova-3 accuracy, Aura-2 voice quality, pricing breakdown, competitive positioning, and developer experience. TL;DR: Deepgram offers STT from $0.0043/min (Nova-3 streaming) and TTS from $0.015/1K chars (Aura-1)."
+    },
+    {
+      "title": "Aura-2 vs ElevenLabs: TTS Quality and Pricing (2026) | CallMissed",
+      "url": "https://www.callmissed.com/en/blog/aura-vs-elevenlabs-turbo-v3-tts-quality",
+      "snippet": "Pricing: Deepgram’s pricing page lists Aura TTS at $0.015 per 1,000 characters, while Deepgram’s Aura-2 announcement separately cites $0.03 per 1,000 characters. Buyers should confirm the current endpoint, model, and rate card before budgeting."
+    },
+    {
+      "title": "Deepgram Pricing 2026: Aura-2 TTS at $30/1M + Voice... | TextToLab",
+      "url": "https://texttolab.com/blog/deepgram-pricing",
+      "snippet": "Deepgram Aura-2 TTS costs $0.030 per 1,000 characters on pay-as-you-go, dropping to $0.027/1K on the Growth plan. That's $30/1M characters — half the price of ElevenLabs Flash ($60/1M) and roughly equal to Cartesia's effective rate."
+    },
+    {
+      "title": "Best TTS API for Developers (2026): Quality, Latency, and Streaming",
+      "url": "https://inworld.ai/resources/best-tts-api-2026",
+      "snippet": "Deepgram Aura-2: WebSocket TTS with token-by-token input streaming. OpenAI TTS: HTTP chunk transfer encoding for standard TTS. WebSocket available through the Realtime API for voice-to-voice use cases."
+    },
+    {
+      "title": "Best TTS Providers for Voice AI Agents 2026",
+      "url": "https://futureagi.com/blog/best-tts-providers-voice-agents-2026/",
+      "snippet": "Streaming protocols: WebSocket and HTTP streaming. Deepgram’s STT and TTS share the same WebSocket surface, which simplifies wiring on a Deepgram-end-to-end stack. Where Deepgram wins: the price-to-quality-to-latency triangle. Aura-2 is the default pick for production voice..."
+    },
+    {
+      "title": "8 Best AI Text-to-Speech Tools 2026 (Developer Tested) | Fastio",
+      "url": "https://fast.io/resources/best-ai-text-to-speech-tools-2026/",
+      "snippet": "Cartesia Sonic, fast streaming latency for voice agentsDeepgram Aura-2, lowest per-character cost with enterprise complianceOpenAI gpt-4o-mini-tts, cheapest per minute with the simplest integration"
+    },
+    {
+      "title": "Top 10 Text-to-Speech ElevenLabs Alternatives for Production Use",
+      "url": "https://deepgram.com/learn/text-to-speech-elevenlabs-alternatives",
+      "snippet": "Compare the leading text-to-speech ElevenLabs alternatives built for production reliability. See how Deepgram, OpenAI, Google Cloud, and others perform on latency, scalability, pricing, and deployment options. 8 min read."
+    },
+    {
+      "title": "9 Best Text-to-Speech APIs for Developers (2026) | TECHSY",
+      "url": "https://techsy.io/en/blog/best-tts-apis-developers",
+      "snippet": "Picking a text-to-speech API? We wired 9 into production voice agents and benchmarked real latency and cost per minute. See which fits your stack.4. Deepgram (Aura-2): Best Single-Vendor STT + TTS. 5. Google Cloud Text-to-Speech: Best Multilingual Breadth and Fat Free Tier."
+    },
+    {
+      "title": "Best Text-To-Speech APIs in 2026: Developer Guide | Gradium",
+      "url": "https://gradium.ai/content/best-text-to-speech-apis-2026",
+      "snippet": "Gradium TTS: Streaming Text-To-Speech for Real-Time Applications. Gradium's TTS API delivers 16-bit PCM audio at 48 kHz by default (16 kHz and 24 kHz options available)."
+    }
+  ]
+}

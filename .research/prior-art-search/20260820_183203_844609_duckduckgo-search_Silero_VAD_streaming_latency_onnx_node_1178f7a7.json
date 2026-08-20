@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Silero VAD streaming latency onnx node",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:32:03.844399+0300",
+  "status": "ok",
+  "message": null,
+  "count": 14,
+  "payload": [
+    {
+      "title": "Silero VAD on Android — ONNX Runtime, sub-ms latency... | Soniqo",
+      "url": "https://soniqo.audio/guides/vad/android",
+      "snippet": "Silero VAD v5 runs on Android, embedded Linux, and Windows via ONNX Runtime, providing streaming voice activity detection with sub-millisecond latency. It serves as the pipeline's speech trigger — STT only runs when speech is detected, saving compute."
+    },
+    {
+      "title": "deepghs/silero-vad-onnx · Hugging Face",
+      "url": "https://huggingface.co/deepghs/silero-vad-onnx",
+      "snippet": "ONNX model of snakers4/silero-vad. This model isn't deployed by any Inference Provider. Ask for provider support. Space using deepghs/silero-vad-onnx 1."
+    },
+    {
+      "title": "Silero VAD - Patter | Documentation",
+      "url": "https://docs.getpatter.com/typescript-sdk/providers/silero-vad",
+      "snippet": "Silero VAD. ONNX-backed voice activity detection for fast, accurate barge-in in pipeline mode.Silero VAD ships with onnxruntime-node as an optional peer dependency (~210 MB)"
+    },
+    {
+      "title": "Silero VAD: Voice Activity Detection Guide, Setup, and Python...",
+      "url": "https://aiadoptionagency.com/silero-vad-voice-activity-detection/",
+      "snippet": "Complete Silero VAD guide. How to use Silero Voice Activity Detection in Python with code examples. Setup, configuration, performance benchmarks, and real-time speech detection implementation."
+    },
+    {
+      "title": "jjhbw/silero-vad - npm",
+      "url": "https://www.npmjs.com/package/@jjhbw/silero-vad?activeTab=readme",
+      "snippet": "Silero VAD Node. Minimal Node.js wrapper around the Silero VAD ONNX model, with a small CLI and parity tests against the Python implementation. The Node implementation runs VAD and silence stripping directly from ffmpeg streams to keep memory usage low on long files."
+    },
+    {
+      "title": "Silero VAD: pre-trained enterprise-grade Voice Activity Detector",
+      "url": "https://helpwanted.dev/projects/snakers4/silero-vad",
+      "snippet": "onnx onnx-runtime onnxruntime pytorch speech speech-processing vad voice-activity-detection voice-commands voice-control voice-detection voice-recognition. What is the usecase for Silero V6 silero_vad_16k_op15.onnx ?"
+    },
+    {
+      "title": "VAD Silero | LOPS Docs",
+      "url": "https://dotdocs.netlify.app/operators/pipelines/vad_silero/",
+      "snippet": "Place a VAD Silero LOP in your network. On the VAD Settings page, pulse Install Dependencies if this is the first time using the operator. Pulse Load Model to load the Silero VAD model. The Model Ready indicator will turn on when the model finishes loading."
+    },
+    {
+      "title": "VADIterator for Streaming | snakers4/silero-vad | DeepWiki",
+      "url": "https://deepwiki.com/snakers4/silero-vad/5.1-vaditerator-for-streaming",
+      "snippet": "src/silero_vad/utils_vad.py. This document covers the VADIterator class, which provides streaming voice activity detection capabilities for real-time audio processing.Pre-loaded silero VAD model (ONNX or JIT). threshold. float."
+    },
+    {
+      "title": "GitHub - snakers4/silero-vad: Silero VAD: pre-trained...",
+      "url": "https://www.webkkk.net/snakers4/silero-vad",
+      "snippet": "Silero VAD supports 8000 Hz and 16000 Hz sampling rates. Highly Portable. Silero VAD reaps benefits from the rich ecosystems built around PyTorch and ONNX running everywhere where these runtimes are available. No Strings Attached."
+    },
+    {
+      "title": "RoomIO always forces 50 ms audio frames when BVC is enabled...",
+      "url": "https://github.com/livekit/agents/issues/3894",
+      "snippet": "Silero VAD (and any other component expecting shorter frames) does extra copies/resampling and regularly trips the “inference is slower than realtime” warning, despite having the same model/CPU as before. Reproduction Steps."
+    },
+    {
+      "title": "Multimodal Companion - Inworld AI Documentation",
+      "url": "https://docs.inworld.ai/node/templates/multimodal-companion",
+      "snippet": "VAD_MODEL_PATH: Path to your VAD model file (the repo includes the VAD model at silero_vad.onnx).Text responses streamed as they’re generated. Audio synthesized in chunks for low latency. All responses include interaction IDs for tracking."
+    },
+    {
+      "title": "I Built a Sub-2s Voice Translation Proxy - DEV Community",
+      "url": "https://dev.to/freaking_wish/i-built-a-sub-2s-voice-translation-proxy-1ni4",
+      "snippet": "The Fix: I ran Silero VAD (Voice Activity Detection) as a local ONNX model directly inside my FastAPI server. It calculates the exact millisecond the user stops speaking and only flushes valid speech chunks to the Sarvam WebSocket."
+    },
+    {
+      "title": "Show HN: Voice bots with 500ms response times | Python LibHunt",
+      "url": "https://www.libhunt.com/posts/1378342-show-hn-voice-bots-with-500ms-response-times",
+      "snippet": "Silero runs via onnx-runtime (with wasm). Whilst it sort-of-kinda works in Firefox, the VAD seems to misfire more than it should, causing the latency numbers to be somewhat absurd."
+    },
+    {
+      "title": "Voice Activity Detection Implementation for... — NOVASOLUTIONS",
+      "url": "https://novasolutions.technology/ai-development/services/speech/voice-activity-detection-vad.html",
+      "snippet": "Silero VAD — the best quality/speed balance for production. We use it in 80% of projects due to low latency and ONNX support. Silero VAD is 1.07 times more precise than WebRTC VAD (0.98 vs 0.92). Practical Integration: Code."
+    }
+  ]
+}

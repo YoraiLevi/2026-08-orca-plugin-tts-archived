@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "PlayHT streaming TTS API latency pricing websocket",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:22.383701+0300",
+  "status": "ok",
+  "message": null,
+  "count": 21,
+  "payload": [
+    {
+      "title": "Quickstart | PlayHT Text to Speech API",
+      "url": "https://docs.play.ht/",
+      "snippet": "WebSocket API. Text to speech HTTP streamingpost. Create Batch TTS Jobpost.The PlayHT API provides a simple interface to our state-of-the-art AI TTS models. Follow this guide to get started."
+    },
+    {
+      "title": "Build Your Own Voice Stack with Deepgram and PlayHT: A Practical...",
+      "url": "https://dev.to/callstacktech/build-your-own-voice-stack-with-deepgram-and-playht-a-practical-guide-2kl9",
+      "snippet": "PlayHT Text-to-Speech API. Official Documentation – Low-latency TTS streaming, voice selection, output formats."
+    },
+    {
+      "title": "ElevenLabs vs Play.ht vs Murf vs OpenAI TTS: Best AI... | ToolHalla",
+      "url": "https://toolhalla.ai/blog/elevenlabs-vs-play-ht-vs-murf-openai-tts-2026",
+      "snippet": "What Sets Play.ht Apart. API-first architecture. Play.ht's API is designed for production workloads: real-time WebSocket streaming with sub-300ms latency, batch processing for high-volume jobs, and SDKs for Python, Node.js, and REST."
+    },
+    {
+      "title": "ElevenLabs vs PlayHT vs Murf: Best AI Voice Generators | AgentGavel",
+      "url": "https://www.agentgavel.com/blog/elevenlabs-vs-playht-vs-murf",
+      "snippet": "Its WebSocket API enables ultra-low-latency streaming for conversational AI applications. PlayHT's API is similarly comprehensive with REST and gRPC interfaces."
+    },
+    {
+      "title": "Building a Real-Time Voice Pipeline: Streaming Audio... | PlayHT Blog",
+      "url": "https://playht.co/blog/streaming-audio-architecture",
+      "snippet": "Transform text into lifelike speech with PlayHT. 900+ AI voices, ultra-realistic voice cloning, and more.How PlayHT architects real-time streaming TTS for voice agents: first-byte latency, chunked audio delivery, graceful barge-in, and buffering that avoids choppy playback."
+    },
+    {
+      "title": "PlayHT: What It Actually Does in 2026 | Custom Clanker",
+      "url": "https://www.customclanker.com/playht-reality-check/",
+      "snippet": "PlayHT is a text-to-speech platform that wants to be the thing you use instead of ElevenLabs. It offers voice cloning, a voice library, streaming TTS, and an API — the same feature checklist as the market leader, at lower prices. The pitch is straightforward: comparable quality, better economics."
+    },
+    {
+      "title": "ElevenLabs vs OpenAI TTS vs PlayHT 2026: Best AI Voice Ge...",
+      "url": "https://pikvue.com/elevenlabs-vs-openai-tts-vs-playht-2026-best-ai-voice-generator/",
+      "snippet": "API latency: ElevenLabs’ API has 200-500ms latency for short clips. For real-time conversational AI (voice assistants, customer service bots), this delay is noticeable. PlayHT’s streaming API and OpenAI’s real-time audio are faster for interactive use cases."
+    },
+    {
+      "title": "Play.ht Review (2026): AI Voice Generator Features & Pricing",
+      "url": "https://searchmytool.com/tool/play-ht",
+      "snippet": "Generate realistic AI voices with Play.ht. Explore pricing tiers, voice cloning capabilities, and top TTS alternatives on SearchMyTool."
+    },
+    {
+      "title": "PlayAI Realtime WebSocket APIs — Event-Driven... | APIs.io AsyncAPI",
+      "url": "https://apis.io/asyncapis/playht/playht-asyncapi/",
+      "snippet": "PlayAI Realtime WebSocket APIs. PlayHT · AsyncAPI Specification.Covers the Text-to-Speech (TTS) streaming WebSocket used to synthesize audio from text in real time, and the Voice Agents WebSocket used to operate audio-in / audio-out conversational agents."
+    },
+    {
+      "title": "TTS Pricing Comparison 2026: 11 Services From $0 to... | TextToLab",
+      "url": "https://texttolab.com/pricing",
+      "snippet": "Text-to-Speech Pricing Comparison. Compare pricing across 11 AI voice providers including Gemini Flash (#2 Speech Arena), Grok ($4.20/1M chars beta), and Inworld (#1 Speech Arena). Free tiers, pay-as-you-go rates, and enterprise options — updated May 2026."
+    },
+    {
+      "title": "PlayHT Review 2026: Features, Pricing & Alternatives",
+      "url": "https://lemonsight.com/tool/audio/playht",
+      "snippet": "PlayHT review 2026: An AI-powered text-to-speech and voice cloning platform that… Pricing, pros & cons, and top alternatives — hands-on tested by LemonSight."
+    },
+    {
+      "title": "WebSocket API - docs.play.ht",
+      "url": "https://docs.play.ht/reference/playht-tts-websocket-api",
+      "snippet": "By following these guidelines and using the provided examples, you can effectively integrate the PlayHT TTS WebSocket API into your application, enabling real-time text-to-speech functionality with low latency and high performance."
+    },
+    {
+      "title": "PlayHT Review & Pricing (2026) | tooledger",
+      "url": "https://tooledger.com/tools/playht",
+      "snippet": "Text-to-speech API with voice cloning and ultra-low-latency streaming for real-time applications"
+    },
+    {
+      "title": "PlayHT API — Pricing, Strengths & Best Use Cases | Tokenscost ...",
+      "url": "https://tokenscost.com/providers/playht",
+      "snippet": "Compare PlayHT Play 3.0 Mini and Dialog TTS API pricing — ultra-low-latency streaming voices for real-time agents."
+    },
+    {
+      "title": "PlayHT AI API Pricing & Models | Tokenscost",
+      "url": "https://tokenscost.com/providers/playht-pricing",
+      "snippet": "Compare PlayHT Play 3.0 Mini and Dialog TTS API pricing — ultra-low-latency streaming voices for real-time agents."
+    },
+    {
+      "title": "GitHub - api-evangelist/play-ht: AI voice generation and TTS ...",
+      "url": "https://github.com/api-evangelist/play-ht",
+      "snippet": "May 8, 2026 · REST API for PlayHT TTS, voice cloning, and PlayDialog conversational voice. v2.2 and v2.3 endpoints supported. WebSocket streaming for low-latency conversational use cases."
+    },
+    {
+      "title": "API Documentation — PlayHT Developer Docs",
+      "url": "https://playht.co/docs",
+      "snippet": "Build with PlayHT A simple, powerful REST API for text-to-speech, voice cloning, dubbing, and every other PlayHT feature."
+    },
+    {
+      "title": "Pricing — PlayHT",
+      "url": "https://playht.co/pricing",
+      "snippet": "Transform text into lifelike speech with PlayHT. 900+ AI voices, ultra-realistic voice cloning, and more."
+    },
+    {
+      "title": "ElevenLabs vs Play.ht (2026): Which Is Better?",
+      "url": "https://aicomparison.ai/elevenlabs-vs-playht/",
+      "snippet": "ElevenLabs API vs Play.ht API comparison showing WebSocket streaming, REST API workflows, developer tools, and real-time AI speech generation.Play.ht. Streaming TTS. Yes (WebSocket). No. Real-time latency."
+    },
+    {
+      "title": "Welcome to Bland Speech - Bland",
+      "url": "https://docs.bland.ai/tts/welcome",
+      "snippet": "Humanlike text-to-speech built for realtime conversations and streaming LLM output.WebSocket reference. Review every client message, server event, audio format, limit, and error. Migration guides. Move from ElevenLabs, Cartesia, Deepgram, PlayHT, Resemble, Google, or Polly."
+    },
+    {
+      "title": "10 Best ElevenLabs Alternatives in 2026 (Tested & Reviewed) - Brilo AI",
+      "url": "https://www.brilo.ai/resources/best-elevenlabs-alternative-for-ai-voice-assistance",
+      "snippet": "Cartesia (lowest latency), PlayHT (streaming + telephony), or Deepgram (if you also need STT) are your best options. ElevenLabs' latency is genuinely problematic for live conversation. Are you a content creator making voiceovers?"
+    }
+  ]
+}

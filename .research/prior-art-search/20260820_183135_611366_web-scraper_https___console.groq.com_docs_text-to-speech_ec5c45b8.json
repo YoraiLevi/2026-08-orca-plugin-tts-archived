@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "skill": "web-scraper",
+  "kind": "document",
+  "query": "https://console.groq.com/docs/text-to-speech",
+  "args": {
+    "links": false,
+    "images": false,
+    "tables": true,
+    "language": null
+  },
+  "generated_at": "2026-08-20T18:31:35.611281+0300",
+  "status": "ok",
+  "message": null,
+  "count": null,
+  "payload": {
+    "url": "https://console.groq.com/docs/text-to-speech",
+    "title": "Text to Speech - GroqDocs",
+    "author": null,
+    "date": null,
+    "sitename": "",
+    "description": "",
+    "content": "---\ntitle: Text to Speech - GroqDocs\nurl: https://console.groq.com/docs\nhostname: groq.com\ndescription: Instantly generate lifelike audio from text using Groq's fast text-to-speech API with support for multiple voices and languages.\nsitename: GroqDocs\n---\nLearn how to instantly generate lifelike audio from text.\nThe Groq API speech endpoint provides fast text-to-speech (TTS), enabling you to convert text to spoken audio in seconds. With support for English and Arabic voices, you can create life-like audio content for customer support agents, game characters, narration, and more.\n| Endpoint | Usage | API Endpoint | \n|---|---|---|\n| Speech | Convert text to audio | https://api.groq.com/openai/v1/audio/speech | \n| Model ID | Language | Description | \n|---|---|---|\n| canopylabs/orpheus-v1-english | English | Expressive TTS with vocal direction controls | \n| canopylabs/orpheus-arabic-saudi | Arabic (Saudi) | Authentic Saudi dialect synthesis | \nThe speech endpoint takes four key inputs:\n- model: canopylabs/orpheus-v1-englishorcanopylabs/orpheus-arabic-saudi\n- input: the text to generate audio from\n- voice: the desired voice for output\n- response format: defaults to \"wav\"\nimport os\nfrom groq import Groq\nclient = Groq(api_key=os.environ.get(\"GROQ_API_KEY\"))\nspeech_file_path = \"orpheus-english.wav\" \nmodel = \"canopylabs/orpheus-v1-english\"\nvoice = \"troy\"\ntext = \"Welcome to Orpheus text-to-speech. [cheerful] This is an example of high-quality English audio generation with vocal directions support.\"\nresponse_format = \"wav\"\nresponse = client.audio.speech.create(\n    model=model,\n    voice=voice,\n    input=text,\n    response_format=response_format\n)\nresponse.write_to_file(speech_file_path)import fs from \"fs\";\nimport Groq from 'groq-sdk';\nconst groq = new Groq({\n  apiKey: process.env.GROQ_API_KEY\n});\nconst speechFilePath = \"orpheus-english.wav\";\nconst model = \"canopylabs/orpheus-v1-english\";\nconst voice = \"hannah\";\nconst text = \"Welcome to Orpheus text-to-speech. [cheerful] This is an example of high-quality English audio generation with vocal directions support.\";\nconst responseFormat = \"wav\";\nasync function main() {\n  const response = await groq.audio.speech.create({\n    model: model,\n    voice: voice,\n    input: text,\n    response_format: responseFormat\n  });\n  \n  const buffer = Buffer.from(await response.arrayBuffer());\n  await fs.promises.writeFile(speechFilePath, buffer);\n  \n  console.log(`Orpheus English speech generated: ${speechFilePath}`);\n}\nmain().catch((error) => {\n  console.error('Error generating speech:', error);\n});curl https://api.groq.com/openai/v1/audio/speech \\\n  -X POST \\\n  -H \"Authorization: Bearer $GROQ_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\n    \"model\": \"canopylabs/orpheus-v1-english\",\n    \"input\": \"Welcome to Orpheus text-to-speech. [cheerful] This is an example of high-quality English audio generation with vocal directions support.\",\n    \"voice\": \"austin\",\n    \"response_format\": \"wav\"\n  }' \\\n  --output orpheus-english.wavFor comprehensive documentation on available voices, vocal directions, use cases, and best practices, see the Orpheus documentation:\nOrpheus Text to Speech\nLearn about vocal directions, available voices, use cases, and best practices for generating expressive speech"
+  }
+}

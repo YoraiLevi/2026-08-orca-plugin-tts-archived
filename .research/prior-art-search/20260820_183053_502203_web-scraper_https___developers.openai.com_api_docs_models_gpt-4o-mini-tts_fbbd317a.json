@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "skill": "web-scraper",
+  "kind": "document",
+  "query": "https://developers.openai.com/api/docs/models/gpt-4o-mini-tts",
+  "args": {
+    "links": false,
+    "images": false,
+    "tables": true,
+    "language": null
+  },
+  "generated_at": "2026-08-20T18:30:53.502129+0300",
+  "status": "ok",
+  "message": null,
+  "count": null,
+  "payload": {
+    "url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-tts",
+    "title": "GPT-4o mini TTS Model | OpenAI API",
+    "author": null,
+    "date": "2025-03-20",
+    "sitename": "",
+    "description": "",
+    "content": "---\ntitle: GPT-4o mini TTS Model | OpenAI API\nurl: https://developers.openai.com/api/docs/models/gpt-4o-mini-tts\nhostname: openai.com\nsitename: OpenAI Developers\ndate: 2025-03-20\n---\nGPT-4o mini TTS\nDefault\nText-to-speech model powered by GPT-4o mini\nText-to-speech model powered by GPT-4o mini\nPerformance\nHigher\nSpeed\nFast\nPrice\n$0.6•$12\nInput•Output\nInput\nText\nOutput\nAudio\nGPT-4o mini TTS is a text-to-speech model built on GPT-4o mini, a fast and powerful language model. Use it to convert text to natural sounding spoken text. The maximum number of input tokens is 2000.\nPricing\nPricing is based on the number of tokens used, or other metrics based on the model type. For tool-specific models, like search and computer use, there’s a fee per tool call. See details in the pricing page.\nText tokens\nPer 1M tokens\nInput\n$0.60\nQuick comparison\nInput\nGPT-4o Realtime\n$5.00\nGPT-4o mini TTS\n$0.60\nGPT-4o mini Realtime\n$0.60\nAudio tokens\nPer 1M tokens\nOutput\n$12.00\nModalities\nText\nInput only\nImage\nNot supported\nAudio\nOutput only\nVideo\nNot supported\nEndpoints\nChat Completions\nv1/chat/completions\nResponses\nv1/responses\nRealtime\nv1/realtime\nRealtime translation\nv1/realtime/translations\nRealtime transcription\nv1/realtime/transcription_sessions\nAssistants\nv1/assistants\nBatch\nv1/batch\nFine-tuning\nv1/fine-tuning\nEmbeddings\nv1/embeddings\nImage generation\nv1/images/generations\nVideos\nv1/videos\nImage edit\nv1/images/edits\nSpeech generation\nv1/audio/speech\nTranscription\nv1/audio/transcriptions\nTranslation\nv1/audio/translations\nModeration\nv1/moderations\nCompletions (legacy)\nv1/completions\nSnapshots\nSnapshots let you lock in a specific version of the model so that performance and behavior remain consistent. Below is a list of all available snapshots and aliases for GPT-4o mini TTS.\ngpt-4o-mini-tts\ngpt-4o-mini-tts-2025-12-15\ngpt-4o-mini-tts-2025-03-20\ngpt-4o-mini-tts-2025-12-15\nRate limits\nRate limits ensure fair and reliable access to the API by placing specific caps on requests, tokens, audio duration, or other usage within a given time period. Your usage tier determines how high these limits are set and automatically increases as you send more requests and spend more on the API.\n| Tier | RPM | TPM | \n|---|---|---|\n| Free | Not supported | |\n| Tier 1 | 500 | 50,000 | \n| Tier 2 | 2,000 | 150,000 | \n| Tier 3 | 5,000 | 600,000 | \n| Tier 4 | 10,000 | 2,000,000 | \n| Tier 5 | 10,000 | 8,000,000 |"
+  }
+}

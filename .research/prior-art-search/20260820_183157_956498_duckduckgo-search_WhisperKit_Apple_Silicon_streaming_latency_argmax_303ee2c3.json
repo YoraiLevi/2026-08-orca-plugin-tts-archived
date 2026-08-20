@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "WhisperKit Apple Silicon streaming latency argmax",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:57.956311+0300",
+  "status": "ok",
+  "message": null,
+  "count": 10,
+  "payload": [
+    {
+      "title": "argmaxinc/argmax-oss-swift: On-device Speech AI for Apple Silicon...",
+      "url": "https://github.com/argmaxinc/argmax-oss-swift",
+      "snippet": "The Argmax CLI includes a local server that implements the OpenAI Audio API, allowing you to use existing OpenAI SDK clients or generate new ones. The server supports transcription and translation with output streaming capabilities (real-time transcription results as they're generated)."
+    },
+    {
+      "title": "What Is WhisperKit? Apple Silicon Whisper Inference Explained...",
+      "url": "https://speakhapi.com/blog/what-is-whisperkit",
+      "snippet": "WhisperKit is Argmax's open-source Swift framework for running Whisper speech-to-text on Apple Silicon. Here's what it is, how it works, and why Mac apps use it."
+    },
+    {
+      "title": "Overview | argmaxinc/WhisperKit | Zread",
+      "url": "https://zread.ai/argmaxinc/WhisperKit",
+      "snippet": "WhisperKit's real-time streaming capabilities enable transcription with sub-second latency, making it suitable for live captioning and voice assistant applications. The framework automatically manages audio buffering and segment confirmation to balance speed and accuracy."
+    },
+    {
+      "title": "Argmax WhisperKit vs whisper.cpp: On-Device Transcription Head to...",
+      "url": "https://cactuscompute.com/compare/argmax-vs-whisper-cpp",
+      "snippet": "Compare WhisperKit by Argmax and whisper.cpp for on-device speech recognition. Apple Neural Engine optimization vs cross-platform C/C++ performance."
+    },
+    {
+      "title": "Argmax on LinkedIn: GitHub - argmaxinc/WhisperKit: Swift native...",
+      "url": "https://www.linkedin.com/posts/argmaxinc_github-argmaxincwhisperkit-swift-native-activity-7180896842191134720--pNz",
+      "snippet": "Exciting updates to WhisperKit! - Real-time streaming mode is several times faster - 4-bit matches 16-bit with Data-free QLoRA - Extended quality benchmarks GitHub - argmaxinc/WhisperKit: Swift native on-device speech recognition with Whisper for Apple Silicon."
+    },
+    {
+      "title": "WhisperKit: On-device Speech Recognition",
+      "url": "https://numfer.com/argmaxinc/WhisperKit",
+      "snippet": "WhisperKit enables on-device speech recognition using state-of-the-art models like Whisper. It delivers features like real-time streaming and word timestamps."
+    },
+    {
+      "title": "Apple SpeechAnalyzer and Argmax WhisperKit - Argmax",
+      "url": "https://www.argmaxinc.com/blog/apple-and-argmax",
+      "snippet": "Argmax WhisperKit. openai/whisper-small.en. Argmax will integrate Apple. We were slightly disappointed to see that Apple’s model still requires a download and does not come pre-installed with iOS or macOS."
+    },
+    {
+      "title": "WhisperKit vs Apple SpeechAnalyzer: what the... | VocAI Blog",
+      "url": "https://vocai.net/blog/whisperkit-vs-speechanalyzer-2026/",
+      "snippet": "WhisperKit is Argmax’s CoreML port of OpenAI’s Whisper model. It ships as a Swift package, runs on the Apple Neural Engine, and supports the full Whisper model family from tiny up to large-v3-turbo. What it does well"
+    },
+    {
+      "title": "argmaxinc/whisperkit-coreml · Hugging Face",
+      "url": "https://huggingface.co/argmaxinc/whisperkit-coreml",
+      "snippet": "Instructions to use argmaxinc/whisperkit-coreml with libraries, inference providers, notebooks, and local apps. Follow these links to get started.How to use argmaxinc/whisperkit-coreml with WhisperKit: # Install CLI with Homebrew on macOS device brew install whisperkit-cli #."
+    },
+    {
+      "title": "Parakeet vs Whisper on Mac: 80ms Local AI Dictation... | Dictato",
+      "url": "https://dicta.to/blog/whisper-vs-parakeet-vs-apple-speech-engine/",
+      "snippet": "WhisperKit is an open-source framework by Argmax that runs Whisper models natively on Apple Silicon using Apple’s Core ML and the Neural Engine. It’s not a different AI model. It’s the same OpenAI Whisper weights, recompiled to run faster on M-series chips."
+    }
+  ]
+}

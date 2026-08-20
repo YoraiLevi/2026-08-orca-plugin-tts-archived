@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Groq TTS PlayAI streaming latency pricing API",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:22.612692+0300",
+  "status": "ok",
+  "message": null,
+  "count": 15,
+  "payload": [
+    {
+      "title": "Text to Speech - GroqDocs - console.groq.com",
+      "url": "https://console.groq.com/docs/text-to-speech",
+      "snippet": "Instantly generate lifelike audio from text using Groq's fast text-to-speech API with support for multiple voices and languages."
+    },
+    {
+      "title": "Playai TTS pricing & cost calculator — Groq | Future AGI",
+      "url": "https://futureagi.com/llm-cost-calculator/groq/playai-tts/",
+      "snippet": "Playai TTS. Groq audio speech. Playai TTS is a Groq text-to-speech model.It supports a 10,000-token context windowwith up to 10,000 output tokens."
+    },
+    {
+      "title": "Groq API Reference",
+      "url": "https://console.groq.com/docs/api-reference",
+      "snippet": "Comprehensive reference documentation for the Groq API, including endpoints, parameters, and examples."
+    },
+    {
+      "title": "Groq API Pricing Guide 2026 | AI Pricing Guru",
+      "url": "https://www.aipricing.guru/blog/groq-api-pricing-guide-2026/",
+      "snippet": "Jun 30, 2026 · Groq API pricing guide for 2026: Llama 3.1 8B, GPT OSS, Llama 4 Scout, Qwen3 32B, model picks, hidden costs, and routing tips."
+    },
+    {
+      "title": "Groq API Pricing (June 2026) — Per-Token Cost Comparison",
+      "url": "https://www.aipricing.guru/groq-pricing/",
+      "snippet": "1 day ago · Complete Groq API pricing for June 2026. Llama 3.3 70B, Llama 3.1 8B, Llama 3.2 Vision, Mixtral, Gemma2, DeepSeek R1 Distill, Qwen 2.5 — per-token costs on Groq's LPU-powered inference platform."
+    },
+    {
+      "title": "Groq: API Pricing, Performance & Model Catalog",
+      "url": "https://llm-stats.com/providers/groq",
+      "snippet": "Groq hosts 3 active AI models. Compare Groq's API speed, pricing, and reliability against other inference providers."
+    },
+    {
+      "title": "Groq API Pricing, Free Tier & How to Get an API Key",
+      "url": "https://apicostcalc.com/groq.html",
+      "snippet": "5 days ago · Groq API pricing for fast Llama, Mixtral and other open models, the free GroqCloud tier, and a step-by-step guide to getting your Groq API key."
+    },
+    {
+      "title": "Groq: PlayAI TTS - Groq | Model Documentation",
+      "url": "https://langmart.ai/model-docs/models/groq_playai-tts.html",
+      "snippet": "Model ID. groq/playai-tts.PlayAI's text-to-speech model hosted on Groq for ultra-fast audio generation. Provides high-quality voice synthesis with low latency."
+    },
+    {
+      "title": "Getting Started with Groq API | Making Near Real Time... - YouTube",
+      "url": "https://www.youtube.com/watch?v=S53BanCP14c",
+      "snippet": "Let's have a look at the Groq API that offers access to their Language Processing Units (LPUs) for free (for a limited time). The API can provide close to 500 tokens per second with Mixtral-8x7B."
+    },
+    {
+      "title": "GitHub - barneyonline/groq_tts: Custom TTS component for Home...",
+      "url": "https://github.com/barneyonline/groq_tts",
+      "snippet": "Text-to-Speech conversion using Groq's API. Support for multiple languages and voices – No special configuration needed; the AI model auto-recognizes the language. Customizable speech model – Check supported voices and models."
+    },
+    {
+      "title": "API Reference - GroqDocs",
+      "url": "https://console-groq-com.nproxy.org/docs/api-reference",
+      "snippet": "Comprehensive reference documentation for the Groq API, including endpoints, parameters, and examples."
+    },
+    {
+      "title": "PlayAI TTS pricing & specs — PlayAI | CloudPrice",
+      "url": "https://cloudprice.net/models/playai-tts",
+      "snippet": "PlayAI TTS is PlayAI's text to speech model with a 10K context window and up to 10K output tokens. A text-to-speech model from PlayAI offering natural-sounding voice synthesis for a range of conversational and content applications."
+    },
+    {
+      "title": "Groq Deploys Canopy Labs Orpheus TTS: $22/1M Characters",
+      "url": "https://www.adwaitx.com/groq-canopy-orpheus-tts-groqcloud-launch/",
+      "snippet": "How fast does Orpheus TTS generate speech on GroqCloud? Both Orpheus models deliver approximately 100 characters per second with streaming latency around 200 milliseconds, reducible to 100ms with input streaming. Does Orpheus support OpenAI API compatibility?"
+    },
+    {
+      "title": "Groq TTS - rapida.ai documentation",
+      "url": "https://doc.rapida.ai/integrations/tts/groq",
+      "snippet": "Text-to-Speech. Groq TTS.Groq delivers text-to-speech through its OpenAI-compatible HTTP API, accelerated by the LPU inference engine for extremely low-latency synthesis. It supports English and Arabic voices through the PlayAI voice collection. Authentication."
+    },
+    {
+      "title": "Groq - Intelligence, Performance & Price Analysis | Artificial Analysis",
+      "url": "https://artificialanalysis.ai/providers/groq",
+      "snippet": "Analysis of Groq's models across key metrics including quality, price, output speed, latency, context window & more."
+    }
+  ]
+}

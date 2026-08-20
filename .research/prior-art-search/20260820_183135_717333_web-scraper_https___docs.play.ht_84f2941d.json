@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "skill": "web-scraper",
+  "kind": "document",
+  "query": "https://docs.play.ht/",
+  "args": {
+    "links": false,
+    "images": false,
+    "tables": true,
+    "language": null
+  },
+  "generated_at": "2026-08-20T18:31:35.717266+0300",
+  "status": "ok",
+  "message": null,
+  "count": null,
+  "payload": {
+    "url": "https://docs.play.ht/",
+    "title": "Quickstart",
+    "author": null,
+    "date": "2025-09-09",
+    "sitename": "",
+    "description": "",
+    "content": "---\ntitle: Quickstart\nurl: https://docs.play.ht/reference/api-getting-started\nhostname: play.ht\ndescription: Welcome to PlayHT\nsitename: PlayHT Text to Speech API\ndate: 2025-09-09\n---\nWelcome to PlayHT\nThe PlayHT API provides a simple interface to our state-of-the-art AI TTS models. Follow this guide to get started.\n1. Create authentication credentials\nGenerate a user ID and API key in the dashboard.\n2. Install the SDK (optional)\nnpm install playhtpnpm install playhtyarn add playhtpip install pyht3. Make your first request\nimport * as PlayHT from 'playht';\nimport fs from 'fs';\n// Initialize client\nPlayHT.init({\n  userId: '<YOUR_USER_ID>',\n  apiKey: '<YOUR_API_KEY>',\n});\nasync function streamAudio(text) {\n  const stream = await PlayHT.stream('All human wisdom is summed up in these two words: Wait and hope.', { voiceEngine: 'PlayDialog' });\n  stream.on('data', (chunk) => {\n    // Do whatever you want with the stream, you could save it to a file, stream it in realtime to the browser or app, or to a telephony system\n    fs.appendFileSync('output.mp3', chunk);\n  });\n  return stream;\n}curl --request POST \\\n     --url https://api.play.ht/api/v2/tts/stream \\\n     --header 'X-USER-ID: <YOUR_USER_ID>' \\\n     --header 'AUTHORIZATION: <YOUR_API_KEY>' \\\n     --header 'accept: audio/mpeg' \\\n     --header 'content-type: application/json' \\\n     --data '\n{\n  \"text\": \"Hello from a realistic voice.\",\n  \"voice_engine\": \"PlayDialog\",\n  \"voice\": \"s3://voice-cloning-zero-shot/d9ff78ba-d016-47f6-b0ef-dd630f59414e/female-cs/manifest.json\",\n  \"output_format\": \"mp3\"\n}\n' --output result.mp34. Learn more\nInput Streaming with LLMs\nOur API supports Input streaming to make it seamless to integrate with LLMs like chatGPT, check this guide to see an example of how to use it.\nTechniques to guarantee the lowest latency\nCheck this guide for some techniques to keep in mind when trying to achieve the lowest latency.\nAudio streaming with Twilio\nFollow this guide for integrating realtime audio streaming with Twilio for over the phone conversations.\nInstant Voice Cloning\nYou can clone any voice instantly across languages with only 30 seconds of speech, try it easily in our API Playground, or through the API here."
+  }
+}

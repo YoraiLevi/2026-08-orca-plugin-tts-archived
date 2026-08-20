@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "FrigadeHQ yap macOS SFSpeechRecognizer swift speech framework",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:58.007408+0300",
+  "status": "ok",
+  "message": null,
+  "count": 14,
+  "payload": [
+    {
+      "title": "GitHub - FrigadeHQ/yap: Free, open source voice dictation for macOS.",
+      "url": "https://github.com/FrigadeHQ/yap",
+      "snippet": "Older APIs like SFSpeechRecognizer can fall back to Apple's servers when a locale has no on-device model, so Yap does not use them. If SpeechAnalyzer can't handle your language on device, dictation stops rather than sending your audio anywhere."
+    },
+    {
+      "title": "Yap voice dictation for macOS",
+      "url": "https://frigade.com/yap",
+      "snippet": "Yap turns speech into text anywhere you can type, entirely on your Mac. No account, no API key, no audio leaving your machine. Free and open source, built by Frigade.Runs on Apple's on-device Speech framework. Nothing to download. One shortcut."
+    },
+    {
+      "title": "SFSpeechRecognizer | Apple Developer Documentation",
+      "url": "https://developer.apple.com/documentation/speech/sfspeechrecognizer",
+      "snippet": "An object you use to check for the availability of the speech recognition service, and to initiate the speech recognition process."
+    },
+    {
+      "title": "GitHub - FrigadeHQ/yap: Free, open source voice dictation for ...",
+      "url": "https://github.com/FrigadeHQ/yap/tree/main",
+      "snippet": "Free, open source voice dictation for macOS. On-device transcription with Apple's Speech framework. No cloud, no API keys, no account. - FrigadeHQ/yap"
+    },
+    {
+      "title": "Yap: macOS Voice Dictation Without a Model, Using Apple's Ne",
+      "url": "https://www.devdigest.org/articles/yap-macos-voice-dictation-without-a-model-using-apples-new-speech-apis",
+      "snippet": "Jul 28, 2026 · Yap: macOS Voice Dictation Without a Model Yap is a new open-source voice dictation tool for macOS that leverages the OS's built-in speech models. It's a 4MB Swift app that lives in the menu bar, triggered by a global shortcut (default ⌘⇧D). Press it, speak, press it again, and the transcribed text is pasted into your current app."
+    },
+    {
+      "title": "yap – Swift Package Index",
+      "url": "https://swiftpackageindex.com/finnvoor/yap",
+      "snippet": "Jul 20, 2026 · yap by Finn Voorhees on the Swift Package Index – 🗣️ A CLI for on-device speech transcription using Speech.framework on macOS 26"
+    },
+    {
+      "title": "yap - FOSSY - Curated FOSS Directory for Community and Discussion",
+      "url": "https://fossy.dev/FrigadeHQ/yap",
+      "snippet": "Free, open source voice dictation for macOS. On-device transcription with Apple's Speech framework. No cloud, no API keys, no account."
+    },
+    {
+      "title": "Yap - On Device Voice Dictation macOS | EveryDev.ai",
+      "url": "https://www.everydev.ai/tools/yap-voice-dictation",
+      "snippet": "Platform and Requirements. Yap requires macOS 26 (Tahoe) or later on an Apple Silicon Mac. Intel support was intentionally dropped: the only path for Intel was SFSpeechRecognizer, which can send audio to Apple's servers, breaking the core privacy promise."
+    },
+    {
+      "title": "Yap — the on-device macOS voice dictation app, and how to speak...",
+      "url": "https://kompozy.io/ai-tools/yap",
+      "snippet": "Yap is a free, open-source macOS dictation app using Apple's on-device Speech framework, with no model to download. How it works, and using it with Kompozy."
+    },
+    {
+      "title": "swift - How to make SFSpeechRecognizer available on macOS?",
+      "url": "https://stackoverflow.com/questions/59111644/how-to-make-sfspeechrecognizer-available-on-macos",
+      "snippet": "I am trying to use Apple's Speech framework to do speech recognition on macOS 10.15.1. Before macOS 10.15, speech recognition was only available on iOS, but according to the documentation and this talk, should now be available on macOS as well."
+    },
+    {
+      "title": "How to use the Speech framework to detect speech on iOS.",
+      "url": "https://www.andyibanez.com/posts/speech-recognition-sfspeechrecognizer/",
+      "snippet": "Implementing SFSpeechRecognizer. Initial Setup. The Speech framework is one of those tools that require you set a string letting your user know what you are going to recognize the speech for."
+    },
+    {
+      "title": "IOS 11, Swift 4, Intermediate, Tutorial: Multi Language Speech to Text...",
+      "url": "https://www.youtube.com/watch?v=EhI4j5drcFI",
+      "snippet": "There are a handful of speech recognition frameworks available today, but they are either very expensive or simply not as good. In this tutorial, I will show you how to create a Siri-like app for speech to text using Speech Kit. This tutorial is made with Xcode 9 and built for iOS 11."
+    },
+    {
+      "title": "KoPass — yap — tool profile and history",
+      "url": "https://kopass.app/en/tool/github/frigadehq/yap",
+      "snippet": "yap — Free, open source voice dictation for macOS. On-device transcription with Apple's Speech framework."
+    },
+    {
+      "title": "wispr-flow · GitHub Topics · GitHub",
+      "url": "https://git.hubp.de/topics/wispr-flow",
+      "snippet": "Swift. Yap.macos swift productivity speech-to-text dictation whisper on-device-ai apple-silicon wispr-flow-alternative wispr-flow."
+    }
+  ]
+}

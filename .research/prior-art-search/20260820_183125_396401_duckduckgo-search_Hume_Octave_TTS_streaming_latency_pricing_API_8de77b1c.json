@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Hume Octave TTS streaming latency pricing API",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:25.396320+0300",
+  "status": "ok",
+  "message": null,
+  "count": 10,
+  "payload": [
+    {
+      "title": "Best TTS APIs 2026: Cartesia 40ms, ElevenLabs, Hume Voice",
+      "url": "https://futureagi.com/blog/best-text-to-speech-providers-2026/",
+      "snippet": "Best Text-to-Speech Providers in 2026: ElevenLabs, Cartesia, Deepgram, Hume, and the Right Pick for Production Voice Agents. Best TTS APIs in May 2026: Cartesia Sonic 4 at 40ms, ElevenLabs v3, Deepgram Aura-2, Hume Octave, plus pricing, latency, and the right pick by use case."
+    },
+    {
+      "title": "Octave - Text-to-Speech with Emotional Intelligence | Hume AI",
+      "url": "https://www.hume.ai/octave",
+      "snippet": "Octave is Hume's text-to-speech API with emotional intelligence.Can I create custom voices? What's the typical latency? What languages does Octave support? How do I get started?"
+    },
+    {
+      "title": "Hume AI review 2026: Empathic voice tested",
+      "url": "https://toolchase.com/blog/hume-ai-review/",
+      "snippet": "Hume prices in Octave TTS characters and EVI minutes, with a separate pay-as-you-go meter for the Expression Measurement API. As a rule of thumb, 1,000 characters is roughly one minute of Octave audio. The pricing here is verified against hume.ai/pricing on the day of writing."
+    },
+    {
+      "title": "Best AI TTS APIs 2026: Inworld, ElevenLabs... | SpeechGeneration AI",
+      "url": "https://speechgeneration.ai/best-ai-text-to-speech-apis",
+      "snippet": "Best AI Text-to-Speech APIs for Developers in 2026. A neutral, fact-dense evaluation of 14 production TTS APIs — covering streaming latency (TTFB), pricing per 1M characters, voice cloning, SSML support, and language coverage."
+    },
+    {
+      "title": "How to Use Hume AI for Ultra-Realistic Voiceovers in 2026",
+      "url": "https://www.fahimai.com/how-to-use-hume-ai",
+      "snippet": "Hume AI’s Octave TTS generates human-like speech in 11 languages with under 200ms latency. The Streaming API works for live audio and video feeds. Checkpoint: You should see your media file uploaded or your stream connected. Step 3: Review the Emotio..."
+    },
+    {
+      "title": "SpeechifyAI vs Hume Octave — SpeechifyAI",
+      "url": "https://speechify.ai/compare/build/text-to-speech/hume",
+      "snippet": "Hume's Octave leads on emotionally expressive, empathic speech, sold through subscription tiers that work out to roughly $50-150 per 1M. SpeechifyAI offers its own emotion control and expressive neural voices from $6 per 1M characters, well below Hume's effective rates."
+    },
+    {
+      "title": "Best Text-to-Speech AI 2026: Top picks & In-depth... — AI/ML API Blog",
+      "url": "https://aimlapi.com/blog/best-text-to-speech-ai",
+      "snippet": "In-depth comparison of the top 9 TTS models including ElevenLabs, Inworld, Cartesia Sonic 3 and MiniMax. Find the right AI voice generator for your needs with real benchmarks and pricing."
+    },
+    {
+      "title": "Cheapest Hume Octave TTS API in 2026: from $7.60... | Perkstack",
+      "url": "https://perkstack.co/blog/cheapest-hume-octave-tts-api",
+      "snippet": "Prices for Hume Octave TTS range from $7.60 at Hume Octave 2 up to $100 at ElevenLabs Multilingual v2, measured as tts · per 1M characters. Same model, different bill: picking the right provider saves up to 92%."
+    },
+    {
+      "title": "Top 10 TTS and STT APIs for AI Agents (2026) | Articles | suprsonic",
+      "url": "https://suprsonic.ai/articles/top-10-tts-and-stt-apis-for-ai-agents-2026",
+      "snippet": "Compare the best TTS and STT APIs for AI agents with real benchmark data, pricing, and latency scores to find your perfect fit. TTS APISTT APIAI AgentsVoice AIAPI Comparison."
+    },
+    {
+      "title": "8 Best ElevenLabs Alternatives in 2026 - Inworld AI",
+      "url": "https://inworld.ai/resources/elevenlabs-alternatives",
+      "snippet": "All prices were fetched from vendor pricing pages on July 7, 2026. All latency figures are each vendor's own published claims, not independent measurements. Price at volume: effective cost per 1M characters at list and committed rates."
+    }
+  ]
+}

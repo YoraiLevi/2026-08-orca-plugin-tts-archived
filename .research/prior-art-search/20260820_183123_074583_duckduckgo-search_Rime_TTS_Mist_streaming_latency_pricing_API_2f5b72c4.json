@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Rime TTS Mist streaming latency pricing API",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:23.074454+0300",
+  "status": "ok",
+  "message": null,
+  "count": 21,
+  "payload": [
+    {
+      "title": "Low-latency TTS for real-time voice agents - Rime Docs",
+      "url": "https://docs.rime.ai/docs/latency",
+      "snippet": "Rime TTS latency benchmarks: sub-200ms end-to-end via the cloud API, sub-100ms on-prem with Coda, 37ms TTFA with Mist v3 — plus what affects response time and how to reduce it."
+    },
+    {
+      "title": "Streaming TTS - Rime Docs",
+      "url": "https://rimelabs.mintlify.app/docs/streaming",
+      "snippet": "Rime’s TTS API streams audio as it is generated, rather than waiting for the full utterance to be synthesized. Every Rime model — Coda, Arcana, and Mist — supports streaming over both HTTP and WebSockets, with sub-200ms end-to-end latency standard via the cloud API."
+    },
+    {
+      "title": "Rime TTS - Patter | Documentation",
+      "url": "https://docs.getpatter.com/python-sdk/providers/rime",
+      "snippet": "RimeTTS targets the Rime HTTP endpoint. Both Arcana (high fidelity) and Mist (low latency) model families are supported. The provider requests audio/pcm and yields raw PCM_S16LE chunks at the configured sample rate."
+    },
+    {
+      "title": "Rime’s Ultrarealistic Arcana and Mist TTS Models Are… | SignalWire",
+      "url": "https://signalwire.com/blogs/developers/rime-arcana-mist-tts-signalwire",
+      "snippet": "Rime’s Arcana and Mist v2 are text-to-speech (TTS) models available on SignalWire that generate natural, expressive speech; Arcana prioritizes expressive realism while Mist v2 focuses on speed and production-scale performance. What’s the difference between Arcana and Mist v2?"
+    },
+    {
+      "title": "tts — pipecat-ai documentation",
+      "url": "https://reference-server.pipecat.ai/en/latest/api/pipecat.services.rime.tts.html",
+      "snippet": "Bases: AudioContextWordTTSService. Text-to-Speech service using Rime’s websocket API. Uses Rime’s websocket JSON API to convert text to speech with word-level timing information."
+    },
+    {
+      "title": "Rime offers ultra-low-latency text-to-speech with natural-sounding...",
+      "url": "https://doc.rapida.ai/integrations/tts/rime",
+      "snippet": "Text-to-Speech Models. Supported Languages. Voice Library.Mist Voices: Fast low-latency voices — River, Cove, Peak, Colby, Tibur, Ana, Vespera. Custom Voices: You can also use custom voice IDs created through the Rime platform. Prerequisites."
+    },
+    {
+      "title": "livekit.plugins.rime API documentation",
+      "url": "https://docs.livekit.io/reference/python/livekit/plugins/rime/",
+      "snippet": "class ChunkedStream (tts: TTS, input_text: str, conn_options: APIConnectOptions). Expand source code.raise RuntimeError(. \"Rime TTS streaming requires use_websocket=True at construction time\" ). s = SynthesizeStream(tts=self, conn_options=conn_options). self._streams.add(s)."
+    },
+    {
+      "title": "Rime Text to Speech with Bolna Voice AI agents - Bolna Docs",
+      "url": "https://www.bolna.ai/docs/providers/voice/rime",
+      "snippet": "Integrate Rime TTS with Bolna Voice AI agents for ultra-fast, expressive speech synthesis with sub-200ms latency and diverse conversational voice options."
+    },
+    {
+      "title": "Integrate Rime TTS with the Conversational AI Engine. | Agora Docs",
+      "url": "https://docs.agora.io/en/conversational-ai/models/tts/rime",
+      "snippet": "Rime provides high-quality text-to-speech (TTS) with low latency, supporting multiple speakers and models. Sample configuration.The WebSocket URL for the Rime streaming API."
+    },
+    {
+      "title": "GitHub - rimelabs/rime-cli: Read-only version of the Rime TTS CLI for...",
+      "url": "https://github.com/rimelabs/rime-cli",
+      "snippet": "rime tts TEXT. Synthesize text to speech. Streams audio and plays it in real-time as it arrives.rime curl [TEXT]. Generate a curl command for making TTS API requests. Useful for debugging and integration."
+    },
+    {
+      "title": "Rime (company) | AI Wiki",
+      "url": "https://aiwiki.ai/wiki/rime_ai",
+      "snippet": "Rime ships speech-synthesis models through a developer API and through voice-AI platform partners. Its lineup has evolved quickly, with two model families, the speed-oriented Mist line and the expressive Arcana line, later joined by a flagship model called Coda."
+    },
+    {
+      "title": "Rime Text-to-Speech MCP Server — MCP.Directory",
+      "url": "https://mcp.directory/servers/rime-text-to-speech",
+      "snippet": "Convert text to speech instantly using Rime's API. Enjoy fast, streaming AI voice generation with minimal latency. Try our free text to speech server!"
+    },
+    {
+      "title": "AI Provider Integration | rapidaai/voice-ai | DeepWiki",
+      "url": "https://deepwiki.com/rapidaai/voice-ai/11-ai-provider-integration",
+      "snippet": "api/assistant-api/internal/transformer/sarvam/tts.go. ui/src/app/components/providers/text-to-speech/rime/constant.ts.This enables uniform event streaming and metrics collection regardless of the underlying provider."
+    },
+    {
+      "title": "Streaming TTS - Rime Docs",
+      "url": "https://docs.rime.ai/docs/streaming",
+      "snippet": "Rime’s TTS API streams audio as it is generated rather than waiting for the full utterance. Coda and Mist stream over HTTP and WebSockets. Under typical conditions, the cloud API delivers sub-200ms end-to-end latency when an application uses the nearest regional endpoint. For real-time voice agents, streaming is the default mode of operation."
+    },
+    {
+      "title": "Streaming HTTP - Rime Docs",
+      "url": "https://docs.rime.ai/api-reference/mistv3/http",
+      "snippet": "Mist v3 streaming HTTP endpoint: low-latency TTS with the updated Mist engine."
+    },
+    {
+      "title": "Mist v3 API: Pricing, Benchmarks & Docs | Together AI",
+      "url": "https://www.together.ai/models/rime-mist-v3",
+      "snippet": "Rime Mist v3 is Rime's English text-to-speech model with a phoneme-first architecture delivering deterministic pronunciation control. The same input always produces the same phonetic output across all voices and calls, with pronunciation corrections applied in minutes without model retraining. Mist v3 features an updated inference engine optimized for high-throughput concurrent requests, SSML ..."
+    },
+    {
+      "title": "docs/docs/latency.mdx at main · rimelabs/docs · GitHub",
+      "url": "https://github.com/rimelabs/docs/blob/main/docs/latency.mdx",
+      "snippet": "TTS and latency The response time from any text-to-speech (TTS) API depends on a variety of factors, including network latency, the length of the text input, any text preprocessing needed prior to model inference, and payload size. Rime's TTS API has been designed from the ground up to be the fastest to respond."
+    },
+    {
+      "title": "rime labs/rime mist v3 API Pricing 2026 - Costs, Performance ...",
+      "url": "https://pricepertoken.com/pricing-page/model/rime-labs-rime-mist-v3",
+      "snippet": "Aug 10, 2026 · rime labs/rime mist v3. Pricing starts at $0.0000 per million input tokens and $0.0000 per million output tokens. The model supports a context window of up to 448 tokens. API access is available through Rime Labs."
+    },
+    {
+      "title": "Rime API: Pricing, Capabilities & Alternatives (2026) · apio",
+      "url": "https://apio.sh/apis/rime",
+      "snippet": "Jun 21, 2026 · Rime is a text-to-speech API built for high-stakes enterprise voice applications including contact center IVR, healthcare communications, and real-time conversational AI. Pricing starts at $30 per 1M characters on a usage-based model, with a free tier of 3,000 minutes and self-serve signup available."
+    },
+    {
+      "title": "How to Choose a Scalable Low-Latency TTS Service for ...",
+      "url": "https://www.rime.ai/resources/how-to-choose-a-scalable-low-latency-tts-service-for-enterprises",
+      "snippet": "What latency benchmarks should enterprises expect for real-time TTS? Sub-200ms end-to-end latency is the current standard for responsive conversational TTS at cloud, sustained at high concurrency. On-prem deployments with Rime's Mist v2 consistently achieve sub-150ms TTFB, giving you meaningful headroom for the rest of your pipeline."
+    },
+    {
+      "title": "Kokoro TTS - a Hugging Face Space by hexgrad",
+      "url": "https://huggingface.co/spaces/hexgrad/Kokoro-TTS",
+      "snippet": "Enter any English text, select a voice and a speaking speed, and the app produces an audio clip of the words spoken aloud."
+    }
+  ]
+}

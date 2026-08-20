@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "OpenAI TTS gpt-4o-mini-tts streaming latency Node SDK",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:30:42.259820+0300",
+  "status": "ok",
+  "message": null,
+  "count": 10,
+  "payload": [
+    {
+      "title": "GPT-4o mini TTS Model | OpenAI API",
+      "url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-tts",
+      "snippet": "GPT-4o mini TTS is a text-to-speech model built on GPT-4o mini, a fast and powerful language model. Use it to convert text to natural sounding spoken text. The maximum number of input tokens is 2000."
+    },
+    {
+      "title": "gpt-4o-mini-tts: Cheapest TTS API in 2026... - TokenMix Blog",
+      "url": "https://tokenmix.ai/blog/gpt-4o-mini-tts-cheapest-tts-api-2026",
+      "snippet": "OpenAI gpt-4o-mini-tts at $0.015/min generated audio, 13 voices, 50+ languages, steerable via prompts.Streaming and Latency. Production Gotchas. Quick Usage. FAQ. What gpt-4o-mini-tts Is."
+    },
+    {
+      "title": "GPT-4o mini TTS API - 300+ AI Models One API - AI.cc",
+      "url": "https://www.ai.cc/gpt-4o-mini-tts/",
+      "snippet": "OpenAI Whisper TTS primarily focuses on speech recognition with limited dedicated TTS development. In contrast, GPT-4o-mini-TTS specializes in expressive, multi-language speech synthesis with multiple voice options, designed for superior audio output."
+    },
+    {
+      "title": "OpenAI.fm",
+      "url": "https://www.openai.fm/",
+      "snippet": "An interactive demo for developers to try the latest text-to-speech model in the OpenAI API."
+    },
+    {
+      "title": "GPT 4o Mini TTS | AI/ML API Documentation",
+      "url": "https://docs.aimlapi.com/api-references/speech-models/text-to-speech/openai/gpt-4o-mini-tts",
+      "snippet": "openai/gpt-4o-mini-tts. Try in Playground. A text-to-speech model based on GPT-4o mini, supporting up to 2,000 input tokens. Setup your API Key."
+    },
+    {
+      "title": "GPT-4o mini TTS API - Access OpenAI GPT-4o mini TTS... | CometAPI",
+      "url": "https://www.cometapi.com/models/openai/gpt-4o-mini-tts/",
+      "snippet": "GPT-4o mini TTS converts text to natural-sounding speech with selectable voices, low latency, and streaming for voice applications. Access via CometAPI. Access via CometAPI API — OpenAI compatible, best pricing, 500+ models."
+    },
+    {
+      "title": "openai/gpt-4o-mini-tts API — Pricing & Benchmarks · OrcaRouter",
+      "url": "https://www.orcarouter.ai/models/openai/gpt-4o-mini-tts",
+      "snippet": "OpenAI GPT-4o-mini TTS is a text-to-speech model that converts textual input into spoken audio. It is part of the GPT-4o-mini family, offering a smaller, faster, and more cost-effective alternative to larger TTS models. The model accepts only text as input; audio output is produced in real-time."
+    },
+    {
+      "title": "OpenAI",
+      "url": "https://lmspeed.net/model/gpt-4o-mini-tts",
+      "snippet": "GPT-4o Mini TTS free API options are available from 3 providers. OpenAI GPT-4o Mini TTS is a text-to-speech model, designed for high-quality speech synthesis from text input."
+    },
+    {
+      "title": "Best TTS API for AI Chatbots with a Realistic Voice (2026)",
+      "url": "https://inworld.ai/resources/best-tts-api-for-ai-chatbot-realistic-voice",
+      "snippet": "OpenAI TTS (gpt-4o-mini-tts). Mid-tier. ~300ms.Sub-200ms latency. Smaller language coverage (11) than the leaders. Code Example: Realtime TTS for a Chatbot. # Sync request: best for non-streaming chatbot replies. import requests import base64."
+    },
+    {
+      "title": "Top Text-to-Speech APIs 2026: Speed & Efficiency Ranked - Smallest.ai",
+      "url": "https://smallest.ai/blog/top-fastest-text-to-speech-apis-in-2026",
+      "snippet": "Looking for the most efficient and fastest Text-to-Speech APIs in 2026? Our comprehensive guide ranks leading solutions by speed, quality, and features. Find your ideal TTS API today!"
+    }
+  ]
+}

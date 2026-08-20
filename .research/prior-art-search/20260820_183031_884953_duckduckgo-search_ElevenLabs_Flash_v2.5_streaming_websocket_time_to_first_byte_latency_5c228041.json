@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "ElevenLabs Flash v2.5 streaming websocket time to first byte latency",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:30:31.884874+0300",
+  "status": "ok",
+  "message": null,
+  "count": 34,
+  "payload": [
+    {
+      "title": "Latency optimization | ElevenLabs Documentation",
+      "url": "https://elevenlabs.io/docs/eleven-api/guides/how-to/best-practices/latency-optimization",
+      "snippet": "Streaming endpoint: Returns audio chunks progressively using Server-sent events. Websockets endpoint: Enables bidirectional streaming for real-time audio generation. Streaming Streaming endpoints progressively return audio as it is being generated in real-time, reducing the time-to-first-byte."
+    },
+    {
+      "title": "ElevenLabs Flash v2.5: Complete Guide — 75ms Latency TTS",
+      "url": "https://elevenlabsmagazine.com/elevenlabs-flash-v25-guide-2026/",
+      "snippet": "Apr 17, 2026 · Complete guide to ElevenLabs Flash v2.5 in 2026, covering latency, pricing, languages, use cases and comparisons with Multilingual v2 and v3."
+    },
+    {
+      "title": "Understanding latency | ElevenLabs Documentation",
+      "url": "https://elevenlabs.io/docs/eleven-api/concepts/latency",
+      "snippet": "The ~75ms Flash figure is representative for short inputs under normal conditions. Audio player buffering - most audio players do not begin playback at the first byte. They buffer a small amount to prevent stuttering if the stream briefly slows down. A 500ms buffer is common; reducing it trades a small increase in stutter risk for lower perceived latency."
+    },
+    {
+      "title": "skills/text-to-speech/references/streaming.md at main ...",
+      "url": "https://github.com/elevenlabs/skills/blob/main/text-to-speech/references/streaming.md",
+      "snippet": "Send a space \" \" to keep alive. TTFB (Time to First Byte): How long until audio starts playing. Affected by chunk_length_schedule - the model waits for enough text before generating. Model limitation: WebSockets are unavailable for eleven_v3. Best practice: Use flush: true at conversation turn endings to ensure the buffered text gets spoken."
+    },
+    {
+      "title": "elevenlabs-skills/text-to-speech/references/streaming.md at ...",
+      "url": "https://github.com/smarks26/elevenlabs-skills/blob/main/text-to-speech/references/streaming.md",
+      "snippet": "Send a space \" \" to keep alive. TTFB (Time to First Byte): How long until audio starts playing. Affected by chunk_length_schedule - the model waits for enough text before generating. Model limitation: WebSockets are unavailable for eleven_v3. Best practice: Use flush: true at conversation turn endings to ensure the buffered text gets spoken."
+    },
+    {
+      "title": "TTS Latency Benchmark 2026: TTFA Compared Across Gradium ...",
+      "url": "https://gradium.ai/content/tts-latency-benchmark-2026",
+      "snippet": "May 5, 2026 · TTS latency benchmark 2026: Gradium TTS leads at 155ms P50 TTFA with a 2ms IQR on the independent Coval benchmark. Full TTFA comparison across Gradium, ElevenLabs (Turbo v2.5, Flash v2.5, Multilingual v2), Cartesia Sonic-3, Deepgram Aura-2, Rime (Mist-v3, Arcana) and OpenAI TTS-1-HD. Methodology, P25/P50/P75/P95, IQR consistency, and WER."
+    },
+    {
+      "title": "Lowest-Latency TTS APIs for Real-Time Agents | AI DEV DAY",
+      "url": "https://aidevdayindia.org/blogs/build-voice-ai-agents/lowest-latency-tts-api.html",
+      "snippet": "Jun 27, 2026 · This eliminates a massive amount of network-hopping latency. ElevenLabs Flash v2.5: The Expressive Option ElevenLabs is famous for hyper-realistic voices. Their standard models are too slow for real-time agents, but their Flash v2.5 model bridges the gap. Hitting roughly 75ms TTFA, Flash is highly competitive for builders who need dynamic ..."
+    },
+    {
+      "title": "Fastest TTS APIs for low-latency voice agents - Smallest.ai",
+      "url": "https://smallest.ai/blog/fastest-tts-apis-for-low-latency-voice-agents",
+      "snippet": "The headline number is Time to First Audio (TTFA), sometimes described as Time to First Byte (TTFB) when you're dealing with audio streams.ElevenLabs is widely used in text-to-speech applications, and Flash v2.5 is its attempt to close the latency gap."
+    },
+    {
+      "title": "ElevenLabs Flash: Ultra-Low Latency Text to Speech for 2026 Agents",
+      "url": "https://kunya.es/models/elevenlabs-tts-flash",
+      "snippet": "ElevenLabs Flash v2.5 — lowest latency TTS for real-time applications, 32 languages.Speed Optimized Text to Speech for Agents in 2026. The core philosophy behind ElevenLabs Flash is the radical prioritization of time-to-first-byte (TTFB)."
+    },
+    {
+      "title": "ElevenLabs — Meet Flash",
+      "url": "https://elevenlabs.io/blog/meet-flash",
+      "snippet": "Flash v2 is English only and Flash v2.5 supports 32 languages. They both cost 1 credit for every 2 characters. It has a slightly lower quality and emotional depth that the Turbo models but significantly lower latency."
+    },
+    {
+      "title": "Voxtral TTS Dominates ElevenLabs Flash v2.5 in... - YouTube",
+      "url": "https://www.youtube.com/watch?v=NtuqhhDT7Vk",
+      "snippet": "Discover how Voxtral TTS achieves a staggering 68.4% human evaluation win rate over ElevenLabs Flash v2.5 for multilingual voice cloning."
+    },
+    {
+      "title": "Talk 30 Languages in <1 sec: an Open-Source Real-Time... | Medium",
+      "url": "https://medium.com/@menes.onus/talk-30-languages-in-1-sec-an-open-source-real-time-speech-translator-i-built-single-handedly-5f461d4cf45e",
+      "snippet": "Text-to-Speech: ElevenLabs Flash v2.5 ($60.00/M chars, 250–600ms Latency). This trio strikes the best balance between accuracy, latency, ease of use, and cost-effectiveness — with helpful free tiers for development and prototyping."
+    },
+    {
+      "title": "ElevenLabs Flash v2.5 text to speech API | Replicate",
+      "url": "https://replicate.com/elevenlabs/flash-v2.5",
+      "snippet": "ElevenLabs Flash v2.5 is the fastest speech synthesis model from ElevenLabs, designed for real-time applications and conversational AI. It delivers high-quality speech with ultra-low latency (~75ms) across 32 languages."
+    },
+    {
+      "title": "Best AI Voice Generators for Real-Time Apps (2026)",
+      "url": "https://cognitivefuture.ai/best-ai-voice-generators-real-time-voice-agents/",
+      "snippet": "−Already on ElevenLabs? → Flash v2.5 is real-time capable too, around 75ms, so you may not need to switch at all. If you searched for the best AI voice generator expecting one of our other roundups on this site, this is a different list on purpose."
+    },
+    {
+      "title": "Aura-2 vs ElevenLabs: TTS Quality and Pricing (2026) | CallMissed",
+      "url": "https://www.callmissed.com/en/blog/aura-vs-elevenlabs-turbo-v3-tts-quality",
+      "snippet": "ElevenLabs presents Eleven v3 as an expressive model, Flash v2.5 as a low-latency option, and Turbo v2.5 as a separate model. The researched official materials do not establish “Turbo v3” as an official product name."
+    },
+    {
+      "title": "Generate audio in real-time | ElevenLabs Documentation",
+      "url": "https://elevenlabs.io/docs/eleven-api/guides/how-to/websockets/realtime-tts",
+      "snippet": "If the threshold is not met, the model will add the text to a buffer and generate audio once the buffer is full. In terms of latency, TTFB is the time it takes for the first byte of audio to be sent to the client."
+    },
+    {
+      "title": "ElevenLabs TTS Latency Test 2026 Real-World Results - VEXYL AI",
+      "url": "https://vexyl.ai/elevenlabs-tts-latency-test-2026-real-world-results/",
+      "snippet": "January 25, 2026 - Improved Streaming Models: ElevenLabs Flash v2.5 claims 75ms inference times."
+    },
+    {
+      "title": "ElevenLabs API Setup: Developer Quick Start Guide (2026)",
+      "url": "https://aiproductivity.ai/guides/elevenlabs-api-developer-setup/",
+      "snippet": "June 13, 2026 - With the Flash v2.5 model, time-to-first-byte is typically under 150ms, making this suitable for conversational interfaces. For the lowest latency in real-time scenarios - voice assistants, interactive characters, live translation - use the ..."
+    },
+    {
+      "title": "Latency optimization | ElevenLabs Documentation",
+      "url": "https://cdntest.elevenlabs.io/docs/best-practices/latency-optimization",
+      "snippet": "Streaming endpoints progressively return audio as it is being generated in real-time, reducing the time-to-first-byte. This endpoint is recommended for cases where the input text is available up-front."
+    },
+    {
+      "title": "elevenlabs-docs/fern/docs/pages/best-practices/latency-optimization.mdx at main · elevenlabs/elevenlabs-docs",
+      "url": "https://github.com/elevenlabs/elevenlabs-docs/blob/main/fern/docs/pages/best-practices/latency-optimization.mdx?plain=1",
+      "snippet": "Streaming endpoints progressively return audio as it is being generated in real-time, reducing the time-to-first-byte. This endpoint is recommended for cases where the input text is available up-front."
+    },
+    {
+      "title": "Text to Speech API integration: streaming, batching, retries",
+      "url": "https://elevenlabs.io/blog/text-to-speech-api-integration",
+      "snippet": "July 5, 2026 - It is the lowest-complexity option and has the highest time-to-first-audio, because the full clip is synthesized before any bytes come back. HTTP streaming (stream) keeps the same request but chunks the response: You append /stream to the path, call the stream method, and the audio returns as a chunked response. The code is nearly identical, and perceived latency is much lower. The WebSocket (stream-input) holds a persistent connection: You send text incrementally and receive audio chunks back as you go."
+    },
+    {
+      "title": "Models | ElevenLabs Documentation",
+      "url": "https://elevenlabs.io/docs/overview/models",
+      "snippet": "May 27, 2026 - With its lower price point for API generations and 75ms latency, Flash v2.5 is the cost-effective option for anyone needing fast, reliable speech synthesis across multiple languages."
+    },
+    {
+      "title": "How to Reduce ElevenLabs TTS Latency in Voice AI Calls (2026 Guide) | Sherlock Calls",
+      "url": "https://www.usesherlock.ai/blog/how-to-reduce-elevenlabs-latency",
+      "snippet": "February 27, 2026 - The delta should be under 10ms if streaming is working correctly. A delta above 50ms indicates buffering somewhere in your pipeline. Every ElevenLabs WebSocket connection goes through TLS handshake, HTTP upgrade, and initial frame exchange before ..."
+    },
+    {
+      "title": "Streaming text to speech | ElevenLabs Documentation",
+      "url": "https://elevenlabs.io/docs/eleven-api/guides/how-to/text-to-speech/streaming",
+      "snippet": "Use WebSockets to stream text to speech in real time as it is generated by an LLM. ... Learn what contributes to latency and how to minimise time-to-first-audio."
+    },
+    {
+      "title": "Generate audio in real-time | ElevenLabs Documentation",
+      "url": "https://11lab.toolsmeen.com/docs/developers/websockets",
+      "snippet": "If the threshold is not met, the model will add the text to a buffer and generate audio once the buffer is full. In terms of latency, TTFB is the time it takes for the first byte of audio to be sent to the client."
+    },
+    {
+      "title": "WebSocket | ElevenLabs Documentation",
+      "url": "https://elevenlabs.io/docs/api-reference/text-to-speech/v-1-text-to-speech-voice-id-stream-input",
+      "snippet": "Although highly flexible, the WebSockets API isn’t a one-size-fits-all solution. It’s well-suited for scenarios where: The input text is being streamed or generated in chunks. Word-to-audio alignment information is required. ... The entire input text is available upfront. Given that the generations are partial, some buffering is involved, which could potentially result in slightly higher latency compared to a standard HTTP request."
+    },
+    {
+      "title": "ElevenLabs Cheat Sheet (2026): Models, Voices, API, Streaming & Agents",
+      "url": "https://www.webfuse.com/elevenlabs-cheat-sheet",
+      "snippet": "March 30, 2026 - No. ElevenLabs now spans text-to-speech, speech-to-text, voice cloning, voice design, streaming, agents, dubbing, and other audio workflows. Start with eleven_flash_v2_5 for low-latency generation, especially when building chat, assistant, or agent-style voice interfaces."
+    },
+    {
+      "title": "Reducing Latency - ElevenLabs",
+      "url": "https://elevenlabs-sdk.mintlify.app/api-reference/reducing-latency",
+      "snippet": "The new turbo model_id is eleven_turbo_v2. ElevenLabs provides three text-to-speech endpoints: 1. A regular text-to-speech endpoint 2. A streaming text-to-speech endpoint 3. A websockets text-to-speech endpoint · The regular endpoint renders the audio file before returning it in the response. The streaming endpoint streams back the audio as it is being generated, resulting in much lower response time from request to first byte of audio received."
+    },
+    {
+      "title": "API Response Time [stream-input] · Issue #134 · elevenlabs/elevenlabs-python",
+      "url": "https://github.com/elevenlabs/elevenlabs-python/issues/134",
+      "snippet": "October 31, 2023 - I am exploring the streaming functionality of Eleven Labs for enabling real-time conversations with a Large Language Model (LLM). I've come across information suggesting that the response times are typically under 1 second. However, duri..."
+    },
+    {
+      "title": "Optimize Text-to-Speech Latency Guide | PDF | Speech Synthesis | Real Time Computing",
+      "url": "https://www.scribd.com/document/955172513/Latency-optimization-ElevenLabs-Documentation",
+      "snippet": "November 25, 2025 - Based on our benchmarking, for the Turbo and Flash models we expect the following improvements to TTFB (time to first byte), depending on your location: ... Asksupported anything at this time. [Link] 4/5 25/11/2025, 14:47 Latency optimization | ElevenLabs Documentation · ⦁ Requests to other Scribe API products v2 Realtime is nowwill seamlessly available."
+    },
+    {
+      "title": "Text to Speech (TTS) API - ElevenLabs",
+      "url": "https://elevenlabs.io/text-to-speech-api",
+      "snippet": "2 weeks ago - - Flash v2.5 - Ultra-low latency (~75ms) for real-time applications like voice agents - Turbo v2.5 - Balanced quality and speed (~250-300ms) for interactive use cases - Multilingual v2 - Consistent quality for long-form content up to 10,000 ..."
+    },
+    {
+      "title": "Is ElevenLabs Real-Time? What Developers Need to Know in 2026",
+      "url": "https://deepgram.com/learn/is-elevenlabs-real-time-what-developers-need-to-know",
+      "snippet": "July 7, 2026 - Smaller values reduce time-to-first-audio but give the model less context, potentially degrading prosody. Flash v2.5 is positioned as the ultra-fast option, with ElevenLabs latency optimization documentation claiming ~75ms inference speeds."
+    },
+    {
+      "title": "8 Best Text-to-Speech APIs for Developers (2026 Comparison)",
+      "url": "https://inworld.ai/resources/best-text-to-speech-apis",
+      "snippet": "Start with latency requirements: conversational AI demands realtime time-to-first-audio, while content creation workflows can tolerate higher latency.WebSocket streaming starts playback immediately with no buffering delay. What are the best alternatives to ElevenLabs?"
+    },
+    {
+      "title": "Text to Speech API - Up To 40% Faster Globally",
+      "url": "https://elevenlabs.io/blog/text-to-speech-api-up-to-40-faster-globally",
+      "snippet": "February 20, 2026 - With upgraded GPUs and an optimized inference stack, Flash v2.5 achieves 50ms model time to first byte, and with network routing improvements on top, that leads to large reductions in perceived latency."
+    }
+  ]
+}

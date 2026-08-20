@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Google Cloud Text-to-Speech Chirp 3 HD streaming latency pricing",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:23.201017+0300",
+  "status": "ok",
+  "message": null,
+  "count": 10,
+  "payload": [
+    {
+      "title": "Text-to-Speech: Lifelike AI voices and speech... | Google Cloud",
+      "url": "https://cloud.google.com/text-to-speech",
+      "snippet": "Google cloud speech to text api flow. Use case.Pricing. Text-to-Speech is priced based on the number of characters sent to the service to be synthesized into audio each month. The first 1 million characters for WaveNet voices are free each month."
+    },
+    {
+      "title": "AI Voice Agent Cost Calculator 2026: Free Per-Minute Pricing...",
+      "url": "https://softcery.com/ai-voice-agents-calculator",
+      "snippet": "Core Components & Concepts Text-to-Speech (TTS) Speech-to-Text (STT) Large Language Models Voice Agent Platform Transport (Telephony / WebRTC) Cost Summary. The Real Cost of Running an AI Voice Agent in 2026."
+    },
+    {
+      "title": "Google TTS Chirp 3 HD vs TTS-1 HD: price & specs, measured",
+      "url": "https://synthorai.io/compare/models/google-tts-chirp3-hd-vs-tts-1-hd/",
+      "snippet": "Side-by-side text-to-speech pricing, specs and capabilities — both models callable through one OpenAI-compatible endpoint with one API key.Pick google-tts-chirp3-hd when you need to shape the delivery, tts-1-hd when the default voice is fine."
+    },
+    {
+      "title": "get_started_with_chirp_3_hd_voices.ipynb - Colab",
+      "url": "https://colab.research.google.com/github/GoogleCloudPlatform/generative-ai/blob/main/audio/speech/getting-started/get_started_with_chirp_3_hd_voices.ipynb?hl=es-419",
+      "snippet": "Chirp 3 HD voices also support streaming text-to-speech conversion using the streaming_synthesize method.Google Cloud Text-to-Speech (TTS) is a powerful API that converts text into natural-sounding audio. Here's a breakdown: **Key Features"
+    },
+    {
+      "title": "TTS Latency Benchmark 2025: We Tested 7 Text-to-Speech APIs for...",
+      "url": "https://vexyl.ai/tts-latency-benchmark-2025/",
+      "snippet": "Google Cloud TTS (Chirp3-HD).ElevenLabs has the best voice quality but ~1 second latency. It’s acceptable for voice AI with streaming, but not the fastest option. What’s a good TTS latency for voice agents? Under 500ms is ideal."
+    },
+    {
+      "title": "Free Text to Speech Audiobook Maker — Best... | Audiobook Maker",
+      "url": "https://audiobook-maker.com/guide/text-to-speech-audiobook/",
+      "snippet": "Text-to-speech (TTS) audiobook creation uses AI neural voices to narrate written text into spoken audio.Google TTS Chirp3-HD is available for users who want premium quality. Unlike Speechify or NaturalReader, Audiobook Maker has no paywalls, no registration, and no usage caps."
+    },
+    {
+      "title": "Audio and speech models - Omixa Docs",
+      "url": "https://omixa.cloud/docs/audio",
+      "snippet": "Google Cloud Speech-to-Text Chirp 3 for multilingual transcription, automatic language recognition, and speaker-aware results."
+    },
+    {
+      "title": "The router for voice models | Speko",
+      "url": "https://speko.ai/?ref=upstract.com",
+      "snippet": "Speko measures 61 speech and language models across 10 languages, then routes each session to the one that actually wins.The Router for Voice AI. Every speech model, benchmarked language by language, wired into one API."
+    },
+    {
+      "title": "ElevenLabs Says \"70+ Languages.\" Real Count... | ThePlanetTools.ai",
+      "url": "https://theplanettools.ai/blog/elevenlabs-multilingual-70-languages-tested-2026",
+      "snippet": "How does ElevenLabs compare to Google Cloud TTS Chirp 3 HD? Can I use one voice for multiple languages on ElevenLabs? Is ElevenLabs v3 production-ready or still in alpha? What is the cheapest ElevenLabs tier for multilingual TTS?"
+    },
+    {
+      "title": "GitHub - keremustundag/visionaid-rpi: Assistive vision device on...",
+      "url": "https://github.com/keremustundag/visionaid-rpi",
+      "snippet": "Google Cloud Text-to-Speech, Chirp3-HD voices (tr-TR / en-US). Audio out.Streaming would let speech begin on the first chunk, hiding most of the remaining ~1.4 s. Overlapping the two API calls. Gemini can stream its response."
+    }
+  ]
+}

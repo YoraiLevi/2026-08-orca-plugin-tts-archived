@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Amazon Polly streaming synthesis latency pricing generative voice",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:23.057958+0300",
+  "status": "ok",
+  "message": null,
+  "count": 14,
+  "payload": [
+    {
+      "title": "Amazon Polly Pricing – Amazon Web Services (AWS)",
+      "url": "https://aws.amazon.com/polly/pricing/",
+      "snippet": "Amazon Pricing Calculator. Calculate your Amazon Polly and architecture cost in a single estimate.Amazon Polly’s Generative voices are priced at $30 per 1 million characters for speech requests (when outside the free tier)."
+    },
+    {
+      "title": "Polly Generative pricing & specs — Amazon | CloudPrice",
+      "url": "https://cloudprice.net/models/amazon-polly-generative",
+      "snippet": "Polly Generative is an AI model by Amazon. Compare specs, benchmarks, and costs across providers.Amazon Polly's generative TTS engine producing highly natural, expressive speech using generative AI techniques."
+    },
+    {
+      "title": "Voice Cloning & TTS Generator - Create Voice from... | Chatterbox AI",
+      "url": "https://chatterboxai.net/playground",
+      "snippet": "Why Choose Chatterbox AI?Zero-Shot Cloning: Generate voices from just 5 seconds of audio - no training requiredUltra-Low Latency: Sub-200ms streaming for real-time applications and live agents"
+    },
+    {
+      "title": "Best Voice AI for Interactive Entertainment (2026)",
+      "url": "https://inworld.ai/resources/best-voice-ai-for-interactive-entertainment",
+      "snippet": "Interactive entertainment with voice-enabled AI characters generates high volumes of TTS usage across user bases. An open-world RPG where every voice agent speaks, or a live-service experience with daily AI interactions, can generate billions of characters per month."
+    },
+    {
+      "title": "Free Text to Speech Online – 300+ AI Voices, 70+... | Voicertool",
+      "url": "https://voicertool.com/",
+      "snippet": "Voicertool: free text to speech with 300+ AI voices and 70+ languages. Convert text to MP3 instantly with no registration required."
+    },
+    {
+      "title": "How to Set Up a Real-Time Voice Agent With an API",
+      "url": "https://knowara.com/ai-tools/voice/real-time-voice-agent-api-setup/",
+      "snippet": "Sub-300ms streaming synthesis latency. Pricing verified as of July 2026.Workaround: Polly’s Long-Form voice engine (a separate, pricier tier at $100 per 1 million characters) narrows this expressiveness gap significantly for long-form narration use cases."
+    },
+    {
+      "title": "amazon-polly-streaming · PyPI",
+      "url": "https://pypi.org/project/amazon-polly-streaming/",
+      "snippet": "Amazon Polly bidirectional streaming over HTTP/2 with SigV4 (the API boto3 does not yet expose).The voice_id must be a generative voice supporting bidirectional streaming. See the Amazon Polly Generative voices page for the current list and supported regions."
+    },
+    {
+      "title": "Lovevoice AI Voice Generator | Transform Text to Speech(TTS) Online",
+      "url": "https://lovevoice.ai/",
+      "snippet": "Free AI Voice Generator — 300+ Realistic Text-to-Speech Voices. Transform your text into natural-sounding speech. Create professional voiceovers for videos, podcasts, and content in seconds."
+    },
+    {
+      "title": "Free Text to Speech Online – Lifelike AI Voices, No Sign-up Required",
+      "url": "https://finevoice.ai/text-to-speech",
+      "snippet": "Generate Emotional, Lifelike Voices from Text. Convert text to speech in your favorite voice with customizable style, speed, pitch, and emotion. Perfect for audiobooks, ads, expainer videos, and more."
+    },
+    {
+      "title": "ElevenLabs Pricing for Creators & Businesses of All Sizes",
+      "url": "https://elevenlabs.io/pricing",
+      "snippet": "Low-latency TTS as low as 5c/minute. 10 Professional Voice Clones.For V2 Flash/Turbo English and V2.5 Flash/Turbo Multilingual models, discounted pricing applies for API usage, costing between 0.5 and 1 credit per character."
+    },
+    {
+      "title": "NiceVoice - Free AI Voice Cloning Tool",
+      "url": "https://voice-clone-web-test.pages.dev/",
+      "snippet": "AI voice cloning uses advanced artificial intelligence technology to analyze your voice sample and generate synthetic speech that closely resembles your original voice, capable of reading any input text. What are the requirements for voice samples?"
+    },
+    {
+      "title": "Free AI Voice Generator, 2,000+ Voices in 80+ Languages | Fliki",
+      "url": "https://fliki.ai/features/voiceover",
+      "snippet": "Generate realistic AI voiceover free. 2,000+ voices across 8 providers including ElevenLabs, OpenAI and Google, 80+ languages, voice cloning, 30+ emotion styles."
+    },
+    {
+      "title": "#TTS – @govindhtech on Tumblr",
+      "url": "https://www.tumblr.com/govindhtech/tagged/TTS",
+      "snippet": "Four voice engines are currently supported by Amazon Polly: generative, long-form, neural, and conventional voices. Amazon Polly voices. The 2016 introduction of standard TTS voices makes use of conventional concatenative synthesis."
+    },
+    {
+      "title": "ТОП-15 лучших программ для озвучки текста [2026]",
+      "url": "https://video-editor.su/programmy-dlya-ozvuchki-teksta.php",
+      "snippet": "Amazon Polly. ОС: Онлайн. Русский язык: есть. Цена: бесплатно в течение 6 месяцев после регистрации и до исчерпания лимита. Лимит зависит от выбранного движка и может варьироваться от 100 000 до 5 000 000 символов."
+    }
+  ]
+}

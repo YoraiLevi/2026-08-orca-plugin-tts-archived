@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Azure Speech TTS streaming websocket latency pricing",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:30:34.206147+0300",
+  "status": "ok",
+  "message": null,
+  "count": 32,
+  "payload": [
+    {
+      "title": "Quotas and Limits for Azure Speech - Foundry ToolsHow to lower speech synthesis latency using Speech SDK ...Cognitive Speech Services Pricing | Microsoft AzureQuotas and Limits for Azure Speech - Azure AI servicesText to speech frequently asked questions (FAQ) - Azure AI ...Microsoft Azure AI Speech Review (2026): Pricing, Features ...",
+      "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-services-quotas-and-limits",
+      "snippet": "This article contains a quick reference and a detailed description of the quotas and limits for the Speech service in Azure AI services. The information applies to all of the service. It also contains some best practices to avoid request throttling. See full list on learn.microsoft.com The following sections provide you with a quick guide to the quotas and limits that apply to the Speech service. For information about adjustable quotas for Standard (S0) Speech resources, see The quotas and limits for Free (F0) Speech resources aren't adjustable. If you switch a Speech resource from Free (F0) to Standard (S0) pricing tier, the change of the corresponding quotas may take up to several hours. Speech to text quotas and limits per resource This section describes speech to text quotas and limits per Speech resource. Unless otherwise specified, the limits aren't adjustable. See full list on learn.microsoft.com Feb 25, 2026 · How to lower speech synthesis latency using Speech SDK, including streaming, pre-connection, and more. View pricing for Cognitive Speech Services, a comprehensive new offering that includes text to speech, speech to text and speech translation capabilities. Jul 28, 2026 · This article contains a quick reference and a detailed description of the quotas and limits for Azure Speech. The information applies to all pricing tiers of Azure Speech. This article also contains some best practices to avoid request throttling. For the Free (F0) pricing tier, see the monthly allowances on the pricing page. Jun 26, 2026 · Azure AI text to speech supports various streaming and non-streaming audio formats, with the commonly used sampling rates. All TTS standard voices are created to support high-fidelity audio outputs with 48 kHz and 24 kHz. HD and standard neural voices both synthesize in under 300ms; the Azure OpenAI HD voices, by contrast, sit above 500ms. The bigger 2026 story is the Voice Live API, which consolidates speech-to-text, TTS, and an LLM into one WebSocket stream for speech-to-speech voice agents — the pitch Microsoft led with at Build 2026. What is network latency between client and azure TTS service? The network latency between the client and Azure TTS service. Indicates the time delay between Azure TTS service received synthesis request and the first audio chunk is returned. SpeechSynthesisResult // you can also get the result id, and send to us when you need help for diagnosis var resultId = result.ResultId; What is Azure speech in foundry tools? View pricing for Azure Speech in Foundry Tools, a comprehensive new offering that includes text to speech, speech to text and speech translation capabilities. Are the quotas and limits for Azure speech adjustable? The quotas and limits for Free (F0) Azure Speech resources aren't adjustable. If you switch an AI Services resource for Azure Speech from the Free (F0) pricing tier to Standard (S0), the change of the corresponding quotas might take up to several hours. The following sections describe speech-to-text quotas and limits per Azure Speech resource. How long does it take to change Azure speech quotas? If you switch an AI Services resource for Azure Speech from the Free (F0) pricing tier to Standard (S0), the change of the corresponding quotas might take up to several hours. The following sections describe speech-to-text quotas and limits per Azure Speech resource. For information about adjustable quotas, see more explanations in this article."
+    },
+    {
+      "title": "How to lower speech synthesis latency using Speech SDK - Foundry Tools | Microsoft Learn",
+      "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-lower-speech-synthesis-latency",
+      "snippet": "February 25, 2026 - How to lower speech synthesis latency using Speech SDK, including streaming, pre-connection, and more."
+    },
+    {
+      "title": "Quotas and Limits for Azure Speech - Azure AI services",
+      "url": "https://docs.azure.cn/en-us/ai-services/speech-service/speech-services-quotas-and-limits",
+      "snippet": "Jul 28, 2026 · This article contains a quick reference and a detailed description of the quotas and limits for Azure Speech. The information applies to all pricing tiers of Azure Speech. This article also contains some best practices to avoid request throttling. For the Free (F0) pricing tier, see the monthly allowances on the pricing page."
+    },
+    {
+      "title": "Text to speech frequently asked questions (FAQ) - Azure AI services | Azure Docs",
+      "url": "https://docs.azure.cn/en-us/ai-services/speech-service/faq-tts",
+      "snippet": "June 26, 2026 - The rate is adjustable with business justifications and no extra charges are incurred for rate limit increase. Check more details in Speech service quotas and limits. We provide several tips for you to lower the latency and bring the best ..."
+    },
+    {
+      "title": "Top text-to-speech APIs in 2026",
+      "url": "https://www.assemblyai.com/blog/top-text-to-speech-apis",
+      "snippet": "The best text-to-speech APIs in 2026 are Rime, ElevenLabs, OpenAI TTS, Google Cloud TTS, Microsoft Azure TTS, Amazon Polly, Speechmatics, Murf.ai, Play.ht, Telynx, Cartesia, and MiniMax—evaluated across voice quality, latency, language support, pricing..."
+    },
+    {
+      "title": "Microsoft Azure TTS — Review (Score: 68/100) - nolist.ai",
+      "url": "https://nolist.ai/item/microsoft-azure-tts",
+      "snippet": "March 8, 2026 - The price leader for simple neural speech, offering a much lower $4 per 1M characters compared to Azure's $16. $4 per 1M characters for neural voices, which is 75% cheaper than Azure's neural tier."
+    },
+    {
+      "title": "Azure Text to Speech Pricing (2026): 500K Free, Then $16/1M | TextToLab",
+      "url": "https://texttolab.com/blog/azure-text-to-speech-pricing",
+      "snippet": "June 10, 2026 - This is standard across cloud TTS providers, but it's worth factoring into your cost estimates — especially if you use heavy SSML markup. Stripping unnecessary whitespace and using shorthand SSML attributes can save 10-20% on character counts. Azure charges the same per-character rate for both real-time and batch synthesis, but the operational constraints differ sharply. Real-time synthesis caps at 200 concurrent WebSocket connections per region on the S0 tier (you can request increases via Azure support)."
+    },
+    {
+      "title": "Text to speech frequently asked questions (FAQ) - Foundry Tools | Microsoft Learn",
+      "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/faq-tts",
+      "snippet": "June 5, 2026 - See Lower speech synthesis latency using Speech SDK. Azure AI text to speech supports various streaming and non-streaming audio formats, with the commonly used sampling rates. All TTS standard voices are created to support high-fidelity audio outputs with 48 kHz and 24 kHz."
+    },
+    {
+      "title": "Azure Speech-to-Text: The $1/Hour Lie (Real Cost)",
+      "url": "https://brasstranscripts.com/blog/azure-speech-services-pricing-2025-microsoft-ecosystem-costs",
+      "snippet": "January 31, 2026 - Key insight: Azure's batch rate ($0.006/min) is 64% cheaper than real-time ($0.0167/min), similar to competitors' batch vs streaming premiums."
+    },
+    {
+      "title": "Speech-to-Text APIs in 2026: Benchmarks, Pricing, and a Developer's Decision Guide",
+      "url": "https://futureagi.substack.com/p/speech-to-text-apis-in-2026-benchmarks",
+      "snippet": "February 27, 2026 - For voice-to-voice interactions, your total round-trip (STT + LLM + TTS) should stay under 800ms. That gives your STT layer a budget of roughly 150–300ms. Anything above 500ms makes conversations feel noticeably sluggish."
+    },
+    {
+      "title": "10 Best Text to Speech APIs in 2025: Pricing, Features & Comparison",
+      "url": "https://deepgram.com/learn/best-text-to-speech-apis-2026",
+      "snippet": "February 3, 2026 - For existing cloud infrastructure: Align with your provider (Google Cloud TTS for GCP, Azure Speech for Azure, AWS Polly for AWS). Test providers in your deployment environment rather than relying solely on published specifications. Latency varies based on network conditions and geographic location."
+    },
+    {
+      "title": "How to use azure tts by websocket api rather than sdk？ - Microsoft Q&A",
+      "url": "https://learn.microsoft.com/en-us/answers/questions/5849754/how-to-use-azure-tts-by-websocket-api-rather-than",
+      "snippet": "April 3, 2026 - Sorry for the inconvenience caused. While Azure Text-to-Speech uses a WebSocket V2 endpoint internally for low-latency scenarios, the input text streaming feature is not supported for direct use over raw WebSocket. This capability is only available through the Azure Speech SDK, which manages ..."
+    },
+    {
+      "title": "How to lower speech synthesis latency using Speech SDK - Azure AI services | Azure Docs",
+      "url": "https://docs.azure.cn/en-us/ai-services/speech-service/how-to-lower-speech-synthesis-latency",
+      "snippet": "This feature minimizes latency and improves the fluidity and responsiveness of audio outputs, making it ideal for interactive applications, live events, and responsive AI-driven dialogues. Text streaming is supported in C#, C++ and Python with Speech SDK. To use the text streaming feature, connect to the websocket V2 endpoint: wss://{region}.tts..."
+    },
+    {
+      "title": "Best TTS APIs in 2026: ElevenLabs, Google, AWS & 9 More Compared",
+      "url": "https://www.speechmatics.com/company/articles-and-news/best-tts-apis-in-2025-top-12-text-to-speech-services-for-developers",
+      "snippet": "March 10, 2026 - For developers building scalable voice agents, Speechmatics offers unbeatable cost-per-character and low latency without production quality degradation. For multilingual content, Google Cloud TTS is hard to top. For AWS-native stacks, Polly is the obvious choice. For ultra-realistic narration in creative projects, ElevenLabs leads the pack. For enterprise customization, Azure's custom neural voice is unmatched."
+    },
+    {
+      "title": "Best TTS APIs for Real-Time Voice Agents (2026 Benchmarks)",
+      "url": "https://inworld.ai/resources/best-voice-ai-tts-apis-for-real-time-voice-agents-2026-benchmarks",
+      "snippet": "January 22, 2026 - Quality rankings from HuggingFace TTS Arena and Artificial Analysis Speech Leaderboard use blind comparison tests. Per-character and per-minute pricing across self-serve tiers exposes true costs, while hidden infrastructure fees (cloud storage, egress, function triggers) add overhead for hyperscaler solutions. SDK availability (Unity, Unreal, Node.js, Python) determines development ease. WebSocket streaming versus REST-only APIs separates real-time applications from batch processing."
+    },
+    {
+      "title": "Azure AI Services Pricing Details - Azure Cloud Computing",
+      "url": "https://www.azure.cn/en-us/pricing/details/cognitive-services/",
+      "snippet": "July 8, 2026 - Speech to text hours are measured as the hours of audio sent to the service, billed in second increments. 1 The concurrent requests applied to web endpoints only. 2 Unused models will be automatically decommissioned after 7 days. 3 To take advantage of this new pricing you need to use the new Speech to text REST API V3.2 preview."
+    },
+    {
+      "title": "Pricing - Azure Speech in Foundry Tools | Microsoft Azure",
+      "url": "https://azure.microsoft.com/en-gb/pricing/details/speech/",
+      "snippet": "It is charged as standard Speech to Text, example: For evaluation of 8 seconds of speech, you will be charged around $- Talk to a sales specialist for a walk-through of Azure pricing."
+    },
+    {
+      "title": "Text-to-Speech Latency: How to Read Vendor Claims and Minimize TTS Latency",
+      "url": "https://picovoice.ai/blog/text-to-speech-latency/",
+      "snippet": "December 2, 2025 - Frontend–Backend Synchronization: Audio context startup, JavaScript lifecycle delays, WebSocket buffering, and encryption/decryption can add 50–150 ms to user-perceived latency."
+    },
+    {
+      "title": "Pricing - Azure Speech in Foundry Tools | Microsoft Azure",
+      "url": "https://azure.microsoft.com/en-us/pricing/details/speech/",
+      "snippet": "View pricing for Azure Speech in Foundry Tools, a comprehensive new offering that includes text to speech, speech to text and speech translation capabilities."
+    },
+    {
+      "title": "Cognitive Speech Services Pricing | Microsoft Azure",
+      "url": "https://azure.microsoft.com/en-in/pricing/details/speech/",
+      "snippet": "View pricing for Cognitive Speech Services, a comprehensive new offering that includes text to speech, speech to text and speech translation capabilities."
+    },
+    {
+      "title": "Microsoft Azure AI Speech Review (2026): Pricing, Features ...",
+      "url": "https://litmustools.com/review/azure-speech/",
+      "snippet": "HD and standard neural voices both synthesize in under 300ms; the Azure OpenAI HD voices, by contrast, sit above 500ms. The bigger 2026 story is the Voice Live API, which consolidates speech-to-text, TTS, and an LLM into one WebSocket stream for speech-to-speech voice agents — the pitch Microsoft led with at Build 2026."
+    },
+    {
+      "title": "Pricing Calculator | Microsoft Azure",
+      "url": "https://azure.microsoft.com/en-us/pricing/calculator/",
+      "snippet": "Azure Speech in Foundry Tools.Pricing calculator. FinOps on Azure."
+    },
+    {
+      "title": "Azure Speech TTS provider — multilingual neural voices with SSML...",
+      "url": "https://developers.telnyx.com/docs/voice/tts/providers/azure",
+      "snippet": "Azure Speech. Overview. WebSocket Streaming. Lifecycle. Configuration.AWS Polly. Azure. ElevenLabs. Other. Pronunciation Dictionaries. In-Call Playback. Pricing."
+    },
+    {
+      "title": "ElevenLabs TTS Latency Test 2026 Real-World Results - VEXYL AI",
+      "url": "https://vexyl.ai/elevenlabs-tts-latency-test-2026-real-world-results/",
+      "snippet": "What is TTS Latency and Why Does It Matter? TTS latency refers to the delay between sending text to a text-to-speech API and receiving the first audio bytes that can be played back to users. In conversational AI, this delay directly impacts how natural your voice agent feels."
+    },
+    {
+      "title": "Streaming TTS - Rime Docs",
+      "url": "https://rimelabs.mintlify.app/docs/streaming",
+      "snippet": "Streaming TTS. WebSocket API. Latency.Stream Rime text-to-speech audio in real time over HTTP, WebSockets, or SSE — how to choose a transport, with runnable examples for low-latency voice agents."
+    },
+    {
+      "title": "Microsoft Azure AI Speech Review: TTS Pricing & Features",
+      "url": "https://knowara.com/ai-tools/voice/microsoft-azure-ai-speech/",
+      "snippet": "1 month ago - Generates custom brand voices through Custom Neural Voice training, billed at $52 per compute hour. Transcribes audio in real time at $1 per hour, or through batch transcription at $0.18 per hour."
+    },
+    {
+      "title": "r/AZURE on Reddit: Can I stream text to TTS service.",
+      "url": "https://www.reddit.com/r/AZURE/comments/1iqqh6x/can_i_stream_text_to_tts_service/",
+      "snippet": ""
+    },
+    {
+      "title": "Microsoft Azure",
+      "url": "https://portal.azure.com/",
+      "snippet": ""
+    },
+    {
+      "title": "Best Murf AI Alternatives in 2026: 6 Tools Compared by... - Smallest.ai",
+      "url": "https://smallest.ai/blog/best-murf-ai-alternatives-in-2026-6-tools-compared-by-speed-pricing-api",
+      "snippet": "Latency for Azure Neural TTS typically falls in the 200-300ms range for streaming responses, which is adequate for many enterprise applications but not competitive with Smallest.ai or Cartesia for real-time conversational use."
+    },
+    {
+      "title": "Models & Languages Overview | Deepgram's Docs",
+      "url": "https://developers.deepgram.com/docs/tts-models-languages-overview",
+      "snippet": "An overview of Deepgram's text-to-speech models and supported languages."
+    },
+    {
+      "title": "Guides & Tutorials: Voice AI Developer Resources | Gradium",
+      "url": "https://gradium.ai/content",
+      "snippet": "Developer guides and tutorials for Gradium's voice AI APIs: text-to-speech, speech-to-text, voice cloning, WebSocket streaming, and voice agents with LiveKit and Pipecat."
+    },
+    {
+      "title": "platform.inworld.ai/llms.txt",
+      "url": "https://platform.inworld.ai/llms.txt",
+      "snippet": "Inworld AI provides APIs for building voice AI applications: Realtime TTS (text-to-speech), Realtime STT (speech-to-text), Realtime speech-to-speech, and Realtime Router for LLM routing across providers."
+    }
+  ]
+}

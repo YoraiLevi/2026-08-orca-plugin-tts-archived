@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "skill": "web-scraper",
+  "kind": "document",
+  "query": "https://elevenlabs.io/docs/eleven-api/guides/how-to/best-practices/latency-optimization",
+  "args": {
+    "links": false,
+    "images": false,
+    "tables": true,
+    "language": null
+  },
+  "generated_at": "2026-08-20T18:30:53.385108+0300",
+  "status": "ok",
+  "message": null,
+  "count": null,
+  "payload": {
+    "url": "https://elevenlabs.io/docs/eleven-api/guides/how-to/best-practices/latency-optimization",
+    "title": "Latency optimization | ElevenLabs Documentation",
+    "author": null,
+    "date": "2026-08-20",
+    "sitename": "",
+    "description": "",
+    "content": "---\ntitle: Latency optimization | ElevenLabs Documentation\nurl: https://elevenlabs.io/docs/eleven-api/guides/how-to/best-practices/latency-optimization\nhostname: elevenlabs.io\ndescription: This guide shows you how to reduce text-to-speech latency in your application.\nsitename: ElevenLabs Documentation\ndate: 2026-08-20\n---\nLatency optimization\nThis guide shows you how to reduce text-to-speech latency in your application.\nThis guide covers the core principles for improving text-to-speech latency. For a conceptual explanation of what latency is and what contributes to it, see Understanding latency.\nWhile there are many individual techniques, we’ll group them into four principles.\nFour principles\nEnterprise customers benefit from increased concurrency limits and priority access to our rendering queue. Contact sales to learn more about our enterprise plans.\nUse Flash models\nFlash models deliver ~75ms inference speeds, making them ideal for real-time applications. The trade-off is a slight reduction in audio quality compared to Multilingual v2.\n75ms refers to model inference time only. Actual end-to-end latency will vary with factors such as your location & endpoint type used.\nLeverage streaming\nThere are three types of text-to-speech endpoints available in our API Reference:\n- Regular endpoint: Returns a complete audio file in a single response.\n- Streaming endpoint: Returns audio chunks progressively using Server-sent events.\n- Websockets endpoint: Enables bidirectional streaming for real-time audio generation.\nStreaming\nStreaming endpoints progressively return audio as it is being generated in real-time, reducing the time-to-first-byte. This endpoint is recommended for cases where the input text is available up-front.\nStreaming is supported for the Text to Speech API, Voice Changer API & Audio Isolation API.\nWebsockets\nThe text-to-speech websocket endpoint supports bidirectional streaming making it perfect for applications with real-time text input (e.g. LLM outputs).\nSetting auto_mode to true automatically handles generation triggers, removing the need to\nmanually manage chunk strategies.\nIf auto_mode is disabled, the model will wait for enough text to match the chunk schedule before starting to generate audio.\nFor instance, if you set a chunk schedule of 125 characters but only 50 arrive, the model stalls until additional characters come in—potentially increasing latency.\nFor implementation details, see the text-to-speech websocket guide.\nChoose appropriate voices\nWe have observed that in some cases, voice selection can impact latency. Here’s the order from fastest to slowest:\n- Default voices (formerly premade), Synthetic voices, and Instant Voice Clones (IVC)\n- Professional Voice Clones (PVC)\nHigher audio quality output formats can increase latency. Be sure to balance your latency requirements with audio fidelity needs.\nConsider geographic proximity\nWe serve our models from multiple regions to optimize latency based on your geographic location.\nFor example, using Flash models with Websockets, you can expect the following TTFB latencies depending on your location:\nYou can check which backend region is serving your request by inspecting the x-region header in the API response.\nCurrently used regions include: USA, Netherlands and Singapore.\nEnterprise customers can use our dedicated EU and India data residency environments for guarantees about the server location as well as low latency. Contact your sales representative to get onboarded to our data residency infrastructure.\nTo opt-out of the global routing and always use USA servers, use the api.us.elevenlabs.io base URL for your API requests:\nThe global servers were previously opt-in using the api-global-preview.elevenlabs.io base URL.\nThis is no longer necessary as it is now the default behavior. Please update your applications to\nsimply use api.elevenlabs.io instead."
+  }
+}

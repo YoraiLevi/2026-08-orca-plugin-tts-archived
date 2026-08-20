@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Cartesia Sonic TTS latency time to first byte pricing",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:30:34.834163+0300",
+  "status": "ok",
+  "message": null,
+  "count": 29,
+  "payload": [
+    {
+      "title": "Cartesia | Real-time TTS API with AI laughter and emotion",
+      "url": "https://www.cartesia.ai/sonic",
+      "snippet": "Integrate real-time text-to-speech with Sonic-3, Cartesia's streaming TTS API.Languages Customers Pricing. Contact Sales Try Cartesia. Sonic: The fastest and most natural text to speech model."
+    },
+    {
+      "title": "Inworld vs Cartesia TTS: Quality, Latency, Pipeline (2026)",
+      "url": "https://inworld.ai/resources/inworld-vs-cartesia",
+      "snippet": "How does Realtime TTS compare to Cartesia Sonic on latency? Cartesia wins on raw speed. Sonic 3.5 Turbo delivers approximately 40ms time-to-first-byte, and the standard Sonic 3.5 model stays under 100ms. These are among the fastest TTFB numbers in the TTS market."
+    },
+    {
+      "title": "Cartesia Sonic 3 and 3.5: Specs, Real Latency, Pricing, and Where...",
+      "url": "https://invideo.io/blog/cartesia-sonic-ai-voice/",
+      "snippet": "Sonic is low-latency, expressive TTS aimed first at voice agents — anything where a pause reads as a failure — and second at high-volume voiceover. The SSM architecture processes audio as a continuous stream rather than in chunks, the design bet behind its speed."
+    },
+    {
+      "title": "Cartesia Sonic 3 pricing: Plans, costs, and limits (2026) | eesel AI",
+      "url": "https://www.eesel.ai/blog/cartesia-sonic-3-pricing",
+      "snippet": "November 14, 2025 - Cartesia Sonic 3 uses a flexible, usage-based pricing model that combines monthly subscriptions with credits and per-minute rates. Costs vary depending on character count for TTS, seconds for STT, and minutes for voice agent usage."
+    },
+    {
+      "title": "Cartesia AI Review 2026: The Fastest TTS Tested (40ms Latency)",
+      "url": "https://texttolab.com/blog/cartesia-ai-review",
+      "snippet": "Cartesia Sonic 3 is the fastest commercial TTS available — 90ms time-to-first-audio on standard, 40ms on Turbo. Nothing else comes close. If you're building voice agents and every millisecond of latency matters, Cartesia is the obvious choice."
+    },
+    {
+      "title": "Cartesia Pricing & Plans: Full Guide for 2026",
+      "url": "https://www.cloudtalk.io/blog/cartesia-pricing/",
+      "snippet": "3 weeks ago - 20K credits exhausts quickly in production — approximately 20,000 characters of TTS, roughly 15-20 minutes of audio at normal speaking pace · $0.06/min telephony rate on Line — the highest rate across all plans · The Pro plan is Cartesia's ..."
+    },
+    {
+      "title": "Cartesia Ships Sonic-3.6: A Streaming TTS Model That Now Leads Both Artificial Analysis Speech Arenas - MarkTechPost",
+      "url": "https://www.marktechpost.com/2026/08/18/cartesia-ships-sonic-3-6-a-streaming-tts-model-that-now-leads-both-artificial-analysis-speech-arenas/",
+      "snippet": "2 days ago - Cartesia Sonic-3.6 ranks #1 on both Artificial Analysis speech arenas. Benchmarks, sub-90ms latency, pricing, and deployment reality"
+    },
+    {
+      "title": "ElevenLabs vs Cartesia Sonic (2026): Quality vs Latency Showdown | CodeSOTA",
+      "url": "https://www.codesota.com/speech/elevenlabs-vs-cartesia",
+      "snippet": "Cartesia is objectively on the Pareto frontier: nobody beats it on MOS at its price. ElevenLabs Turbo owns the top-right — maximum quality, maximum cost. For voice agents end-to-end conversational latency is STT + LLM + TTS; you have ~150–200ms of an ~800ms budget for TTS alone."
+    },
+    {
+      "title": "Cartesia | Cartesia vs OpenAI TTS",
+      "url": "https://www.cartesia.ai/vs/cartesia-vs-openai-tts",
+      "snippet": "With a TTFA of 199 ms, Cartesia's Sonic model is significantly faster than ElevenLabs' 832 ms at the self-serve tier (with ElevenLabs reserving slightly lower latency for enterprise customers)."
+    },
+    {
+      "title": "Cartesia | Pricing",
+      "url": "https://www.cartesia.ai/pricing",
+      "snippet": "Plans for every stage — from your first prototype to mission-critical voice infrastructure."
+    },
+    {
+      "title": "Cartesia Sonic, ElevenLabs and MiniMax: The Ultimate ...",
+      "url": "https://www.famulor.io/blog/cartesia-sonic-elevenlabs-and-minimax-the-ultimate-comparison-for-ai-voice-agents-and-famulors-strategic-advantage",
+      "snippet": "February 2, 2026 - It is crucial for the naturalness ... considered the latency leader in the Text-to-Speech industry, with a TTFA of just 40 milliseconds...."
+    },
+    {
+      "title": "10 Best Text to Speech APIs in 2025: Pricing, Features & Comparison",
+      "url": "https://deepgram.com/learn/best-text-to-speech-apis-2026",
+      "snippet": "Pricing: Standard TTS at $4/million characters, Neural TTS at $16/million characters. Free tier includes 5 million characters/month for first 12 months. Best For: Applications using AWS infrastructure, high-volume production deployments, ..."
+    },
+    {
+      "title": "Cartesia vs ElevenLabs for Voice AI: Latency, Quality, and Cost in 2026",
+      "url": "https://burki.dev/blog/41-cartesia-vs-elevenlabs-tts",
+      "snippet": "February 11, 2026 - The cost gap is real but small: Cartesia is ~30–40% cheaper per minute than ElevenLabs Turbo. The latency gap is bigger: Cartesia ships ~80ms TTFB, ElevenLabs Turbo ships ~250–400ms TTFB."
+    },
+    {
+      "title": "Vapi x Cartesia Ultra-Realistic Voice AI With Sonic 2.0: Speed, Cost, and the Architecture Gap (2026)",
+      "url": "https://www.leadlock.ai/blog/vapi-x-cartesia-ultra-realistic-voice-ai-with-sonic-2-0/",
+      "snippet": "May 24, 2026 - Vapi with Cartesia runs $0.15-0.33/min all-in at scale - the advertised $0.05/min is the platform fee only, before STT, LLM, TTS, and telephony are added. Sonic 2.0 only improves the last step of Vapi’s three-step pipeline; total end-to-end ..."
+    },
+    {
+      "title": "8 Best TTS APIs for AI Voice Agents in 2026 (Tested & Ranked)",
+      "url": "https://www.cekura.ai/blogs/best-tts-for-ai-voice-agents",
+      "snippet": "May 1, 2026 - If pure voice quality is the deal-breaker, ElevenLabs and Cartesia remain the stronger picks. What it does: Inworld builds streaming TTS and STT for production voice agents, with sub-200ms latency and a pricing structure that discounts as usage ..."
+    },
+    {
+      "title": "Cartesia Pricing 2026: Sonic 3 API Costs From Free to $299/Month | TextToLab",
+      "url": "https://texttolab.com/blog/cartesia-pricing",
+      "snippet": "May 13, 2026 - The pattern is clear: Cartesia is 3-10x more expensive than OpenAI tts-1 for raw character-to-audio conversion. But that misses the point. You don't choose Cartesia for price — you choose it for the 40ms latency that makes voice agents feel instantaneous."
+    },
+    {
+      "title": "Cartesia \\ Cartesia vs Google Text to Speech",
+      "url": "https://www.cartesia.ai/vs/cartesia-vs-google-tts",
+      "snippet": "February 14, 2025 - We run 20M+ outbound calls per month on Cartesia, with peak concurrency of 5,000 calls in a single minute, and 100ms time-to-first-byte — 2x faster than every other voice provider we tested."
+    },
+    {
+      "title": "Cartesia Sonic 3 vs OpenAI TTS: A complete guide | eesel AI",
+      "url": "https://www.eesel.ai/blog/cartesia-sonic-3-vs-openai-tts",
+      "snippet": "October 29, 2025 - How do the response times compare when looking at Cartesia Sonic 3 vs OpenAI TTS for real-time interactions? Cartesia Sonic 3 is significantly faster, achieving a Time to First Byte (TTFB) as low as 40-90 milliseconds."
+    },
+    {
+      "title": "Cartesia AI Pricing Explained (2026) — Complete Plan Breakdown, Features & Limitations",
+      "url": "https://fish.audio/vs/pricing/cartesia-ai/",
+      "snippet": "Cartesia AI positions itself as a real-time voice AI platform with a focus on low-latency streaming for conversational applications."
+    },
+    {
+      "title": "Cartesia Sonic Pricing & Reviews 2026 | Techjockey.com",
+      "url": "https://www.techjockey.com/detail/cartesia-sonic",
+      "snippet": "Cartesia Sonic price starts at USD 5 at Techjockey.com. The pricing model is based on different parameters, including extra features, deployment type, and the total number of users."
+    },
+    {
+      "title": "Cartesia Sonic Review: 40ms TTS for Voice Agents",
+      "url": "https://knowara.com/ai-tools/cartesia-sonic-review/",
+      "snippet": "Cartesia Sonic delivers 40ms TTS latency for real-time voice agents. 8 Reading Time. Tested by the Knowara AI Voice Tools team across 40+ TTS generations, 3 pricing tiers, and 2 voice-cloning sessions on Cartesia’s Sonic-3 API."
+    },
+    {
+      "title": "SpeechifyAI vs Cartesia Sonic — SpeechifyAI",
+      "url": "https://speechify.ai/compare/build/text-to-speech/cartesia",
+      "snippet": "Cartesia Sonic is engineered for ultra-low latency in real-time applications. SpeechifyAI provides sub-300ms streaming from $6 per 1M characters with transparent per-character billing, versus Cartesia's credit-based model that works out to roughly $24-40 per 1M."
+    },
+    {
+      "title": "ElevenLabs vs OpenAI TTS vs Cartesia 2026 — PkgPulse Guides",
+      "url": "https://www.pkgpulse.com/guides/elevenlabs-vs-openai-tts-vs-cartesia-text-to-speech-2026",
+      "snippet": "Cartesia: Ultra-Low-Latency TTS. Cartesia's Sonic model is built for real-time voice applications — designed to produce the first audio chunk in under 100ms, enabling natural-feeling conversational AI."
+    },
+    {
+      "title": "Best TTS API (2026)",
+      "url": "https://anvevoice.app/best/best-tts-api-2026",
+      "snippet": "#3 Cartesia (Sonic). Ultra-low-latency TTS optimized for real-time conversational AI. Sub-100ms time-to-first-byte.#5 Google Cloud Text-to-Speech. Enterprise-grade TTS with broad language coverage (50+ languages, 380+ voices). Strong choice for GCP-native applications."
+    },
+    {
+      "title": "Cartesia AI Review 2026 — Sonic-3, 90ms Latency, and TTS Built for...",
+      "url": "https://aivoicereview.com/blog/cartesia-ai-review-2026",
+      "snippet": "Verdict: Cartesia Sonic-3 is the fastest TTS API available for voice agent deployments in 2026. The 90ms time-to-first-audio is real, measurable, and audibly different in live conversations. Voice quality is strong — not ElevenLabs-level, but competitive."
+    },
+    {
+      "title": "Cartesia Sonic-3 Tested: 90ms Voice AI, 10-Sec... | ThePlanetTools.ai",
+      "url": "https://theplanettools.ai/tools/cartesia",
+      "snippet": "We tested Cartesia Sonic-3 — 90ms time-to-first-audio, 10-second voice clone, 40+ languages. Free plan, Pro from $4 per month yearly, Scale $239."
+    },
+    {
+      "title": "8 Best AI Text-to-Speech Tools 2026 (Developer Tested) | Fastio",
+      "url": "https://fast.io/resources/best-ai-text-to-speech-tools-2026/",
+      "snippet": "Cartesia shipped Sonic Turbo with 40ms time-to-first-audio in early 2026, roughly four times faster than its nearest competitor. That benchmark shift turned text-to-speech from a batch rendering convenience into real-time conversational infrastructure."
+    },
+    {
+      "title": "Best AI Voice Agents 2026: ElevenLabs vs Vapi vs Retell",
+      "url": "https://ortemtech.com/blog/best-ai-voice-agents-2026/",
+      "snippet": "TTS (Text-to-Speech): Converts the LLM's text response to natural audio. Key metrics: latency, naturalness, voice cloning quality. Leading providers: ElevenLabs, Cartesia, PlayHT."
+    },
+    {
+      "title": "The 10 best AI voice assistants in 2026",
+      "url": "https://anthemcreation.com/en/artificial-intelligence/ai-voice-assistants-2026-comparison/",
+      "snippet": "Cartesia Sonic 2 holds the production TTS latency record with a TTFB (Time to First Byte) of 40 ms and stable streaming at 90 ms. The architecture relies on state-space models (an alternative to classic transformers) optimized for real-time streaming without glitches or artifacts."
+    }
+  ]
+}

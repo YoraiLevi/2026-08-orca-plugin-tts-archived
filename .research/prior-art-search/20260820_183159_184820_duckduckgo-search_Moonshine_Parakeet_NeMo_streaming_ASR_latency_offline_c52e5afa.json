@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "Moonshine Parakeet NeMo streaming ASR latency offline",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:31:59.184719+0300",
+  "status": "ok",
+  "message": null,
+  "count": 16,
+  "payload": [
+    {
+      "title": "Models — NVIDIA NeMo Framework User Guide",
+      "url": "https://docs.nvidia.com/nemo-framework/user-guide/latest/nemotoolkit/asr/models.html",
+      "snippet": "Apr 13, 2026 · The model trained with such limitations can be used in streaming mode and give the exact same outputs and accuracy as when the whole audio is given to the model in offline mode. These model can use caching mechanism to store and reuse the activations during streaming inference to avoid any duplications in the computations as much as possible."
+    },
+    {
+      "title": "GitHub - medmabcf/local-stream-asr: Offline, privacy-first ...",
+      "url": "https://github.com/medmabcf/local-stream-asr",
+      "snippet": "Apr 11, 2026 · The encoder processes the entire audio segment at once. The fix: I borrowed Moonshine's VAD (Voice Activity Detection) layer and parameters verbatim. The VAD splits the live microphone stream into natural speech segments, then feeds each completed segment into Parakeet as a batch."
+    },
+    {
+      "title": "local-stream-asr/README.md at main · medmabcf/local ... - GitHub",
+      "url": "https://github.com/medmabcf/local-stream-asr/blob/main/README.md",
+      "snippet": "The fix: I borrowed Moonshine's VAD (Voice Activity Detection) layer and parameters verbatim. The VAD splits the live microphone stream into natural speech segments, then feeds each completed segment into Parakeet as a batch. This gives pseudo-streaming — you get a new transcription line for every sentence you speak, with latency roughly equal to the trailing silence gap."
+    },
+    {
+      "title": "Offline VAD Mode | bagustris/live-asr-sherpa | DeepWiki",
+      "url": "https://deepwiki.com/bagustris/live-asr-sherpa/5.2-offline-vad-mode",
+      "snippet": "Mar 10, 2026 · Purpose and Scope This document details the offline VAD-segmented processing pipeline, which provides higher accuracy ASR for live audio sources by processing complete utterances instead of incremental chunks. This mode is required for certain model architectures (Whisper, NeMo, SenseVoice, Moonshine, FireRedASR, Parakeet) that cannot decode incrementally."
+    },
+    {
+      "title": "ASR Training, Transcription, and Streaming | NVIDIA/NeMo ...",
+      "url": "https://deepwiki.com/NVIDIA/NeMo/4.3-asr-training-transcription-and-streaming",
+      "snippet": "Jan 17, 2026 · This document covers the training, transcription (offline inference), and streaming inference workflows for Automatic Speech Recognition (ASR) models in NeMo. It explains the practical execution of AS"
+    },
+    {
+      "title": "GitHub - NVIDIA-NeMo/Speech: A scalable generative AI framework...",
+      "url": "https://github.com/NVIDIA-NeMo/Speech",
+      "snippet": "Introduction. NVIDIA NeMo Speech is built for researchers and PyTorch developers working on Speech models including Automatic Speech Recognition (ASR), Text to Speech (TTS), and Speech LLMs."
+    },
+    {
+      "title": "nvidia/parakeet-tdt-0.6b-v3 · Hugging Face",
+      "url": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
+      "snippet": "import nemo.collections.asr as nemo_asr asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=\"nvidia/parakeet-tdt-0.6b-v3\"). Transcribing using Python. First, let's get a sample."
+    },
+    {
+      "title": "sherpa-onnx C API: Non-Streaming (Offline) ASR Models",
+      "url": "https://k2-fsa.github.io/sherpa/onnx/c-api/html/offline_asr.html",
+      "snippet": "sherpa-onnx supports many non-streaming ASR model families through the SherpaOnnxCreateOfflineRecognizer() API. Configure exactly one model family by filling in the corresponding sub-struct of SherpaOnnxOfflineModelConfig."
+    },
+    {
+      "title": "Introducing NVIDIA Nemotron 3.5 ASR Streaming",
+      "url": "https://www.baseten.co/blog/introducing-nvidia-nemotron-35-asr-streaming/",
+      "snippet": "Deploy NVIDIA Nemotron 3.5 ASR for low-latency, production-ready speech recognition with 6x higher throughput and multilingual support.This significantly improves throughput, enabling up to 6x more concurrent streams than NVIDIA’s Parakeet RNNT while maintaining low latency."
+    },
+    {
+      "title": "Best Local Speech-to-Text Models in 2026: Moonshine vs Parakeet...",
+      "url": "https://www.onresonant.com/resources/local-stt-models-2026",
+      "snippet": "Moonshine, Parakeet, and Whisper compared — accuracy, parameters, license, streaming, and which to pick for real-time dictation on Apple Silicon. For years, the best speech-to-text required a server. You'd record audio, send it somewhere, and wait. In 2026, that's no longer true."
+    },
+    {
+      "title": "Streaming ASR vs Whisper on mobile: when to switch - DEV Community",
+      "url": "https://dev.to/voxrtio/streaming-asr-vs-whisper-on-mobile-when-to-switch-5cm7",
+      "snippet": "Parakeet streaming: same NeMo family, different size variants. Streaming Conformer: general architectural family, different implementations from Google, Microsoft, and NVIDIA. Kaldi TDNN-F: old-school, but streaming, still used in Vosk."
+    },
+    {
+      "title": "Nemotron 3.5 ASR Streaming Multilingual 0.6B vs Parakeet TDT...",
+      "url": "https://openrouter.ai/compare/nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b/nvidia/parakeet-tdt-0.6b-v3",
+      "snippet": "Compare Nemotron 3.5 ASR Streaming Multilingual 0.6B from Nvidia and Parakeet TDT 0.6B v3 from Nvidia on key metrics including benchmarks, price, context length, and other model features."
+    },
+    {
+      "title": "nvidia/nemotron-3.5-asr-streaming-0.6b · Hugging Face",
+      "url": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
+      "snippet": "We’re on a journey to advance and democratize artificial intelligence through open source and open science."
+    },
+    {
+      "title": "Best open source speech-to-text (STT) model in 2026 (with ...",
+      "url": "https://northflank.com/blog/best-open-source-speech-to-text-stt-model-in-2026-benchmarks",
+      "snippet": "Jan 6, 2026 · The best open source speech-to-text (STT) models in 2026 are: Canary Qwen 2.5B for maximum English accuracy IBM Granite Speech 3.3 8B for enterprise-grade English ASR and translation Whisper Large V3 for multilingual STT in 99+ languages Whisper Large V3 Turbo or Distil-Whisper when you need much faster throughput Parakeet TDT for ultra low-latency streaming Moonshine for edge and mobile ..."
+    },
+    {
+      "title": "Best Open Source Speech-to-Text Models in 2026",
+      "url": "https://www.assemblyai.com/blog/top-open-source-stt-options-for-voice-applications",
+      "snippet": "Top 8 open source STT options for voice applications in 2026. Open source speech-to-text has never been better — or harder to choose. Compare the best models for 2026 — Whisper, NVIDIA Canary, Parakeet, Moonshine — and when to buy instead."
+    },
+    {
+      "title": "11 STT Models Compared in 2026: Which One to Pick for... | Voice AI",
+      "url": "https://voice.smolevich.com/blog/stt-models-comparison-2026",
+      "snippet": "I benchmarked 11 speech-to-text models on Russian and English voice memos before locking in the STT stack for my Telegram bot. Whisper, Parakeet, GigaAM, ElevenLabs Scribe — what won on accuracy, latency, and privacy."
+    }
+  ]
+}

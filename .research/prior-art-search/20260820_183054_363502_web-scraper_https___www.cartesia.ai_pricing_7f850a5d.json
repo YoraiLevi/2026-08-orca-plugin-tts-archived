@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "skill": "web-scraper",
+  "kind": "document",
+  "query": "https://www.cartesia.ai/pricing",
+  "args": {
+    "links": false,
+    "images": false,
+    "tables": true,
+    "language": null
+  },
+  "generated_at": "2026-08-20T18:30:54.363441+0300",
+  "status": "ok",
+  "message": null,
+  "count": null,
+  "payload": {
+    "url": "https://www.cartesia.ai/pricing",
+    "title": "Cartesia | Pricing",
+    "author": null,
+    "date": "2000-01-01",
+    "sitename": "",
+    "description": "",
+    "content": "---\ntitle: Cartesia | Pricing\nurl: https://www.cartesia.ai/pricing\nhostname: cartesia.ai\ndescription: Plans for every stage — from your first prototype to mission-critical voice infrastructure.\nsitename: Cartesia\ndate: 2000-01-01\n---\nPricing for every stage.\nStart free, scale as you ship. Pay for the credits and agent minutes you use, with unlimited workspace seats on every plan.\nPro\n$5\n/mo100K credits / month\n$5 prepaid agents / month\nEverything in Free, plus\n- Commercial use license\n- Instant voice cloning\nStartup\n$49\n/mo1.25M credits / month\n$49 prepaid agents / month\nEverything in Pro, plus\n- Pro voice cloning\n- Organizations\nScale\n$299\n/mo8M credits / month\n$299 prepaid agents / month\nEverything in Startup, plus\n- Priority support\n- High concurrency limits\nEnterprise\nCustom\nCustom credits & agent usage\nVolume pricing\nEverything in Scale, plus\n- Custom concurrency limits\n- DPAs and BAAs for compliance\n- Shared Slack channel\n- SSO\n- Security questionnaires\nCalculate your costs based on your usage needs\nPick the products you plan to use and the volume you expect — we'll recommend the plan that fits.\nSelect features and capabilities\nMinutes of generated audio per month\n45 min\n050,000+\nCompare plans in detail\nFeature-by-feature across Free, Pro, Startup, and Scale — same billing period as above.\nFree\n$0/mo\nPro\n$5/mo\nStartup\n$49/mo\nScale\n$299/mo\nEnterprise\nCustom\nText to Speech\nSonic-3.6Minutes included monthly\n~27\n~133\n~1,667\n~10,667\nCustom\nConcurrent requests\n2\n3\n5\n15\nCustom\nInstant voice cloning\nProfessional voice cloning\n2\n4\nCustom\nVoice changer\n15 credits per second of audio\nLocalizing a voice\n225 credits as a one-time cost\nSpeech to Text\nInk-2Hours included monthly\n~1h 51m\n~9h 16m\n~115h 44m\n~740h 44m\nCustom\nConcurrent requests\n8\n12\n20\n60\nCustom\nVoice Agents\nLineNumber of agent slots\n1\n3\n5\n10\nCustom\nConcurrent calls\n8\n12\n20\n60\nCustom\nCall duration\n$0.06 per minute\n$0.06 per minute\n$0.06 per minute\n$0.06 per minute\nCustom\nTelephony\n$0.014 per minute when using a Cartesia-provided phone number\nLLM usage during calls\nFree for UI-created agents for a limited time\nEvaluations\nFree of charge for a limited time only\n$5/mo\nSelect ProText to Speech\nSonic-3.6Minutes included monthly\n~133\nConcurrent requests\n3\nInstant voice cloning\nProfessional voice cloning\nVoice changer\n15 credits per second of audio\nLocalizing a voice\n225 credits as a one-time cost\nSpeech to Text\nInk-2Hours included monthly\n~9h 16m\nConcurrent requests\n12\nVoice Agents\nLineNumber of agent slots\n3\nConcurrent calls\n12\nCall duration\n$0.06 per minute\nTelephony\n$0.014 per minute when using a Cartesia-provided phone number\nLLM usage during calls\nFree for UI-created agents for a limited time\nEvaluations\nFree of charge for a limited time only\nFAQs\nCapabilities"
+  }
+}
