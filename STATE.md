@@ -1,6 +1,22 @@
 # STATE — orca-plugin-tts
 
-**Updated:** 2026-08-20 · **Phase:** 0 (research) → closing · **Branch:** `main` · **Nothing implemented yet.**
+**Updated:** 2026-08-20 · **Phase:** 2/3 (implementation) · **Branch:** `main`
+
+## IN PROGRESS (resumption contract, constitution Part III)
+
+| Task | Owner | Gate |
+|---|---|---|
+| **T020-T027** normalizer | agent `normalizer-dev` | all normalizer tests green; T021f (`snake_case` intact) passes |
+| **T030-T038** chunker | agent `chunker-dev` | T030 `chunks.join('')===input` and T035 streaming==batch both green |
+
+Both are pure-logic packages with no shared files — the M2 ∥ M3 parallel pair.
+Next after both land: **T040** (provider seam) on the critical path.
+
+## Assumptions taken by default (T001, unanswered by user; reversible before T082)
+
+- Repo layout: **one repo, two packages** (`packages/core`, `providers`, `plugin`; `service` at M9).
+- Licence: **MIT**. Revisit before T082/publish given Piper GPL-3.0 voice coupling.
+- **v1 is OS-synth-only.** Resident service + Piper is M9, post-v1.
 
 ## One-paragraph status
 
