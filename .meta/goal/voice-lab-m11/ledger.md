@@ -219,3 +219,52 @@ audit trail that explains the whole session after the fact.
 - audited_before: yes — the map in `016` section 1 is the audit. tested_after: yes, by re-running
   `check:citations` after every change and by grepping `PLAN.md`/`TASKS.md` for each debunked claim.
 
+
+---
+
+## J20 — gate M11 measured (done, contract C3 acked UNMET)
+
+- **Measured in real Chrome over DevTools Protocol**, probe injected via
+  `Page.addScriptToEvaluateOnNewDocument` *before* the page's module runs, so
+  `voice-lab/index.html` was measured exactly as it ships. No new dependency (Node's built-in
+  WebSocket). Report: `docs/.research/m11-gate.md`.
+- **p95 3,401 ms** on `short.md` (2 chunks, n=20) against a 2,000 ms budget; **22,755 ms** on
+  `paths.md` (13 chunks, n=5). Cache-hit replay **41 ms** — that claim held. Control-change
+  speak-on-change 1,510 ms — passes.
+- Named cause: **`POST /speak` synthesizes every chunk before it answers.** `speak()` in
+  `scripts/voice-lab.mjs` builds `out` in a loop and returns `chunks: out` in one envelope.
+  FR-024 requires the opposite. The shipped path is already the disabled-streaming path.
+- **C3 is ticked as an honest failure**, per its failure clause: the number is measured, named and
+  recorded rather than quietly missed.
+
+## G-1 — all six fixtures answer 503 (root cause found, fixes dispatched)
+
+Reproduced against the running lab, not inferred. The chain, each link verified by effect:
+
+1. Every file in `fixtures/` opens with an HTML comment.
+2. **The normalizer has no HTML-comment transform** — the comment survives normalization. This is
+   a live v1 defect, not a lab-only one.
+3. The chunker therefore emits chunk 0 = `"<!"` and chunk 4 begins `"--> Yes"`.
+4. `say -o <file> "<!"` **exits 0 and writes no file** → `OsSynthEmptyOutputError`.
+5. `speak()` treats that as a provider failure and **503s the entire request**, discarding five
+   perfectly good chunks.
+
+Two further defects fell out of the same probe:
+
+- **`1,112` normalizes to `"one,one hundred twelve"`** — `expandNumbers` does not handle a
+  thousands separator. `2,017` becomes `"two,seventeen"`; the leading zero of `017` is dropped.
+  Every `[measured-here]` number in the docs is written with a comma, so this is heard constantly.
+- **The macOS 503 returns the Ubuntu remedy** (`sudo apt install espeak-ng`). Wrong platform,
+  wrong advice — P18 by its own definition.
+- Minor: `node scripts/voice-lab.mjs --port 7399` **silently ignores `--port`**, binds 7311, dies
+  EADDRINUSE. Same class: a flag that does nothing and says nothing.
+
+**Dispatched on disjoint file sets** (P34 — explicit paths only, both told):
+
+| Job | Owns | Fixes |
+|---|---|---|
+| J21-normalizer | `packages/core/src/normalizer/**`, stage-count doc sites | HTML comments; thousands separators; 15 → 16 stages everywhere |
+| J22-server | `scripts/voice-lab.mjs`, `voice-lab/**` | streaming `/speak` (the gate); one dead chunk must not kill the utterance, announced in-stream per P30; platform-correct hint; the `--port` flag |
+
+Both briefed to prove each new test can fail (paste RED, revert, green) and to re-measure the gate
+with the same harness before and after.
