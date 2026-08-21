@@ -25,6 +25,37 @@ describe('T076 GATE: thinking blocks are never spoken', () => {
     expect(joined).not.toMatch(/SECRET_REASONING|encrypted/)
   })
 
+  it('a thinking block is dropped by its TYPE, even when it also carries a text field', () => {
+    // MUTATION-CHECKED, and this is why the case exists: dropping the `type === 'text'` allowlist
+    // and pushing any block with a string `text` left every other assertion in this file green.
+    // The fixtures could not catch it, because a real thinking block keeps its payload under
+    // `thinking`/`data` and has no `text` key at all — so a decoder reading `block.text` blindly
+    // finds nothing to leak in the fixture, and everything to leak in the record ORCA actually
+    // hands us. Principle VIII is the highest-stakes rule in this project; its gate must fail for
+    // the right reason.
+    const leaky = JSON.stringify({
+      type: 'assistant', uuid: 'a9',
+      message: { content: [
+        { type: 'thinking', thinking: 'SECRET_REASONING', text: 'SECRET_REASONING' },
+        { type: 'redacted_thinking', data: 'enc', text: 'SECRET_REDACTED' },
+        { type: 'tool_use', name: 'Bash', text: 'rm -rf /' },
+        { type: 'text', text: 'The answer is four.' }
+      ] }
+    })
+    const out = decodeClaudeLine(leaky)
+    expect(out?.text, 'a block was spoken because it had a .text field, not because it was speech')
+      .toBe('The answer is four.')
+  })
+
+  it('a turn of nothing but a text-bearing thinking block yields NOTHING', () => {
+    // The control for the case above: if the allowlist were dropped, this would return the
+    // reasoning instead of null, so the assertion above can be shown to distinguish outcomes.
+    expect(decodeClaudeLine(JSON.stringify({
+      type: 'assistant', uuid: 'a10',
+      message: { content: [{ type: 'thinking', thinking: 'SECRET', text: 'SECRET' }] }
+    })), 'a thinking-only turn was spoken').toBeNull()
+  })
+
   it('yields nothing at all for a thinking-only turn', () => {
     const replies = decodeAll('thinking-only.jsonl')
     expect(replies).toEqual([])

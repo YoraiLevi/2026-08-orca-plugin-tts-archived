@@ -120,5 +120,19 @@ describe('B-01 an evicted id can never become a reason to speak again', () => {
     })).join('\n') + '\n')
     await settle()
     expect(speech.spoken, 'a compaction replayed the session aloud').toEqual([])
+
+    // ...and the session is not muted forever. MUTATION-CHECKED: deleting the whole re-anchor
+    // branch (`if (replies.length < mark)`) left the assertion above green, because
+    // `replies.slice(20)` of a 4-line file is empty either way. Silence alone therefore proved
+    // nothing. Without re-anchoring the mark stays at 20, so the next SIXTEEN replies are never
+    // spoken — the plugin goes quietly mute for that session, which is the failure mode this
+    // project exists to prevent.
+    await appendFile(file, Array.from({ length: 3 }, (_, i) => JSON.stringify({
+      type: 'assistant', uuid: `after-compaction-${i}`,
+      message: { content: [{ type: 'text', text: `after compaction ${i}` }] }
+    })).join('\n') + '\n')
+    await settle()
+    expect(speech.spoken, 'the mark froze past the compaction; the session went permanently mute')
+      .toEqual(['after compaction 0', 'after compaction 1', 'after compaction 2'])
   })
 })
