@@ -567,6 +567,12 @@ function isDigit(c: string | undefined): boolean {
   return c !== undefined && c >= '0' && c <= '9'
 }
 
+const LETTER = /\p{L}/u
+
+function isLetter(c: string | undefined): boolean {
+  return c !== undefined && LETTER.test(c)
+}
+
 function expandNumbers(src: string): string {
   let out = ''
   let i = 0
@@ -599,6 +605,16 @@ function expandNumbers(src: string): string {
 
     // "#42" is a reference, not a quantity. Speak the numerals.
     if (src[i - 1] === '#') { out += digits; i = j; continue }
+
+    /**
+     * A digit run GLUED TO A LETTER is a label, not a quantity: `p50`, `T110d`, `P22`, `M9`,
+     * `x86`. Expanding it fused the letter into the number word and destroyed both — `p50` was
+     * spoken as "pfifty", `P22` as "Ptwenty two", `T110d` as "Tone hundred tend". The letter is
+     * gone, the numeral is gone, and what is left is a plausible-sounding word that was never
+     * written. 006 section 19 rank 5, found by `token-conservation.test.ts` against the committed
+     * fixtures. Same judgement as the `#42` rule immediately above.
+     */
+    if (isLetter(src[i - 1])) { out += digits; i = j; continue }
 
     const value = Number(digits)
     if (value >= 1_000_000 || digits.length > 6) { out += digits; i = j; continue }
