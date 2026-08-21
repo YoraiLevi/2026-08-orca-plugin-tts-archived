@@ -64,9 +64,11 @@ import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
 import { parseSettingsText } from './parse.js'
-import { SETTINGS_SCHEMA, isFuture, schemaDefaults, toNormalizeOptions } from './schema.js'
+import { SETTINGS_SCHEMA, isFuture, schemaDefaults, toChunkerOptions, toNormalizeOptions } from './schema.js'
 import { normalize } from '../normalizer/index.js'
 import type { NormalizeOptions } from '../normalizer/index.js'
+import { Chunker } from '../chunker/index.js'
+import type { ChunkerOptions } from '../chunker/index.js'
 
 /* The lab is JavaScript with no type declarations, and it is not ours to change. The specifiers
  * are computed so `tsc` treats these as untyped rather than demanding `.d.ts` for voice-lab/. */
@@ -125,6 +127,7 @@ function extractFunction(src: string, name: string): string {
 
 type Values = Record<string, unknown>
 let labNormalizeOptions: (values: Values) => NormalizeOptions
+let labChunkOptions: (values: Values) => ChunkerOptions
 let pageSource: string
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
@@ -151,9 +154,19 @@ const SETTINGS_SETS: readonly SettingsSet[] = [
     overrides: { 'path.style': 'verbatim', 'path.extensionStyle': 'omit' }
   },
   {
-    name: 'terse paths, extension first',
-    why: 'stage 8 on, but every one of its three inputs off its default.',
-    overrides: { 'path.style': 'terse', 'path.extensionStyle': 'word-first' }
+    name: 'terse paths',
+    why: "the middle rung of stage 8. NOTE: under 'terse' the extension is not spoken at all, so this set says nothing about extensionStyle — see the set below.",
+    overrides: { 'path.style': 'terse' }
+  },
+  {
+    name: 'spoken paths, extension omitted',
+    why: "extensionStyle is observable ONLY under pathStyle 'spoken' — 'terse' and 'verbatim' both skip the part of stage 8 that speaks it. A mutation probe that dropped extensionStyle from the plugin's projection went GREEN until this set existed. Without it, that wire is asserted only under settings that disable it.",
+    overrides: { 'path.extensionStyle': 'omit' }
+  },
+  {
+    name: 'spoken paths, extension spoken first',
+    why: "the second observable extensionStyle value, again under 'spoken'. One value could coincide with the normalizer's own default; two cannot.",
+    overrides: { 'path.extensionStyle': 'word-first' }
   },
   {
     name: 'code blocks dropped, numbers left alone',
@@ -177,9 +190,14 @@ const SETTINGS_SETS: readonly SettingsSet[] = [
     }
   },
   {
+    name: 'chunker moved: smaller units, first sentence not isolated',
+    why: 'the SECOND option surface the lab drives. Nothing here changes normalize() output, so the byte-equality rows below must stay green — while the chunk-boundary comparison further down must see the move.',
+    overrides: { 'pace.chunkMaxUnits': 60, 'pace.isolateFirstSentence': false }
+  },
+  {
     name: 'wired at defaults, 37 designed fields perturbed',
     why: 'a designed-not-wired field must carry its VALUE and change NOTHING spoken. If one leaks into speech, this set diverges from `defaults`; if one is dropped in transit, the designed-field round trip below catches it.',
-    overrides: {}          // filled in beforeAll from perturbAllDesigned()
+    overrides: perturbAllDesigned()      // hoisted; CONTROLS is loaded above
   }
 ]
 
@@ -282,6 +300,9 @@ beforeAll(async () => {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
   const compiled = new Function('__v', `const values = () => __v\n${src}\nreturn normalizeOptions()`)
   labNormalizeOptions = (v: Values) => compiled(v) as NormalizeOptions
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+  const compiledChunk = new Function('__v', `const values = () => __v\n${extractFunction(pageSource, 'chunkOptions')}\nreturn chunkOptions()`)
+  labChunkOptions = (v: Values) => compiledChunk(v) as ChunkerOptions
 
   const dir = join(REPO_ROOT, 'fixtures')
   const names = (await readdir(dir)).filter((f) => f.endsWith('.md')).sort()
@@ -333,11 +354,47 @@ describe('C4 — settings exported from the lab reproduce the lab\'s spoken text
     expect(Object.keys(opts).length).toBeGreaterThanOrEqual(5)
   })
 
+  it('every wired normalize field is OBSERVABLE somewhere in the sets — no wire asserted only under a setting that disables it', async () => {
+    // The check that would have caught this test's own first-draft hole. A mutation probe that
+    // dropped `normalize.extensionStyle` from the plugin's projection went GREEN, because every
+    // set that moved it also ran `pathStyle: 'terse'` or `'verbatim'`, both of which skip the part
+    // of stage 8 that speaks an extension. A wire exercised only where its own stage is off is not
+    // exercised. For each wired field: some (set, fixture) pair must exist where changing THAT
+    // FIELD ALONE moves the lab's spoken text.
+    const probes: Record<string, unknown> = {
+      'omit.codeBlocks': 'drop',
+      'path.style': 'terse',
+      'path.extensionStyle': 'omit',
+      'num.expandIntegers': false,
+      'struct.orderedLists': 'drop'
+    }
+    const unobservable: string[] = []
+    for (const [controlId, probeValue] of Object.entries(probes)) {
+      let seen = false
+      for (const set of SETTINGS_SETS) {
+        const base = valuesFor(set)
+        const moved = { ...base, [controlId]: probeValue }
+        if (JSON.stringify(base[controlId]) === JSON.stringify(probeValue)) continue
+        for (const f of fixtures) {
+          if (await labSpoken(base, f.text) !== await labSpoken(moved, f.text)) { seen = true; break }
+        }
+        if (seen) break
+      }
+      if (!seen) unobservable.push(controlId)
+    }
+    expect(
+      unobservable,
+      'these wired fields change nothing spoken under ANY settings set on ANY fixture, so the ' +
+      'byte-equality assertions above cannot see them at all. Add a settings set (or a fixture) ' +
+      'where the field is observable, or the wire is asserted by a test that could not fail.'
+    ).toEqual([])
+  })
+
   it('every settings set actually moves a wired value, so none of them is the defaults twice', () => {
     const base = JSON.stringify(labNormalizeOptions(valuesFor(SETTINGS_SETS[0]!)))
-    const moved = SETTINGS_SETS.slice(1, 6)
+    const moved = SETTINGS_SETS.slice(1, 9)
       .filter((s) => JSON.stringify(labNormalizeOptions(valuesFor(s))) !== base)
-    expect(moved.map((s) => s.name)).toHaveLength(5)
+    expect(moved.map((s) => s.name)).toHaveLength(7)   // the chunker set moves no NORMALIZE value; that is the point of it
   })
 
   for (const set of SETTINGS_SETS) {
@@ -368,7 +425,7 @@ describe('C4 — negative controls: this comparison can tell two strings apart',
     // Without this, byte-equality would be satisfied by a normalizer that ignored its options
     // entirely, and every assertion above would be free (P36).
     const a = valuesFor(SETTINGS_SETS[0]!)
-    const b = valuesFor(SETTINGS_SETS[5]!)
+    const b = valuesFor(SETTINGS_SETS[7]!)
     const fixture = fixtures.find((f) => f.name === 'paths.md')!
     const spokenA = await labSpoken(a, fixture.text)
     const spokenB = await labSpoken(b, fixture.text)
@@ -395,7 +452,7 @@ describe('C4 — negative controls: this comparison can tell two strings apart',
     // `normalize()`, this equality would break — and that would be a real finding, not a test bug.
     const fixture = fixtures.find((f) => f.name === 'architecture.md')!
     const defaults = await labSpoken(valuesFor(SETTINGS_SETS[0]!), fixture.text)
-    const designed = await labSpoken(valuesFor(SETTINGS_SETS[6]!), fixture.text)
+    const designed = await labSpoken(valuesFor(SETTINGS_SETS[9]!), fixture.text)
     expect(designed).toBe(defaults)
   })
 })
@@ -475,5 +532,41 @@ describe('C4 — the lab/schema disagreement is named, not absorbed', () => {
     expect(schemaIds).toHaveLength(47)
     expect(labIds.filter((i) => !schemaIds.includes(i))).toEqual([...LAB_ONLY_IDS])
     expect(schemaIds.filter((i) => !labIds.includes(i))).toEqual([...SCHEMA_ONLY_IDS])
+  })
+})
+
+describe('C4 — the chunker surface: the lab and the plugin split the speech at the same places', () => {
+  // The listener hears CHUNKS, not one string. Two settings reach `ChunkerOptions`, and a
+  // disagreement there changes what each utterance says without changing the concatenation — the
+  // quietest divergence of all. Same two-path rule: the lab side is `chunkOptions()` lifted from
+  // voice-lab/index.html; the plugin side is the serialized file through `toChunkerOptions()`.
+  function chunksFrom(opts: ChunkerOptions, spoken: string): string[] {
+    const c = new Chunker(opts)
+    return [...c.addText(spoken), ...c.finish()].map((x) => x.text)
+  }
+
+  for (const set of SETTINGS_SETS) {
+    it(`settings set "${set.name}" — same chunk boundaries on architecture.md`, () => {
+      const values = valuesFor(set)
+      const text = fixtures.find((f) => f.name === 'architecture.md')!.text
+      const spoken = normalize(text, labNormalizeOptions(values))
+      const fromLab = chunksFrom(labChunkOptions(values), spoken)
+      const jsonc: string = labSettings.serializeJsonc(labSettings.toSettingsFile(values, { revision: 1 }))
+      const fromPlugin = chunksFrom(toChunkerOptions(parseSettingsText(jsonc).settings), spoken)
+      expect(fromLab.length).toBeGreaterThan(1)
+      expect(
+        fromPlugin,
+        `chunk boundaries differ under "${set.name}". lab: ${JSON.stringify(labChunkOptions(values))}, ` +
+        `plugin: ${JSON.stringify(toChunkerOptions(parseSettingsText(jsonc).settings))}`
+      ).toEqual(fromLab)
+    })
+  }
+
+  it('NEGATIVE CONTROL: moving the chunker settings really does move the boundaries', () => {
+    const text = fixtures.find((f) => f.name === 'architecture.md')!.text
+    const defaults = valuesFor(SETTINGS_SETS[0]!)
+    const moved = valuesFor(SETTINGS_SETS[8]!)
+    const spoken = normalize(text, labNormalizeOptions(defaults))
+    expect(chunksFrom(labChunkOptions(moved), spoken)).not.toEqual(chunksFrom(labChunkOptions(defaults), spoken))
   })
 })
