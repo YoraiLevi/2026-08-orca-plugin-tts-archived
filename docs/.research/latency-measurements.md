@@ -1,8 +1,13 @@
 # Latency measurements — the numbers this project decides on, measured
 
 **Written:** 2026-08-21. **Author:** measurement pass for round-3 findings E-03, E-04, E-05, C-01.
-**Reproduce:** `pnpm bench:latency` (add `--json` for the raw arrays). Source:
+**Reproduce:** `pnpm bench:latency` — **silent by default.** Add `--audible` to re-run the
+device-side probes, which play sound; add `--json` for the raw arrays. Source:
 `scripts/bench-latency.mjs`. Not a CI gate, deliberately — see "Why this is not a gate".
+
+> **Do not run `--audible` on a machine anyone is listening to.** The device-side figures in this
+> document were taken that way and it interrupted the author mid-session. That is section 1.0, and
+> it is a finding, not an apology.
 
 **Machine.** Apple M5, 10 cores, macOS 26.5, Node v26.7.0, repo at `bea3acf`. Two full runs,
 2026-08-21, roughly ten minutes apart, on an otherwise idle machine with the built-in speaker as the
@@ -25,6 +30,65 @@ arithmetic. `[claimed]` — nobody has run it.
 | STATE.md's 927 ms first audio | **Unsupported, and unreproducible.** Measured 1,112 ms lower bound / 2,017 ms upper. The script it came from does not run today (1.2, 3.3) |
 | R4.2 (<500 ms) on the OS synth | **Unreachable by any playback fix.** Synthesis alone is 1,054–1,163 ms (1.3) |
 | The nine "cancel measured at 50 ms" claims | **A check that could not have failed** — the assertion is `<= 1000 ms` (3.4) |
+| Measuring any of the device-side numbers | **Interrupts the person using the machine, and there is no silent substitute.** Design 003's Stop budget is defined in exactly the terms we cannot measure (1.0) |
+
+### 1.0 The measurement is audible, and that is a finding in its own right
+
+The device-side probes in this document were obtained by spawning the real player against the real
+default output device. On the author's working machine that produced audible tones and sentences over
+the channel the author actually uses to know what their tools are doing. For a voice-first, dyslexic
+operator that is not a cosmetic nuisance; it is the product's own channel being taken over by the
+tooling that measures the product.
+
+The constraint is permanent, not a one-off mistake in method:
+
+- **macOS `afplay` has no device-selection flag.** There is no `-d`, no `AUDIODEV`, nothing. It
+  plays to the default output device or not at all.
+- **A stock macOS system ships no null or loopback sink.** BlackHole, Loopback and
+  `SwitchAudioSource` are all installs, and installing an audio device to make a benchmark runnable
+  is out of scope — it would also change what is being measured.
+- **Therefore, on this machine, device-side latency cannot be measured without interrupting the
+  person using it.** Not "is inconvenient to measure" — cannot.
+
+`bench-latency.mjs` now defaults to silent and declares the gap rather than hiding it:
+
+```
+  interchunk.gap   NOT-RUN — audible probe — opens the default output device. Re-run with
+                   `--audible` on a machine nobody is listening to. Silent mode cannot
+                   substitute: afplay has no device-selection flag and a stock macOS system
+                   has no null sink.
+```
+
+Five probes still run silently, because `say -o <file>` and `espeak-ng -w <file>` write a WAV and
+never open the device, and `afplay` on a missing file exits before reaching CoreAudio: `spawn.floor`,
+`synth.say`, `listVoices`, `tempfile.roundtrip`, `player.no-device`. Those five carry sections 1.2,
+1.3, 1.6 and the whole of 1.1's decomposition, so the most consequential finding in this document —
+that the gap is device open, not process spawn — is reproducible silently on any machine.
+
+**What this costs the project, concretely.** Design 003's Stop budget is defined as *"from the input
+event to the last audio sample leaving the device"*. Its 50 ms drain segment is precisely the part
+that lives past the last silently-measurable boundary. So the one number 003 most needs is the one
+number this repo is now structurally unable to take on the author's own machine, and the honest label
+for it stays `[claimed]` until somebody builds a rig.
+
+**The rig that would settle it,** in increasing order of cost and fidelity:
+
+| Rig | Measures | Cost | Caveat |
+|---|---|---|---|
+| A second machine, headphones unplugged, run `--audible` | everything in this document, repeatably | one spare Mac | still the default device; just nobody is listening |
+| A virtual loopback device (BlackHole 2ch) plus a recorder capturing the loopback while the probe runs | **true first-sample-out and true cancel-to-silence** — the two numbers we cannot get at all today | one kext-free install, and a rig script that correlates the recording's first non-zero sample against the probe's `t0` | changes the output device, so the device-open constant is BlackHole's, not the built-in speaker's; measure both and report the pair |
+| A CoreAudio-level probe (an `AudioUnit` render callback timestamping its first non-silent buffer) | first sample out with sample accuracy, no capture path needed | a small Swift binary, in the same family as the compiled probe already in `docs/.research/q-round1-platform.md` | Swift toolchain; macOS only, so it settles macOS and says nothing about R1 parity |
+| An external loopback: line-out to line-in on an interface, recorded | ground truth including DAC latency | audio hardware | the only rig that measures what the listener's ear actually receives |
+
+Recommendation: **the second machine for routine re-runs, and the CoreAudio probe once, to convert
+003's 50 ms drain segment from `[claimed]` to a measurement.** The loopback rigs are the only way to
+get true cancel-to-silence, and that number is worth one afternoon because it is the entire premise
+of the Stop budget.
+
+Until then the device-side figures below stand as a **characterized constant with a recorded rig**,
+in exactly the sense the constitution's R006 allows: they were measured, once, on a named machine, on
+a named date, and reproducing them is expensive. They are not a reading anyone should expect to take
+casually.
 
 ### 1.1 The ~970 ms is real — and the reason given for it everywhere in this repo is wrong
 
@@ -145,7 +209,7 @@ All figures milliseconds. `n` is per run; two independent runs are shown as `run
 
 | Probe | What it measures | p50 | p95 | max | min | Label |
 |---|---|---|---|---|---|---|
-| `spawn.floor` | `say ""` — spawn, zero synthesis (P10 re-run, n=12) | 428 / 412 | 557 / 435 | 557 / 435 | 411 / 405 | `[measured-here]` |
+| `spawn.floor` | `say -o <file> ""` — spawn, zero synthesis; silent form of P10 (n=12) | 428 / 412 | 557 / 435 | 557 / 435 | 411 / 405 | `[measured-here]` |
 | `synth.say` | `OsSynthProvider.generate()`, one sentence to a WAV buffer (n=9) | 1,163 / 1,054 | 1,244 / 1,084 | 1,244 / 1,084 | 974 / 900 | `[measured-here]` |
 | `listVoices` | `provider.listVoices()`, uncached (n=6) | 487 / 472 | 591 / 547 | 591 / 547 | 405 / 418 | `[measured-here]` |
 | `tempfile.roundtrip` | `mkdtemp` + `writeFile(56 kB)` + `rm` (n=20) | 0.33 / 0.42 | 0.41 / 0.79 | 0.64 / 1.0 | 0.30 / 0.30 | `[measured-here]` |
@@ -157,6 +221,16 @@ All figures milliseconds. `n` is per run; two independent runs are shown as `run
 | `firstaudio.upper` | the above + the player's whole fixed overhead (n=10) | 2,017 / 1,997 | 2,132 / 2,061 | 2,132 / 2,061 | 1,828 / 1,851 | `[derived]` |
 | `cancel.kill-to-exit` | SIGKILL → player process exit, mid-playback (n=10) | 3.5 / 2.9 | 8.8 / 7.3 | 8.8 / 7.3 | 0.9 / 1.0 | `[measured-here]` |
 | `earcon.added-cost` | 140 ms two-note earcon as its own chunk through the real sink (n=10) | 874 / 862 | 903 / 886 | 903 / 886 | 384 / 358 | `[measured-here]` |
+
+**Which of these are silent.** `spawn.floor`, `synth.say`, `listVoices`, `tempfile.roundtrip` and
+`player.no-device` run in the default silent mode and can be re-taken at any time. The other seven
+require `--audible` and were taken once, on the machine named at the top of this document, on
+2026-08-21. Section 1.0 explains why that asymmetry exists and what rig would remove it.
+
+**One label correction.** P10 measured bare `say ""`, which opens the audio device even though it
+emits nothing. The silent probe uses `say -o <file> ""`, which routes to a file writer instead.
+Measured side by side on 2026-08-21 the two agree — 0.42 s for the `-o` form against P10's
+0.414/0.418 s — but they are not the same command and the table says which one ran.
 
 ### 2.2 How the inter-chunk gap is defined and why this definition is the listener's
 
@@ -553,7 +627,13 @@ not fail. `bench-latency.mjs` therefore:
 - labels every row `[measured-here]` or `[derived]` inline, so the output cannot be pasted into a
   document as an undifferentiated table — which is exactly how the ~970 ms escaped.
 
-Platform coverage today: **darwin is complete.** On linux, `spawn.floor` reports NOT-RUN (there is no
+**Silent by default.** Seven of the twelve probes open the audio device and are behind `--audible`,
+which prints a three-line warning before it makes a sound. In the default mode they print NOT-RUN
+with the reason quoted in section 1.0. This is the same discipline as the NOT-RUN accounting above,
+applied to a constraint about the *operator* rather than the platform: the benchmark must be runnable
+while somebody is working, or it will not be run.
+
+Platform coverage today: **darwin is complete in `--audible` mode, and five of twelve probes silently.** On linux, `spawn.floor` reports NOT-RUN (there is no
 zero-work synth spawn equivalent) and the player probes require `paplay` on `PATH`. On win32 the
 player probes report NOT-RUN — a `System.Media.SoundPlayer` timing probe has not been written. Those
 gaps are printed, not hidden, and they are the obvious next contribution from anyone with those

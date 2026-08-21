@@ -17,9 +17,23 @@
  * command. What CI *could* gate is a ratio between two numbers measured in the same run; that is
  * not attempted here and is not claimed.
  *
- * IT PLAYS AUDIO OUT LOUD. Several probes exercise the real `SubprocessSink`, which spawns the
- * platform's real player. That is the point — a synthetic approximation of the sink would measure
- * the approximation. Expect ~30 s of beeps and short sentences.
+ * IT IS SILENT BY DEFAULT, AND THAT IS A HARD RULE. This is assistive-technology tooling: the
+ * author is voice-first and uses this machine's audio channel to know what their own tools are
+ * doing. A benchmark that beeps over that channel is a benchmark that gets run once and then
+ * deleted, so the audible probes are behind `--audible` and print a warning before they make a
+ * sound. Run them only on a machine nobody is listening to.
+ *
+ * Everything on the synthesis side stays measurable in silent mode, because `say -o <file>` /
+ * `espeak-ng -w <file>` write a WAV and never open the audio device: spawn floor, per-sentence
+ * synthesis, `listVoices()`, the temp-file round trip, and the player's own process-startup cost
+ * (spawned on a missing file, so it exits before reaching CoreAudio).
+ *
+ * The device side — the inter-chunk gap, first sample out, cancel-to-silence — cannot be measured
+ * without opening the default output device. macOS `afplay` has no device-selection flag and a
+ * stock system has no null sink, and installing one to work around this is out of scope. So in
+ * silent mode those probes report NOT-RUN with that reason, and the document treats the device
+ * cost as a separately-characterized constant with its rig recorded. See
+ * `docs/.research/latency-measurements.md` "The measurement is audible, and that is a finding".
  *
  * WHAT IT CANNOT MEASURE, STATED RATHER THAN SKIPPED. Nothing in userland can observe the instant
  * the first sample leaves the DAC without a loopback capture device or a CoreAudio-level probe.
@@ -38,6 +52,16 @@ import { build } from 'esbuild'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const JSON_OUT = process.argv.includes('--json')
+/**
+ * Audible probes are opt-in. Default silent — see the header. `SILENT` gates every probe that
+ * opens the audio device; nothing else in this file spawns a player.
+ */
+const AUDIBLE = process.argv.includes('--audible')
+const SILENT = !AUDIBLE
+const SILENT_REASON =
+  'audible probe — opens the default output device. Re-run with `--audible` on a machine nobody ' +
+  'is listening to. Silent mode cannot substitute: afplay has no device-selection flag and a ' +
+  'stock macOS system has no null sink.'
 const SAMPLE_RATE = 22050
 
 /* ------------------------------------------------------------------ plumbing */
@@ -169,6 +193,15 @@ async function main() {
   if (!JSON_OUT) {
     console.log(`bench-latency — ${platform} ${process.arch}, node ${process.version}`)
     console.log(`labels: [measured-here] = run on this machine now · [derived] = arithmetic on measured-here values`)
+    if (AUDIBLE) {
+      console.log('')
+      console.log('  *** --audible: the device-side probes WILL PLAY SOUND on the default output')
+      console.log('  *** device — roughly 45 s of tones and short sentences. Do not run this while')
+      console.log('  *** anyone is listening to this machine.')
+    } else {
+      console.log('silent mode (default): device-side probes are skipped, not silently omitted.')
+      console.log('                       pass --audible to run them; they make noise.')
+    }
     console.log('')
   }
 
@@ -177,9 +210,16 @@ async function main() {
 
   /* 1. process spawn floor -------------------------------------------------- */
   if (platform === 'darwin') {
+    // P10 measured bare `say ""`, which opens the audio device even though it emits nothing.
+    // `-o <file>` routes to a file writer instead, so this is silent by construction. Measured
+    // side by side on 2026-08-21 the two forms agree (0.42 s vs 0.41-0.43 s), but they are not
+    // the same command, so the label says which one ran.
+    const dir = await mkdtemp(join(tmpdir(), 'orca-tts-bench-floor-'))
+    const out = join(dir, 'empty.wav')
     const xs = []
-    for (let i = 0; i < 12; i++) xs.push(await runToExit('say', ['']))
-    record({ id: 'spawn.floor', label: '`say ""` — spawn with zero synthesis (P10 re-run)',
+    for (let i = 0; i < 12; i++) xs.push(await runToExit('say', ['-o', out, '']))
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
+    record({ id: 'spawn.floor', label: '`say -o <file> ""` — spawn with zero synthesis, silent form of P10',
              label_kind: 'measured-here', stats: stats(xs.filter(Boolean)), raw: xs })
   } else {
     notRun('spawn.floor', 'process spawn floor', `no known zero-work synth spawn for ${platform}`)
@@ -264,8 +304,12 @@ async function main() {
 
   /* 5. the player's own fixed overhead, by regression ------------------------ */
   const playerCmd = { darwin: 'afplay', linux: 'paplay', win32: null }[platform]
+  /** True only when a real player may be spawned against the real output device. */
+  const canPlay = AUDIBLE && playerCmd !== null && await have(playerCmd)
   let playerFixed = null
-  if (playerCmd !== null && await have(playerCmd)) {
+  if (SILENT) {
+    notRun('player.fixed-overhead', 'player fixed overhead', SILENT_REASON)
+  } else if (canPlay) {
     const dir = await mkdtemp(join(tmpdir(), 'orca-tts-bench-play-'))
     const points = []
     const raw = []
@@ -293,7 +337,10 @@ async function main() {
   /* 6/7. the sink itself, and the inter-chunk gap ---------------------------- */
   const sink = new SubprocessSink()
   let gapStats = null
-  if (playerCmd !== null && await have(playerCmd)) {
+  if (SILENT) {
+    notRun('sink.chunk-overhead', 'sink per-chunk overhead', SILENT_REASON)
+    notRun('interchunk.gap', 'inter-chunk gap', SILENT_REASON)
+  } else if (canPlay) {
     // 6 — synthetic tones of known duration: isolates the sink's own per-chunk cost.
     const overhead = []
     const rawOv = []
@@ -347,7 +394,10 @@ async function main() {
   }
 
   /* 8/9. first audio, as a measured bracket ---------------------------------- */
-  if (synthesized.length > 0 && playerCmd !== null && await have(playerCmd)) {
+  if (SILENT) {
+    notRun('firstaudio.lower', 'first audio lower bound', SILENT_REASON)
+    notRun('firstaudio.upper', 'first audio upper bound', SILENT_REASON)
+  } else if (synthesized.length > 0 && canPlay) {
     const lower = []
     const rawFa = []
     for (let i = 0; i < 10; i++) {
@@ -386,7 +436,9 @@ async function main() {
   }
 
   /* 10. cancel --------------------------------------------------------------- */
-  if (playerCmd !== null && await have(playerCmd)) {
+  if (SILENT) {
+    notRun('cancel.kill-to-exit', 'cancel latency', SILENT_REASON)
+  } else if (canPlay) {
     const dir = await mkdtemp(join(tmpdir(), 'orca-tts-bench-cancel-'))
     const f = join(dir, 'long.wav')
     await writeFile(f, sineWav(3000))
@@ -409,7 +461,9 @@ async function main() {
   }
 
   /* 11. earcon (finding E-04) ------------------------------------------------ */
-  if (playerCmd !== null && await have(playerCmd)) {
+  if (SILENT) {
+    notRun('earcon.added-cost', 'earcon cost', SILENT_REASON)
+  } else if (canPlay) {
     // Design 005 section 11.1 costs a two-note earcon at 60 + 20 + 60 = 140 ms of tone. Through the
     // shipped sink it is a SEPARATE AudioChunk, so it also buys a whole extra sink cycle before
     // the first word. Measure what prepending it actually adds.
@@ -456,6 +510,13 @@ async function main() {
           `~${(playerFixed - playerNoDevice).toFixed(0)} ms is opening the audio device — ` +
           `the second part is what a resident player (M9) removes.`)
       }
+    }
+    if (SILENT) {
+      console.log('')
+      console.log('  Device-side latency (inter-chunk gap, first audio, cancel-to-silence) was NOT')
+      console.log('  measured: every probe for it opens the default output device. The figures on')
+      console.log('  record come from an --audible run and are in docs/.research/latency-measurements.md')
+      console.log('  with their rig. Treat them as a characterized constant, not a fresh reading.')
     }
     console.log('')
     console.log('  Not a CI gate: absolute latency is machine-dependent. Run it manually and record')
