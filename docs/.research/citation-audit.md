@@ -266,6 +266,85 @@ Moving `--max-stale` to 98 would make CI green and make the ratchet decoration, 
 `.github/workflows/ci.yml` already warns about in its own comment. **It is left at 34 and the job is
 left red.** The number to beat is 98, and it is 98 because of `006`.
 
+## The instrument, fixed — 2026-08-21 (J21), `e71ff4f` and `1558ecc`
+
+The re-audit above diagnosed the checker; this is what changed in it. Three things, each aimed at
+one half of a defect that was measured rather than suspected.
+
+**1. Every run prints its configuration, clean or not.** The tool was quiet when clean, and quiet
+was the problem: a bare count carries no evidence of which population produced it, so two runs that
+disagree look like progress or regression instead of two different measurements. The line names the
+ORCA state and SHA, the threshold and where it came from, and the working tree's condition:
+
+```
+config:    orca:87097551f8  ·  threshold 85 (from citation-ratchet.json, calibrated 98309f8)  ·  tree clean
+```
+
+**2. The ratchet is per configuration**, in `docs/.research/citation-ratchet.json`, with its reason
+and its calibration commit beside it. `--ratchet` reads the entry for the configuration actually
+running. A number on the command line is still accepted, but only if it *is* that configuration's
+calibrated ratchet — anything else is refused by name:
+
+```
+config:    orca:absent  ·  threshold REFUSED  ·  tree clean
+REFUSED:   --max-stale=34 is not the ratchet for configuration orca:absent, which is 98.
+           34 is recorded as SUPERSEDED: …
+           Pass --ratchet instead of a number, so the threshold travels with its configuration…
+```
+
+**3. A dirty working tree is reported loudly**, with the offending files named and the pin-it
+recipe, because uncommitted edits to files citations point into are usually a peer's in-flight work
+and not citation rot.
+
+Seven tests in `scripts/check-citations.test.mjs`, each proved able to fail against four mutants:
+deleting the config line (4 red), removing the cross-config refusal (2 red), refusing *every* number
+rather than only foreign ones — the CONTROL (1 red), and making `--ratchet` ignore the config
+(1 red). They deliberately pin no citation COUNT: that moves whenever anyone edits a source file,
+and a test red for that reason would say nothing about the instrument.
+
+## What the ratchet should measure instead — the recommendation, not implemented
+
+Fixing the instrument exposed a second defect underneath it, and this one is the author's to settle
+because it changes what the gate *means*.
+
+**A stale citation is two different things wearing one number.**
+
+| | | Moves when |
+|---|---|---|
+| **DRIFTED** | the anchor is still in the cited file, somewhere else — the claim is intact, the pointer is off | anyone edits a line above a cited one, in bulk |
+| **LOST** | the anchor is nowhere in the cited file — renamed, moved or deleted, and the claim itself is in question | somebody makes a decision |
+
+Both are now printed. The current split, measured clean at `1558ecc`:
+
+```
+stale is:  129 DRIFTED · 1 LOST      (orca:87097551f8)
+           141 DRIFTED · 1 LOST      (orca:absent)
+```
+
+**Almost nothing the gate measures is a documentation decision.** And the demonstration is sharper
+than the ratio: `4ccfa20` — *fix(os-synth): a reply beginning with `---` lost half of it* — moved the
+ORCA-resolved total from **85 to 130 in a single commit, with no documentation changing at all**.
+Bisected in a pinned worktree with the instrument held fixed, and controlled: the same tree scored
+85 with the old script and 85 with the new one, so the jump is the code, not the change to the
+checker.
+
+So the total-count ratchet **punishes whoever fixes a bug in a heavily-cited file and rewards
+leaving it alone**, which is backwards, and it currently has **no honest path to green**: raising the
+number is decoration, and re-pointing the citations is actively harmful for the 66 in `006-fma`,
+which is stale by remedy. A gate whose only exits are "lie" and "make it worse" is the finding.
+
+**Recommendation: ratchet on LOST, report DRIFTED.** `LOST` is churn-invariant, it is 1 today, and a
+ratchet of 1 is a real bound that a bug fix cannot break. `DRIFTED` stays visible, and stops being a
+gate. The stronger version, if the author wants pointers that do not rot at all, is the one `004`
+Panel E already named: **cite a symbol plus the line**, and let the tool resolve the line from the
+symbol rather than comparing against it — at which point drift stops existing rather than being
+tolerated. That is a larger change and deserves its own Job.
+
+**Left as-is deliberately:** the ratchet is still on the total, and the standing numbers 85 / 98 were
+**not** raised to meet the measured 130 / 142. Both are recorded in `citation-ratchet.json` —
+`standing` versus `measured` — so the gap is visible instead of resolved by moving a threshold to
+fit the number it measures.
+
 ## What this checker cannot catch
 
 Stated plainly, because a tool that hides its blind spots is worse than none.

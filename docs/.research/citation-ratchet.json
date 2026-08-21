@@ -4,30 +4,53 @@
     "population in every configuration. With an ORCA checkout resolved, ~527 citations into ORCA's",
     "tree are checked and ~129 paths are external; without one, those same paths fall to external",
     "and the count is drawn from a partly DISJOINT set. A single number enforced across both is not",
-    "a threshold on anything: J21 measured seven repairs moving the ORCA-resolved count 92 -> 85 and",
-    "the ORCA-absent count 98 -> 98, on the same pinned tree.",
+    "a threshold on anything: seven repairs moved the ORCA-resolved count 92 -> 85 and the",
+    "ORCA-absent count 98 -> 98, on the same pinned tree.",
     "",
-    "A number here is a RATCHET, not an amnesty. It may only go DOWN. Raising it to make a job green",
-    "is how a checker becomes decoration (see .github/workflows/ci.yml's own comment, and PITFALLS",
-    "P33). Lowering it as citations are genuinely re-derived is the point.",
+    "A number here is a RATCHET, not an amnesty. It may only go DOWN. Raising it to make a job",
+    "green is how a checker becomes decoration (PITFALLS P33). THE NUMBERS BELOW ARE NOT MET AT",
+    "HEAD AND HAVE DELIBERATELY NOT BEEN RAISED TO MEET IT — see `standing` vs `measured`.",
     "",
-    "Every reading below was taken on a CLEAN DETACHED WORKTREE at the stated commit, with",
-    "node_modules and dist symlinked in. A count taken in the shared working tree is not comparable:",
-    "it reads whatever five peers have uncommitted. The same tree read 139 while one peer had",
-    "os-synth/index.ts open."
+    "Every reading was taken on a CLEAN DETACHED WORKTREE at the stated commit, with node_modules",
+    "symlinked in. A count taken in the shared working tree is not comparable: it reads whatever",
+    "five peers have uncommitted. The same tree read 139 while one peer had os-synth/index.ts open."
   ],
+
   "calibratedAt": "98309f8",
   "calibratedOn": "2026-08-21",
   "configs": {
     "orca:87097551f8": {
       "maxStale": 85,
-      "why": "All 85 are in the three record documents - 006-fma 66, 014-review-round7 13, 008-crossreview-round3 6. Zero live. 006 is stale by REMEDY rather than drift (its TT1 and TT2 rows describe bare catches that have since been fixed), so closing it is 66 hand judgements and a pin-vs-reconcile decision that belongs to the author, not a --fix run."
+      "why": "Standing ratchet, measured clean at 98309f8. All 85 were in the three record documents - 006-fma 66, 014-review-round7 13, 008-crossreview-round3 6 - with zero live."
     },
     "orca:absent": {
       "maxStale": 98,
-      "why": "The CI configuration: GitHub's runner has no ORCA checkout. Same 85 record-document citations plus 13 that only resolve in this configuration - five in 011-settings, two in 016-reconciliation-round7, one in 002 pointing at another document, and four more in 006 that the ORCA-resolved run classifies differently."
+      "why": "The CI configuration: GitHub's runner has no ORCA checkout. The same 85 plus 13 that only resolve in this configuration - five in 011-settings, two in 016, one in 002 pointing at another document, and four more in 006 the ORCA-resolved run classifies differently."
     }
   },
+
+  "measured": {
+    "at": "1558ecc",
+    "orca:87097551f8": { "stale": 130, "drifted": 129, "lost": 1 },
+    "orca:absent": { "stale": 142, "drifted": 141, "lost": 1 },
+    "why": [
+      "NOT MET, and not raised. The standing 85/98 were measured at 98309f8; commit 4ccfa20",
+      "(fix(os-synth): a reply beginning with `---` lost half of it) moved the ORCA-resolved total",
+      "from 85 to 130 in one commit, with no documentation changing at all. Bisected in a pinned",
+      "worktree with the instrument held fixed; a control run confirmed the checker change itself",
+      "moved the count by zero (85 with the old script and 85 with the new one at 98309f8).",
+      "",
+      "So the gate is red for CODE CHURN in a heavily-cited file, and it has no honest path to",
+      "green: raising the number is decoration, and re-pointing the citations is HARMFUL for the",
+      "66 in 006-fma, which is stale by REMEDY rather than drift - its TT1 and TT2 rows describe",
+      "bare catches that have since been fixed, so a re-pointed citation would sit green beside a",
+      "sentence describing a defect that no longer exists.",
+      "",
+      "A gate with no honest path to green is the finding, not the number. See",
+      "docs/.research/citation-audit.md, `What the ratchet should measure instead`."
+    ]
+  },
+
   "superseded": {
     "34": "Calibrated 2026-08-21 against the ORCA-ABSENT run while docs/.research/citation-audit.md's Numbers table reported 33 from the ORCA-RESOLVED run. Two populations, one number. It was never a threshold on the number anyone was reading, and the checker now refuses it rather than enforcing it."
   }
