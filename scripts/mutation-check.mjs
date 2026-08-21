@@ -193,6 +193,105 @@ const MUTANTS = [
     to: '    registeredCommands: () => 1,',
     test: 'packages/plugin/src/adapter/adapter.test.ts'
   },
+  // ---- round 7: the silent-failure sites. Each of these was a real defect until this round; a
+  // surviving mutant here means the fix is no longer defended and the site is silently back.
+  {
+    id: 'prepare-warm-on-broken-say',
+    claim: '006 finding 1: a synthesizer that cannot run must never report itself warm',
+    file: 'packages/providers/src/os-synth/index.ts',
+    from: '    if (voices.length === 0) {',
+    to: '    if (false) {',
+    test: 'packages/providers/src/os-synth/os-synth.test.ts',
+    only: 'finding 1'
+  },
+  {
+    id: 'player-exit-ignored',
+    claim: '006 site 35 / section 19 rank 1: a player that exits non-zero is not playback',
+    file: 'packages/plugin/src/sinks/subprocess-sink.ts',
+    from: "          resolve(code === 0\n            ? { ok: true, why: '' }\n            : { ok: false, why: `${p.cmd} exited ${String(code)}` })",
+    to: "          void code; resolve({ ok: true, why: '' })",
+    test: 'packages/plugin/src/sinks/subprocess-sink.test.ts'
+  },
+  {
+    id: 'delivery-receipt-discarded',
+    claim: '006 site 18 / section 19 rank 2: { delivered: false } must reach the spoken fallback',
+    file: 'packages/plugin/src/adapter/index.ts',
+    from: "          if ((r as { delivered?: unknown } | undefined)?.delivered === false) undelivered('reported undelivered')",
+    to: '          void r',
+    test: 'packages/plugin/src/adapter/adapter.test.ts'
+  },
+  {
+    id: 'unspeakable-reply-silent',
+    claim: '006 site 31: a reply with nothing speakable in it is announced, not logged',
+    file: 'packages/plugin/src/speech-service.ts',
+    from: "          if (outcome === 'empty') this.#noteLoss('unspeakable')",
+    to: '          void outcome',
+    test: 'packages/plugin/src/speech-service.test.ts'
+  },
+  {
+    id: 'skip-reported-as-failure',
+    claim: '006 site 32: a control the listener pressed must never be reported as an engine failure',
+    file: 'packages/plugin/src/speech-service.ts',
+    from: "      if (this.#skip) return 'skipped'",
+    to: "      if (this.#skip) return 'synthesis-failed'",
+    test: 'packages/plugin/src/speech-service.test.ts'
+  },
+  {
+    id: 'cancel-not-awaited',
+    claim: '006 C6: barge-in must not return before the daemon cancel has landed',
+    file: 'packages/core/src/queue/index.ts',
+    from: '    await this.#deps.cancelSynthesis()',
+    to: '    void this.#deps.cancelSynthesis()',
+    test: 'packages/core/src/queue/queue.test.ts'
+  },
+  {
+    id: 'no-transcript-silent',
+    claim: '006 TT1: "nothing to follow" must never be a bare return',
+    file: 'packages/plugin/src/huddle/index.ts',
+    from: '          this.#deps.notify(NO_TRANSCRIPT_SENTENCE[reason])',
+    to: '          void reason',
+    test: 'packages/plugin/src/huddle/huddle.test.ts'
+  },
+  {
+    id: 'no-transcript-narrates',
+    claim: '006 TT1, the other side: it must be said ONCE, not once per agent event',
+    file: 'packages/plugin/src/huddle/index.ts',
+    from: '        if (this.#announcedNoTranscript !== reason) {',
+    to: '        if (true) {',
+    test: 'packages/plugin/src/huddle/huddle.test.ts'
+  },
+  {
+    id: 'reap-drops-the-lock',
+    claim: '006 C4: the five-minute reap must not silently change which session is followed',
+    file: 'packages/plugin/src/huddle/index.ts',
+    from: "    if (typeof following === 'string' && following.length > 0) this.#locked = following",
+    to: '    void following',
+    test: 'packages/plugin/src/huddle/huddle.test.ts'
+  },
+  {
+    id: 'unstable-id-for-uuidless-record',
+    claim: '006 TT4/site 15: a record with no uuid must decode to the same id every read',
+    file: 'packages/plugin/src/huddle/decoders.ts',
+    from: '  return { id: typeof rec[\'uuid\'] === \'string\' ? rec[\'uuid\'] : stableId(text), text }',
+    to: '  return { id: typeof rec[\'uuid\'] === \'string\' ? rec[\'uuid\'] : `${Date.now()}-${parts.length}`, text }',
+    test: 'packages/plugin/src/huddle/huddle.test.ts'
+  },
+  {
+    id: 'verdict-glyph-deleted',
+    claim: '006 site 50: a check mark is a verdict, so "yes done" and "no done" must differ',
+    file: 'packages/core/src/normalizer/index.ts',
+    from: "  '\\u2713': 'yes', '\\u2714': 'yes', '\\u2705': 'yes',",
+    to: '  // MUTANT',
+    test: 'packages/core/src/normalizer/normalize.test.ts'
+  },
+  {
+    id: 'half-written-line-concluded-on',
+    claim: '006 TT3: a transcript ending mid-line is re-read, not concluded on',
+    file: 'packages/plugin/src/huddle/index.ts',
+    from: '        this.#truncatedRetries.set(file, spent + 1)',
+    to: '        this.#truncatedRetries.set(file, MAX_TRUNCATED_RETRIES)',
+    test: 'packages/plugin/src/huddle/huddle.test.ts'
+  },
   {
     id: 'status-deletes-queue',
     claim: 'C5: asking what is being read must not delete what is being read',

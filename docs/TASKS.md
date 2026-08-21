@@ -8,6 +8,18 @@ Derived from `docs/PLAN.md`. Checkpoints are gates: do not start the next phase 
 **Gate rule:** a checkpoint that could not have failed is not a checkpoint. Every one below names a
 value that must move.
 
+> **Amended 2026-08-21 — forced by round-7 findings R7-01, R7-02, R7-06 and R7-11
+> (`docs/design/014-review-round7.md`).** PITFALLS **P32**'s propagation list omitted this file and
+> `docs/PLAN.md`, so **six rounds of measurement folding never opened either** — which is how Gate M9
+> came to pass with the ~950 ms inter-sentence gap fully intact, and how the constitution's sharpest
+> latency constraint came to have no task carrying it. P32's list has been extended. Three things
+> changed here: **Phase M9 was rescoped and re-gated** (already landed, `docs/design/015-m9-rescope.md`,
+> and Gate M9a is now the instrument for `docs/PLAN.md`'s new inter-sentence-gap Definition-of-Done
+> item); **T125 now carries `queue.maxQueued`**, which four documents specified three incompatible
+> ways while no task carried any of them (R7-06); and **M15's dependency on M16** — decided in
+> `docs/design/009-reconciliation.md` section 2, conflict C5, and never propagated here — is stated
+> below.
+
 ---
 
 ## Phase M0 — Spec (blocking; nothing else starts)
@@ -348,12 +360,33 @@ A local page running the real normalizer and the real provider. No ORCA involvem
 
 ## Phase M12 — Settings (roadmap item 2)
 
+Designed in `docs/design/011-settings.md`, which supersedes three sentences of `004` and **owns every
+settings id in the project** — including the ones M16 and M17 add at `since: 3`.
+
 - [ ] **T120** Settings schema shared by plugin and lab → `packages/core/src/settings/`
 - [ ] **T121** Plugin reads settings via `settings.get` on activate, and on change
 - [ ] **T122** Defaults come from the schema, never hardcoded at a call site
 - [ ] **T123** Invalid/partial settings fall back per-field, never wholesale, and log which field
 - [ ] **T124** Test: every `NormalizeOptions` field is reachable from settings, asserted by iterating
-      the schema — a new option that is not settable fails the test
+      the schema — a new option that is not settable fails the test, with the named `EXCLUDED` list
+      carrying the reason for every deliberate omission
+- [ ] **T125** **`queue.maxQueued` becomes one control with one owner** — added 2026-08-21, forced by
+      **R7-06**. Four documents specified it three incompatible ways and **no task carried any of
+      them**: `docs/design/009-reconciliation.md` C3 and `004`/`003` say the one value is **8**;
+      `docs/design/011-settings.md` T122 says **delete** both `maxQueued: 8` and `DEFAULT_MAX_QUEUED`
+      so no call site holds a fallback literal; `docs/design/012-huddle-presence.md` says set it to 8
+      **and** make it `ceil(8 / |F|)`; `docs/design/013-voice-input.md` assumes a flat 8; and
+      `packages/plugin/src/speech-service.ts:74` still reads `const DEFAULT_MAX_QUEUED = 20`.
+  - [ ] T125a `011`'s schema owns the control. Every other document **cites** `queue.maxQueued`; none
+        restates the number. The shipped default moves **20 → 8** (C3: twenty queued replies is ~3
+        minutes of unrequested speech).
+  - [ ] T125b Delete `DEFAULT_MAX_QUEUED` and the `maxQueued: 8` call-site literal; the fallback-literal
+        lint (`011` section on T122) goes red if either returns.
+  - [ ] T125c **Per-session fairness is a second field, not a redefinition of the first** —
+        `queue.perSessionFairness` at `since: 3`, so `011`'s plain-`int` `queue.maxQueued` keeps one
+        meaning. Its arithmetic must not admit more than the global cap (R7-36).
+  - [ ] T125d Test: with `|F| > 1`, the **total** admitted across all sessions is asserted against the
+        global cap, with a negative control that fails when the cap is raised.
 
 **Gate M12:** a value exported from Voice Lab, pasted into ORCA settings, produces byte-identical
 spoken text.
@@ -434,6 +467,19 @@ is said aloud, which is why it can render an ASCII diagram and describe it in on
 
 ## Phase M15 — Per-agent voices (roadmap item 5)
 
+> **Dependency stated 2026-08-21 — forced by R7-03's root cause (P32's propagation list omitted this
+> file). Decided in round 3, `docs/design/009-reconciliation.md` section 2, conflict C5, and never
+> propagated here.** **M15 is scheduled after M16, or Gate M15 cannot be run.** Gate M15 reads *"with
+> two agents running, you can tell who is speaking"* — but huddle today locks to one session, and
+> **that lock is the P22 fix**, so a two-agent gate has no configuration to run in until M16's
+> followed set exists. The coherent alternative, recorded so it is not rediscovered: ship identity for
+> **switch announcements only**, which requires **rewording the gate in the same change** rather than
+> leaving a gate nothing can satisfy. See `docs/design/005-agent-identity.md` section 15.1.
+>
+> Two live prerequisites travel with it, from `005` section 16: M16's followed set (9), and
+> **`switchTo()` has no caller** (10, `007` C8) — a live defect on which every identity announcement
+> rides.
+
 - [ ] **T150** Voice assignment: stable per session, from the available voice list
   - [ ] T150a deterministic from the session id, so the same agent keeps its voice across restarts
   - [ ] T150b avoid collisions while sessions are concurrent
@@ -450,7 +496,8 @@ is said aloud, which is why it can render an ASCII diagram and describe it in on
 
 ## Phase M16 — Huddle presence (roadmap item 6)
 
-Depends on M13.
+Depends on M13. **Scheduled before M15** — see the note under Phase M15.
+Designed in `docs/design/012-huddle-presence.md`; its settings are `docs/design/011-settings.md`'s.
 
 - [ ] **T160** Model: which sessions are "in the huddle", which is speaking, which are queued
 - [ ] **T161** Panel presence list — session label, voice, speaking indicator
@@ -462,13 +509,42 @@ Depends on M13.
 
 ---
 
-## Phase M17 — Voice input (roadmap item 8, later)
+## Phase M17 — Voice input (roadmap item **7**, later)
 
-- [ ] **T170** Decide whether to use ORCA's existing STT stack or our own `sherpa-onnx`
-- [ ] **T171** Push-to-talk before hands-free; barge-in gated behind it
+> **Renumbered 2026-08-21 — forced by R7-11.** This read *"roadmap item 8"* while M11–M16 map to
+> items 1–6 and `HANDOFF.md:74-77` lists exactly **seven** Phase-2 items in this order. There is no
+> item 7 anywhere in the repo: `grep -rn "roadmap item 7" .` returns nothing. **Read as an off-by-one,
+> not as a dropped item** — but this is an inference from two artifacts, not from the tracker. If
+> issue [#4](https://github.com/YoraiLevi/orca-plugin-tts/issues/4) or
+> [#5](https://github.com/YoraiLevi/orca-plugin-tts/issues/5) names an eighth item, that item has no
+> milestone here and needs one (R083). **Whoever next opens those issues should check and record the
+> answer beside this note**; nobody in this session could reach the network.
+>
+> **Designed 2026-08-21 in `docs/design/013-voice-input.md`**, which supersedes T170–T172 below.
+> Its verdict: full voice-input parity is **not buildable to R1 today**, and what ships is
+> **M17a — push-to-talk plus a listener-invoked recap**, with M17b (recognizer) and M17c (own STT
+> stack) unscheduled and their reasons recorded.
+
+- [x] **T170** Decide whether to use ORCA's existing STT stack or our own `sherpa-onnx`.
+      **Settled in `013`: neither, at M17a.** ORCA's thirteen host methods touch no speech, so the
+      plugin cannot reach ORCA's stack from the worker at all — the reason is reachability, not the
+      panel.
+- [ ] **T171** Push-to-talk before hands-free; barge-in gated behind it. **M17a.** Barge-in is
+      **two named budgets, not one** (R7-28): press → last sample is 250 ms end-to-end; the
+      **provider-cancel segment inside it** stays at the constitutional `< 50 ms`
+      (`.specify/memory/constitution.md:118`, `packages/providers/src/contract.ts:12`). M17a asserts
+      **both**, separately — collapsing them is the conflation
+      `packages/providers/src/budget-claims.test.ts` exists to prevent.
 - [ ] **T172** Half-duplex gate so the mic does not hear the speaker
+- [ ] **T173** The listening window's close condition, and what it does when the followed set is
+      empty — added 2026-08-21, forced by **R7-30**. The primary close signal is a new `type:'user'`
+      record in a **followed** transcript, and `012`'s R1 guarantees `F = ∅` after every reap,
+      restart and first run, so on a fresh worker that signal **cannot fire** and the window runs to
+      `TALK_WINDOW_MS`. See `013` for the specified behaviour; say aloud at press time which close
+      condition is armed.
 
-**Gate M17:** speaking interrupts playback within the barge-in budget, without echo.
+**Gate M17a:** speaking interrupts playback within **both** named budgets, without echo; and with
+`F = ∅` the window closes on the specified fallback, not on the 30 s clock.
 
 ---
 

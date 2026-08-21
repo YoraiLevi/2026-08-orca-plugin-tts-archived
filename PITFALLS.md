@@ -52,8 +52,16 @@ sound: `docs/.research/test-audit.md`.
 per chunk"*, and M9 was on the way to being scoped as *"stop spawning a player per chunk"*. That fix
 would have shipped and changed nothing a listener could hear.
 **Cause:** the framing entered at `packages/plugin/src/sinks/subprocess-sink.ts:8-10` as bare prose
-and was copied into HANDOFF, STATE, the constitution, `architecture.md` and designs 004, 005, 006,
-007 and 010. Nobody decomposed it. Measured (`docs/.research/latency-measurements.md` section 1.1,
+and was copied into HANDOFF, STATE, the constitution, `architecture.md`, **`docs/PLAN.md`,
+`docs/TASKS.md`** and designs 004, 005, 006, 007 and 010. Nobody decomposed it.
+**Propagation list corrected 2026-08-21, forced by round-7 finding R7-03.** This list originally
+**omitted `docs/PLAN.md` and `docs/TASKS.md`** — the documents that define *done* and schedule the
+work. Round 6 folded exactly the list it was given, so those two were never opened, and **that one
+omission produced three of round 7's eight blocks-implementation findings** (R7-01, R7-02, R7-03):
+Gate M9 could be met with the ~950 ms gap fully intact, and the constitution's inter-sentence budget
+had no Definition-of-Done item, no task, no test and no CI gate. **When a pitfall names a propagation
+list, the list must include every document that defines a gate, a budget or a milestone — not only
+the documents that repeat the wrong sentence.** Measured (`docs/.research/latency-measurements.md` section 1.1,
 2026-08-21) against the shipped `SubprocessSink` with real `say` output, gap p50 950 / 937 / 897 ms
 over three runs of n=18 `[measured-here]`:
 
@@ -104,8 +112,19 @@ default behaviour interrupts the user is a benchmark that gets deleted.**
 **Consequence for the design:** this is the first *observed* reproduction of P22 since its fix, and
 it arrived through a path none of the fixes cover. The high-water mark, the lock and the per-file
 priming all assume a small, stable set of sessions in a worktree.
+**Gates are run in a detached worktree at a named SHA, never in the shared tree, and the SHA is
+recorded beside the number.** Added 2026-08-21, forced by round-7 finding R7-13: `pnpm
+check:citations` run twice minutes apart in the live tree returned **38 stale**, then **75 stale**,
+with no document edited between them — concurrent agents held uncommitted edits to
+`packages/plugin/src/main.ts` and `packages/providers/src/`, and the checker resolves symbols against
+the *working tree*. This is P31's own shape reaching the **verification tooling** rather than the
+plugin, and it defeats R004: the same probe before and after is unsatisfiable in a tree with other
+writers. A number taken in a shared tree is not a measurement, it is a sample of someone else's
+in-progress edit.
 **Verify by effect:** `ls -lt ~/.claude/projects/<worktree>/*.jsonl | head` during a fan-out — count
 the files modified in the last five minutes. More than two means the listener is in this situation.
+For the tooling half: `git stash list && git status --porcelain` before any gate — a non-empty
+working tree means the number you are about to record belongs to a tree nobody can reconstruct.
 
 ## P30 — "Never fail silently" that terminates in a channel the user does not have
 **Symptom:** the project has a real, enforced discipline — every catch notifies, every degradation

@@ -5,6 +5,26 @@ input", T170–T172).
 **Author had no session context.** Claims about our own code cite `path:line` verified at `1161722`.
 Every number carries **[measured-here]**, **[documented]** or **[claimed]** (constitution R006).
 
+> ### Amended 2026-08-21 — round-7 review, `docs/design/014-review-round7.md`
+>
+> Seven findings landed on this document. Each is resolved **in place**, in the section that owns the
+> mechanism, and each carries the finding number that forced it. Two of them invalidate an argument
+> this document made rather than a number it quoted, and those arguments are rewritten, not softened.
+>
+> | Finding | What changed here |
+> |---|---|
+> | **R7-30** blocks-implementation — the listening window's primary close signal is dead when the followed set is empty | **Section 3.3a is new.** The dependency on `012`'s followed set `F` is stated as a precondition; the `F = ∅` behaviour is specified rather than left to the 30 s clock; and **the press announces which close condition is armed**, so the listener is never in a silence whose end they cannot predict. Gate M17a gains the `F = ∅` row. Up to 30 s of dead air on the accessibility path was the cost of leaving this implicit. |
+> | **R7-28** needs-decision — barge-in redefined onto the 250 ms end-to-end budget | Section 4's budget paragraph is rewritten to keep **two quantities named separately**: press → last sample is **250 ms**, and the **provider-cancel segment inside it stays `CANCEL_BUDGET_MS = 50`**. Gate M17a asserts **both**. The earlier text collapsed them, which is the exact conflation `packages/providers/src/budget-claims.test.ts:38-44` exists to prevent and P33's shape. **This document does not move a constitutional number**; doing so is a constitution amendment plus a constant change, not a sentence in a design doc. |
+> | **R7-06** needs-decision — `maxQueued` specified three incompatible ways | Section 4's step 4 **cites `011`'s `queue.maxQueued`** and restates no number. |
+> | **R7-29** needs-decision — settings invented that `011`'s frozen schema does not carry | **Section 9a is new**: "Settings this milestone adds", each row an `011` `FieldDescriptor` at `since: 3`. |
+> | **R7-34** needs-decision — the `win-arm64` binary cost is charged to STT when its own source says TTS already pays it | Section 2 option B is **re-scored on marginal cost**: the binary, the extraction and the signing question are already owed by the default TTS engine, so **the delta STT actually adds is the model download and nothing else**. The verdict is unchanged; **the reason M17c stays unscheduled is not the same reason it was**. |
+> | **R7-35** needs-decision — VAD and keyword spotting never considered; the real blocker never named | **Section 2 gains option F, "VAD-only, no recognition"**, scored against the same four constraints, and **section 2a names the blocker this document should have named**: cross-platform microphone capture in Node. Opened as **Q84**. The verdict — ship E as M17a — stands; **the argument for it is replaced**, because a correct conclusion resting on overstated obstacles is fragile. |
+> | **R7-39** worth-noting — unlabelled numbers against this document's own R006 promise | Labels added at section 0's model sizes, section 3.3's buzz earcon, section 5's restatement of it, section 6.1's 10 ms monitor and its *"up to 2,000 ms"*. |
+> | **R7-38** worth-noting — the stated search and the "Reproduce:" command are different greps | **One pattern**, used in both places, in section 0. |
+>
+> **Citations.** `scripts/check-citations.mjs` had never been run over this document. It was run for
+> this pass and reports **zero** flags against it, before and after these amendments.
+
 ---
 
 ## 0. The verdict, before the reasoning
@@ -16,21 +36,36 @@ independent findings close the four doors, and they were closed by research, not
 |---|---|---|
 | Reuse ORCA's STT | `q-round1-orca-api.md` Q15 — main-process + host renderer only. A panel has no preload, no `window.api`, `connect-src 'none'`, no `allow="microphone"` | **RESOLVED NEGATIVE** |
 | Ship sherpa-onnx STT | `q-round1-platform.md` Q16 — same native binary as TTS, same missing `win-arm64` on npm (P13), no OS fallback on Windows-on-ARM | **RESOLVED** |
-| Ship a model in the plugin | `q-round1-platform.md` Q17 — smallest English model ORCA itself ships is **87.7 MiB**, 1.75× the whole 50 MB cap; Moonshine tiny is **119.0 MiB** extracted | **RESOLVED NEGATIVE** |
+| Ship a model in the plugin | `q-round1-platform.md` Q17 — smallest English model ORCA itself ships is **87.7 MiB** **[documented]** (computed per-file from ORCA's pinned catalog, `src/main/speech/model-download-catalog.ts`, in `docs/.research/q-round1-platform.md` Q17), 1.75× the whole 50 MB cap; Moonshine tiny is **119.0 MiB** over 12 files **[documented]** (the Hugging Face file listing, same source). **A third artifact is genuinely unmeasured** and must not be conflated with these two: the `…-quantized-2026-02-27.tar.bz2` release asset is 29.9 MB **compressed**, extracted size **unknown** — section 8's refutation row is about that one | **RESOLVED NEGATIVE** |
 | Use a cloud API | R3.4 — the default needs no account, no API key, no network | **forbidden** |
 
 And the door this document was asked to open — *"macOS, Windows and Linux all ship system
 dictation"* — **is only two-thirds true, and the missing third is the one R1 is about**:
 
 > **[measured-here]**, 2026-08-21: the Ubuntu 24.04.3 desktop image manifest (1,819 packages) contains
-> **zero** speech-*recognition* packages. `grep -iE 'speech|dictat|voice|asr|sphinx|kaldi|onnx|deepspeech|julius|nerd-dictation'`
-> returns only `espeak-ng-data`, `libespeak-ng1`, `libspeechd2`, `python3-speechd`,
-> `speech-dispatcher`, `speech-dispatcher-audio-plugins`, `speech-dispatcher-espeak-ng` — every one of
-> them **output**, none of them input. Reproduce:
+> **zero** speech-*recognition* packages.
+>
+> **The pattern below is the one that produced the result, and it is the only one this document
+> uses** — the stated search and the "Reproduce:" command were two different greps (**R7-38**), which
+> made the claim something other than the output of the command offered to check it. That is P33's
+> shape: three artefacts that each look right alone.
+>
 > ```
 > curl -sfL https://releases.ubuntu.com/24.04/ubuntu-24.04.3-desktop-amd64.manifest \
->   | grep -iE 'speech|dictat|voice|asr|kaldi|whisper|vosk'
+>   | grep -icE 'speech|dictat|voice|asr|sphinx|kaldi|onnx|deepspeech|julius|nerd-dictation|whisper|vosk'
 > ```
+>
+> Drop the `-c` for the seven matching lines. They are `espeak-ng-data`, `libespeak-ng1`,
+> `libspeechd2`, `python3-speechd`, `speech-dispatcher`, `speech-dispatcher-audio-plugins`,
+> `speech-dispatcher-espeak-ng` — **every one of them output, none of them input.** `whisper` and
+> `vosk`, which appeared only in the old reproduce command, and `sphinx`, `onnx`, `deepspeech`,
+> `julius` and `nerd-dictation`, which appeared only in the old stated search, are **all** in the one
+> pattern above and **none** of them matches. That is a stronger result than either half claimed.
+>
+> **Not re-run in the session that amended this document** (no network), so the count `7` is the
+> original **[measured-here]** reading and the *pattern* is what changed. Section 8's refutation row
+> asks a future reader to re-run exactly this line; there is now exactly one line to re-run.
+>
 > This is P25's shape exactly — *"ask what the image manifest ships, not what the distro packages"* —
 > and it is the second time that question has decided a design in this project.
 
@@ -95,13 +130,45 @@ live in a runtime cache outside the install tree, exactly as P4 already conclude
 ORCA's catalog ids, hashes and the Windows ASCII-relocation workaround (P8).
 
 - **R3.4: satisfied.** Local, no key, no network after the download.
-- **R1: fails on Windows-on-ARM** — the sherpa `win-arm64` npm gap (P13, Q16), with **no OS fallback
-  equivalent to SAPI on the input side**. Recoverable only via the GitHub-release path (P13), which is
-  a download, an extraction (`unbzip2-stream`, P14) and a binary we would then have to sign.
-- **Cost: 87.7 MiB minimum** for the smallest English model ORCA ships, 119.0 MiB for Moonshine tiny
-  (Q17, MEASURED there). That is a first-run download an order of magnitude larger than the TTS voice.
-- **This is the only option that gives us the audio stream**, and therefore the only one where jobs B
-  and C can be done properly rather than by proxy.
+- **R1 on Windows-on-ARM: re-scored, because the earlier scoring double-counted (R7-34).** The
+  previous text charged STT with *"a download, an extraction … and a binary we would then have to
+  sign"*, and its own cited source says the opposite about who pays:
+
+  > *"There is **nothing to decide separately for STT**: the `win-arm64` fetch-from-GitHub-releases
+  > plan **already required for TTS (P13)** covers voice input too."*
+  > — `docs/.research/q-round1-platform.md:516-518`
+
+  **Piper via `sherpa-onnx-node` is the default TTS engine**, so on Windows-on-ARM the plugin already
+  owes the GitHub-release fetch (P13), the pure-JS bz2 extraction (P14) and the signing question
+  (`010` Q64) **before voice input is considered at all**. Charging them again to STT counts them
+  twice, and it was one of two legs holding up the M17c verdict.
+
+  | Windows-on-ARM cost | Who pays it | STT's marginal share |
+  |---|---|---|
+  | The `win-arm64` binary is absent from npm (P13) | **TTS already** — Piper is the default engine | **zero** |
+  | Fetch from the GitHub release + `unbzip2-stream` extraction (P14) | **TTS already** | **zero** |
+  | Signing / notarizing a fetched native binary (`010` Q64) | **TTS already** | **zero** |
+  | The non-ASCII Windows path relocation (P8) | **TTS already** | **zero** |
+  | **The recognition model download** | nobody yet | **87.7 MiB [documented]** — the whole delta |
+
+  A detail the earlier text never mentioned: upstream publishes explicit **`-no-tts` variants** of the
+  same release —
+  `sherpa-onnx-v1.13.6-win-arm64-shared-MD-MinSizeRel-no-tts.tar.bz2` at **15.4 MB compressed**
+  **[documented]** (`docs/.research/q-round1-platform.md:488-491`, `:495-497`), against 19.4 MB for
+  the full build. That matters only for an STT-**only** sidecar; we would ship the full build, which
+  is the one TTS already needs.
+
+  **What remains genuinely true:** on Windows-on-ARM there is **no OS fallback equivalent to SAPI on
+  the input side** (`q-round1-platform.md:516-518` says this in the same breath), so if the
+  GitHub-release path is ever skipped, voice input simply does not exist there. That is a real R1
+  risk. It is just not a *binary-acquisition* cost, and it is not STT's to pay first.
+- **Cost: 87.7 MiB minimum** for the smallest English model ORCA ships **[documented]**, 119.0 MiB for
+  Moonshine tiny over 12 files **[documented]** (`q-round1-platform.md` Q17). That is a first-run
+  download an order of magnitude larger than the TTS voice, and **after R7-34 it is the *entire*
+  delta rather than one item on a list of four.**
+- **This is the only option that gives us the audio stream** — with the caveat section 2a now
+  states: *where the audio stream comes from* was never answered here either. Option F below needs
+  the same stream for a fraction of the model.
 
 ### C — A sidecar the user installs
 
@@ -142,15 +209,91 @@ Ship jobs B, C and D. Job A is the user's dictation, or their keyboard, or nothi
 - **R3.4: satisfied trivially.**
 - **Cost: essentially zero**, and it is the only option that is *entirely* within reach today.
 
+### F — VAD-only, no recognition — new, R7-35
+
+**Detect that a human started talking. Never find out what they said.**
+
+This option was missing from the five above, and its absence is the sharper half of R7-35: a grep for
+`vad|keyword|microphone capture|audio capture` over the original document returned **nothing**. That
+is an omission with a specific cost, because section 1 defines job B as *"stop the speech when the
+user starts talking"* and then implements it as a **keypress** — while a voice-activity detector is
+precisely the mechanism that detects "the user started talking" **without STT**.
+
+- **Same dependency, no new one.** `sherpa-onnx-node`'s JS layer ships `vad.js` and
+  `keyword-spotter.js` beside `non-streaming-tts.js`, over **exactly one** `sherpa-onnx.node`
+  **[documented]** (`docs/.research/q-round1-platform.md:462-468`, `:478`). The constitution names
+  this explicitly as the reason the dependency was chosen: *"`sherpa-onnx-node` covering TTS, **STT,
+  VAD and keyword spotting** is worth more than four narrower packages"*
+  (`.specify/memory/constitution.md:128-129`). **The project's own Complexity principle argued for
+  this capability and no design had used it.**
+- **R1: same as option B**, no better and no worse — one native binary, the `win-arm64` marginal cost
+  re-scored above at **zero**.
+- **R3.4: satisfied.** Offline, key-free, no network after the model lands.
+- **P4 (the 50 MB cap): this is the axis where F is not close to B.** A VAD model is **~1–2 MB**
+  **[claimed]** — an order-of-magnitude-and-a-half smaller than the 87.7 MiB recognizer, and the only
+  candidate in this document that could plausibly live *inside* the plugin rather than in a runtime
+  cache. **Nobody has measured it here**, and it is the single number that decides whether F is a
+  download-free rung; the probe is one line in **Q84**'s block below and it has not been run.
+- **P5: satisfied** — a model file is data, not a build step.
+- **What it buys that E does not:** hands-free barge-in. The listener talks over the agent and the
+  agent stops, with no key to find. That is buzz's *"talking over the agent **is** the stop gesture"*
+  (section 6.1) taken literally rather than approximated by a press.
+- **What it buys that B cannot, cheaply:** keyword spotting on the same addon is **this project's only
+  route to a hands-free `stop` in terminal focus**, where upstream stablyai/orca#15642 kills every
+  chord (`003` section 1 F6). A single wake word is a far smaller model than a recognizer.
+- **What it does not buy:** job A. F transcribes nothing. It is an *enhancement to E*, not a
+  replacement for B.
+- **What blocks it is the same thing that blocks B**, and it is not the model — see section 2a.
+
+### 2a. The blocker this document should have named: where the audio comes from — R7-35
+
+Option B was scored as *"the only option that gives us the audio stream"* with **no account of where
+that stream comes from**, and the same gap sits under option F. It is named here because it, and not
+model size, is what actually decides M17c.
+
+**Node has no cross-platform microphone capture.** The routes are:
+
+| Route | Cost | Against |
+|---|---|---|
+| A native addon (`naudiodon`, `node-microphone`, `mic`) | `node-gyp` at install time | **Principle II** and P5 — a plugin is copied, never built. `naudiodon` is abandoned (last push 2024-03, P9) |
+| An external binary (`sox`, `ffmpeg`, `arecord`, `parec`) | a setup step per platform | P25's shape exactly: the binary is *not* on the Ubuntu desktop image. This is option C's rung wearing a different hat |
+| A renderer with `getUserMedia` | none — the browser does it | **the panel has no `allow="microphone"`**, `connect-src 'none'`, no preload (Q15). Closed |
+| A **forked Node worker** driving the platform audio API through the vendored sherpa addon | unknown | **unknown — this is Q84.** `sherpa-onnx-node` ships microphone examples upstream; whether its addon exposes capture, or only accepts buffers a caller must already have, has never been checked |
+
+**No Q-round question has ever asked this.** Every door in section 0 was closed on a model, a binary
+or an API; the door that is *actually* load-bearing was never knocked on. **That answer, not the
+model size, gates M17c** — because if no route exists, options B and F are both unbuildable
+regardless of how small the model gets, and if the forked-worker route works, F becomes a ~2 MB
+enhancement to a milestone that is already shipping.
+
+Recorded as **Q84**.
+
 ### The recommendation
 
 **Ship E now, as M17a. Offer C behind a setting as M17b. Keep B as the funded future if the listener
-wants hands-free. Reject D as an answer and adopt it as a home. Do not make A the default, and do not
-make it a lie.**
+wants hands-free, with F ahead of it in that queue. Reject D as an answer and adopt it as a home. Do
+not make A the default, and do not make it a lie.**
 
-The reason E comes first is not caution, it is the split in section 1: E is jobs B, C and D, which is
-**everything the M17 gate actually measures**. A milestone that ships E has a runnable gate. A
-milestone that ships A has an unrunnable one on Linux and an un-hookable one everywhere.
+**The verdict is unchanged and the argument for it is not** (R7-35). The earlier version rested on
+four closed doors, and two of them were overstated: option B's Windows-on-ARM cost was double-counted
+(R7-34), and a sixth option that needs 2 MB instead of 87.7 MiB was never considered at all. A
+verdict resting on overstated obstacles is fragile even when it is correct, so here is the argument
+that actually holds:
+
+1. **E is jobs B, C and D, which is everything the M17 gate measures** (section 1). A milestone that
+   ships E has a runnable gate on all three platforms. A milestone that ships A has an unrunnable one
+   on Linux and an un-hookable one everywhere. **This leg never depended on the model at all** — it is
+   a fact about what the gate asserts, and it is why E ships first.
+2. **Everything past E — B, C and F alike — waits on Q84**, not on a download size. That is one
+   question, answerable in an afternoon, and until it is answered no amount of model shopping changes
+   anything.
+3. **F, not B, is the next rung if Q84 is positive.** It is ~40× smaller, it is the same addon TTS
+   already loads, it delivers the one thing E approximates with a keypress, and it is the only route
+   to a hands-free `stop` while #15642 is open.
+
+**What this reordering does not do** is make M17c cheap or scheduled. It stays unscheduled — but for
+a stated reason that can be falsified (Q84 comes back negative; a VAD model turns out not to be
+1–2 MB) rather than for a cost that its own source says TTS already pays.
 
 ---
 
@@ -190,9 +333,10 @@ dictate"* — which is why the verb below is `talk` and not `dictate`.
 
 ### 3.3 Hold, tap, or latch — the option space, default to the listener
 
-buzz holds: press opens the mic, release closes it, with an 880 Hz / 440 Hz earcon on each edge
-(`useHuddlePttState.ts:36-54`, via `q-round1-buzz-transcript.md` item 3). Hold is right when the app
-owns the mic. **We do not own the mic** in M17a, so what the press bounds is a *listening window* —
+buzz holds: press opens the mic, release closes it, with an **880 Hz / 440 Hz [documented]** earcon on
+each edge — third-party frequencies read out of buzz's source, never measured here and never adopted
+(`useHuddlePttState.ts:36-54`, via `q-round1-buzz-transcript.md` item 3; see section 5 for why we do
+not copy them). Hold is right when the app owns the mic. **We do not own the mic** in M17a, so what the press bounds is a *listening window* —
 the interval during which we stay silent.
 
 | Mode | Press means | Ends on | Fails when |
@@ -214,6 +358,75 @@ followed transcript is the observable fact that the human's turn landed — the 
 already runs (`packages/plugin/src/huddle/index.ts:226`), the same 250 ms debounce (`:52`), no new
 mechanism. That is the cheapest, most honest close: the window ends when the thing it was waiting for
 happened.
+
+### 3.3a The precondition that sentence hides, and what happens without it — R7-30
+
+**Stated plainly, because it was not stated at all: the evidence-based close above requires a
+non-empty followed set. It has no effect when `F = ∅`.**
+
+`012` guarantees `F = ∅` regularly, and does so on purpose:
+
+- `012` section 2 R1 — *"**Membership is explicit. A new session joins nothing.** … never
+  auto-followed."*
+- `012` section 2.4 — *"Session appears while `F` is empty and huddle is on → **still not
+  followed**."*
+- `012` section 2 R5 — `F` is persisted, but ORCA reaps an idle worker after five minutes (P20/P6),
+  and members that are gone at restore are dropped.
+
+So **after every reap, every restart and every first run, `F` is empty.** In that state there is no
+followed transcript, the `type: 'user'` record has nowhere to be observed, and the window's primary
+close signal is dead. What is left is `session.talkWindowMs` — the 30 s clock — or a second tap the
+listener has no reason to know is required. **Up to 30 seconds of dead air after the human finished
+speaking, on the accessibility path, for a listener who is voice-first and dyslexic.** That is
+`003` section 8.7 rule 4's exact concern — *a silence indistinguishable from a crash* — arriving
+through the default configuration rather than through a fault.
+
+**Three things change.**
+
+**1. The close condition is chosen at press time, from what is actually armed, and it is *always* a
+set — never a single signal.**
+
+| At press | Armed close conditions | Bound on the silence |
+|---|---|---|
+| `\|F\| ≥ 1` | a `type:'user'` record in **any** member of `F` · second tap · `session.talkWindowMs` | typically one turn |
+| `F = ∅`, a control pane is connected | **the control pane's own cwd transcript**, watched read-only for this window only · second tap · `session.talkWindowMs` **reduced to `session.talkWindowIdleMs`** | typically one turn |
+| `F = ∅`, no control pane, no readable transcript | second tap · `session.talkWindowIdleMs` | the reduced clock |
+
+**2. The `F = ∅` fallback is a read-only watch, and it is bounded by the window.** When nothing is
+followed, the worker resolves the control pane's working directory (`003` section 2D's handshake
+already yields it) and watches that worktree's most recently modified transcript **for the duration of
+the listening window and no longer**. It is R024-clean — a read, never a write, never speech: **a
+transcript watched this way is never spoken from, never primed, never given a high-water mark, and
+never enters `F`.** It is used for exactly one bit of information: *did a user record appear.* The
+watch is torn down when the window closes, on every path including the timeout.
+
+This is the narrow, reversible half of the choice. **The alternative — auto-following the pane's
+session so the normal close applies — is refused**: it is `012` R1's automatic membership with a
+nicer name, which is the whole of P22 and P31.
+
+**3. The press says which condition is armed.** One short clause appended to the mic-open
+announcement, spoken before the earcon's silence begins:
+
+| Armed | Spoken at press |
+|---|---|
+| followed set | *"Listening. I'll stop when your turn lands."* |
+| pane fallback | *"Listening. Nothing is followed, so I'm watching this pane — tap again when you're done."* |
+| clock only | *"Listening. Nothing to watch — tap again when you're done, or I'll resume in fifteen seconds."* |
+
+The wording is `011`'s `announce.*` territory and is taste; **what is not taste is that the listener
+is told which of the three they are in.** A listening window whose end the listener cannot predict is
+the *"confusing what it is even reading… feel helpless"* failure (P22) inverted into silence, and
+P30's lesson applies unchanged: the announcement must reach the audio stream, not a log line.
+
+**Why a shorter clock rather than only a shorter clock.** `session.talkWindowIdleMs` exists because
+the clock-only row has no evidence to wait for, so the *only* honest bound is time; its argued
+starting value is **15 s** against the followed set's 30 s. It is a floor under the failure, not a
+fix — the fix is row 2, and the settings are section 9a's. Both values are the listener's (**P23**).
+
+**Verify by effect:** run the M17a window test with `F = ∅` and assert the window closes on the
+pane's user record — **and** run it with the pane watch disabled and assert it closes on
+`session.talkWindowIdleMs` and not on `session.talkWindowMs`. Without the second reading the test
+passes on a build where the fallback never runs, which is exactly today's behaviour.
 
 ---
 

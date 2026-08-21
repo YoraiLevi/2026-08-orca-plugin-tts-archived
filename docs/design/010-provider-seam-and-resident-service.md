@@ -36,6 +36,8 @@ implementation code; the TypeScript below is contract, and is expected to be cop
 | F3 | Piper amy-low synthesizes one sentence in **52–65 ms** | **MEASURED** `[measured-here]` | `PITFALLS.md` P11 |
 | **F4** | **A real sentence through `OsSynthProvider.generate()` costs p50 1,163 / 1,054 ms**, p95 1,244 / 1,084, min 900, n=9 per run, two runs | **`[measured-here]`** | `docs/.research/latency-measurements.md` 1.3 |
 | **F5** | **The inter-chunk gap is p50 950 / 937 / 897 ms**, n=18 per run, three runs — and **~893 ms of it (99.7 %) is CoreAudio device open/pre-roll/post-roll/teardown**, not the 2.3 ms process spawn | **`[measured-here]`** | `docs/.research/latency-measurements.md` 1.1, PITFALLS **P32** |
+| **F6** | **A WARM resident `AVSpeechSynthesizer.write(_:toBufferCallback:)` reaches its first non-empty, non-silent PCM buffer in p50 17.7 ms (run 1) / 17.1 ms (run 2)**, n=20 each, max observed 21.6 ms; the whole utterance renders in p50 ~38 ms | **`[measured-here]`** | `docs/.research/spike1-resident-synth.md` 1 (**SPIKE-1, run 2026-08-21**) |
+| **F7** | The **COLD** first buffer — the first `write()` in a fresh process — is **307–345 ms, p50 328 ms**, n=8 fresh processes. Residency is therefore worth **~311 ms per utterance** `[derived]`, once per session | **`[measured-here]`** / **`[derived]`** | `docs/.research/spike1-resident-synth.md` 2 |
 
 Put F1 and F3 side by side: **the spawn is 8× the synthesis** *on a neural engine*. That comparison
 was the whole argument of Part 2.
@@ -59,6 +61,31 @@ was the whole argument of Part 2.
 >
 > **SPIKE-2 (section 8.2) is now DONE**: `pnpm bench:latency`, `docs/.research/latency-measurements.md`.
 > It is the probe that produced F4 and F5 and the reason this note exists.
+
+> **Amended again 2026-08-21 — SPIKE-1 has now RUN, and it forced round-7 finding R7-15.** F6 and F7
+> above are its result. **Section 8's categorical sentence — *"R4.2 … is unreachable on the OS-synth
+> rung by any amount of residency or playback work"* — is withdrawn, and section 8.2's *"Yes on
+> macOS, very probably"* is no longer a guess.** Both are replaced by the measurement in 8.2. The
+> two sentences were fifty lines apart, said opposite things, were never compared, and **M9a's ship
+> gate depended on which one held** — the P33 shape, inside this document.
+>
+> **What SPIKE-1 settles.** F4's 1,054–1,163 ms is `say -o file.wav`, which returns only when the
+> **whole** WAV is written, so it bounds *total* synthesis and says nothing about *first buffer*.
+> Measured directly, warm first-buffer on macOS is **17.7 / 17.1 ms** — **8.5× inside** this
+> document's own 150 ms pass condition, and roughly **1/60th** of what section 8 inferred. **The
+> engine is not on the macOS latency critical path.** The device is: 17.7 ms of synthesis against
+> ~893 ms of device cycle. Windows and Linux first-buffer remain **`[claimed]`**; their probes are
+> committed and unrun (`scripts/spikes/spike1-windows-firstbuffer.ps1`,
+> `scripts/spikes/spike1-linux-firstindex.mjs`, `docs/TASKS.md` T089).
+>
+> **Where M9 is now specified.** `docs/design/015-m9-rescope.md` was written while this document was
+> under review and could not be edited. It is **not** a competing account: it is the **M9a build
+> specification** — device lifecycle, device loss, default-device change mid-sentence, two-sided
+> cancel while we own the device, ducking, the revised gate, and the collateral to designs 003, 004
+> and 005. **This document owns the seam; `015` owns M9's deliverable and its gate.** Sections 8, 8.2,
+> 10 and 12 below have been amended so that nothing here contradicts it. Where a residual
+> disagreement is found, **`015` is the later evidence and wins**, and it should be reported as a
+> defect in this note.
 
 ---
 
@@ -101,7 +128,7 @@ Four properties of that shape are the reason four documents each need to widen i
 |---|---|---|---|---|
 | 1 | Per-utterance identity: voice, **rate as wpm**, pitch in semitones | `005` sections 4, 8.2, 8.4 | M15 | rate everywhere; pitch on all three by three different surfaces (`q-round1-platform.md` Q33) |
 | 2 | `pause()` / `resume()`, distinct from `cancel()` | `003` section 8.7 (`:1283-1296`) | M13 | macOS `pauseSpeaking(at: .word)`, Windows `Pause()`/`Resume()`, Linux SSIP `PAUSE`/`RESUME` — **DOCUMENTED**, item 2 |
-| 3 | Audio-format variance, including synthesized earcon PCM | `004` section 2 (`:102`), `005` section 11.1d (`:623-627`) | M11 | our own three rungs already differ; the earcon is generated PCM at a rate the provider did not choose |
+| 3 | Audio-format variance, including synthesized earcon PCM | `004` section 2 (**`004:126-127`** — corrected 2026-08-21, R7-21: `004:102` was wrong at this document's own pinned SHA `32b929a`, where the sentence *"Branch on `chunk.format`, do not assume WAV"* was at `004:91`; it is `004:126-127` at HEAD), `005` section 11.1d (`:623-627`) | M11 | our own three rungs already differ; the earcon is generated PCM at a rate the provider did not choose |
 | 4 | **`spoke-elsewhere` as a first-class outcome** | `008` X-10, resolved in `009` section 1 | **already shipped, unmodelled** | `PITFALLS.md` P25; `os-synth/index.ts:318-323` |
 | 5 | **Word-boundary events** | nobody — found by the platform probe, unscheduled | M13's cursor, and precise resume | **MEASURED on macOS** (F2); Windows `SpeakProgress` and Linux SSIP index marks **DOCUMENTED** |
 | 6 | **SSML, or its absence, as a capability** | nobody — found by the platform probe, unscheduled | M15 (it is the only route to pitch on Windows) | available on all three, used on none (`q-round1-platform.md` item 3) |
@@ -219,6 +246,16 @@ export interface ProviderCapabilities {
    * 'client'   — the provider emits bytes and never plays (R021). Every rung but one.
    * 'provider' — the provider speaks through something we do not own, and yields NO bytes.
    *              `formats` is `[]`. This is the `spd-say` rung. See section 5.
+   *
+   * R021 EXCEPTION, NOT A CAPABILITY. Added 2026-08-21, forced by finding R7-24.
+   * `playback: 'provider'` is legal ONLY on the declared floor rung — a provider whose id is on
+   * `PROVIDER_PLAYBACK_ALLOWLIST` (today: exactly `os-synth` on linux, backend `spd-say`, P25).
+   * Any other provider declaring it FAILS the contract suite, by name.
+   * Why: as written this was a general capability with no rule limiting its use, and T041h asserts
+   * only the SHAPE (formats empty, one `spoke-elsewhere`, zero `audio`) — never PERMISSION. A cloud
+   * provider playing through its own SDK would be fully conformant while defeating R021 and losing
+   * everything section 5.2 lists: the earcon, ducking, measurable barge-in, and the Voice Lab.
+   * The allowlist is the rule; the shape assertion is not.
    */
   readonly playback: 'client' | 'provider'
 
@@ -305,7 +342,30 @@ export interface TtsProvider {
    */
   generate(text: string, opts?: SynthesizeOptions): AsyncIterable<SpeechEvent>
 
-  /** R014, two-sided. Resolves once nothing is still producing sound THAT WE CAN REACH. */
+  /**
+   * R014, two-sided. Resolves once nothing is still producing sound THAT WE CAN REACH.
+   *
+   * WHICH QUANTITY `CANCEL_BUDGET_MS = 50` GATES. Restated 2026-08-21, forced by finding R7-18.
+   * The 50 ms was measured against PROCESS EXIT (~3 ms kill-to-exit `[measured-here]`), and this
+   * signature changed the promise to resolve on SOUND STOPPED. Keeping the constant while changing
+   * what it measures re-creates P33 inverted — prose stricter than anything observable.
+   *
+   *   - `CANCEL_BUDGET_MS = 50` gates KILL-TO-EXIT, unchanged, and that is what the contract suite
+   *     asserts. It is measurable today and it is what `packages/providers/src/contract.ts:12` means.
+   *   - AUDIO DRAIN — the interval between kill-to-exit and the last non-silent sample — is
+   *     `[claimed]`, UNGATED, and UNMEASURABLE in userland: it needs a loopback capture or a
+   *     CoreAudio probe (`docs/.research/latency-measurements.md` 1.5). No test may assert it until
+   *     an instrument exists. M9a's sidecar is that instrument (`015` section 2.4): once we own the
+   *     device we can timestamp the last non-silent sample, and only then does a drain budget become
+   *     a number rather than a wish.
+   *   - Moving the constitution's `Barge-in signal -> audio stops | < 50 ms` row onto a different
+   *     quantity is a CONSTITUTION AMENDMENT plus a constant change, not a design-doc sentence.
+   *
+   * Returns `void`, not `{ reached }`. `reached` lives on the `spoke-elsewhere` event's own
+   * `cancel()` (see `SpeechEvent` above), because it is only meaningful where the sound belongs to
+   * a daemon we do not own. Section 5.2's sentence announcing `cancel(): Promise<{ reached }>` as
+   * "the fix" was wrong about this signature and has been corrected (R7-18).
+   */
   cancel(): Promise<void>
 
   /**
@@ -320,8 +380,25 @@ export interface TtsProvider {
    *  [measured-here] (n=6 x2, docs/.research/latency-measurements.md 1.6). */
   listVoices(): Promise<readonly VoiceDescriptor[]>
 
-  /** Rule A, for the request rather than the provider: can THIS utterance be served as asked? */
-  supports(req: ProsodyRequest): SupportReport
+  /**
+   * Rule A, for the request rather than the provider: can THIS utterance be served as asked?
+   *
+   * ASYNC. Changed from `SupportReport` to `Promise<SupportReport>` 2026-08-21, forced by finding
+   * R7-22. A request carrying `voice: { by: 'index', index: n }` cannot be answered without the
+   * voice list, and the only voice list costs p50 487/472 ms `[measured-here]` (n=6 x2,
+   * `docs/.research/latency-measurements.md` 1.6) behind an async `listVoices()`. A synchronous
+   * `supports()` called cold must therefore lie or throw — and the lie is expensive, because
+   * section 6 routes an unverifiable voice to a SPOKEN sentence, so a cold sync `supports()`
+   * produces a spurious spoken degradation on the accessibility path. Rule A defeated by its own
+   * signature.
+   *
+   * Implementations MUST resolve against the cached list where it is warm and MUST await
+   * `listVoices()` where it is not. T041j asserts the COLD path: call `supports()` on a provider
+   * that has never run `prepare()`, with an index-addressed voice, and assert a correct report and
+   * ZERO `degraded` events — with the negative control (a genuinely unsupported index) asserting
+   * exactly one.
+   */
+  supports(req: ProsodyRequest): Promise<SupportReport>
 }
 
 export interface VoiceDescriptor {
@@ -354,6 +431,69 @@ export class PauseUnsupportedError extends Error {
   readonly code = 'pause_unsupported' as const
 }
 ```
+
+### 4.0a `PlaybackSink` v2, and the demultiplexer between it and `generate()`
+
+> **New section, 2026-08-21 — forced by finding R7-17.** This document changed `AudioChunk`'s shape
+> and changed `generate()` from yielding `AudioChunk` to yielding `SpeechEvent`, **and never wrote
+> down what happens to the consumers.** Section 12 then called rung 1 *"a pure-refactor commit with
+> no latency change, so if anything regresses, the cause is unambiguous"*. **That sentence is
+> withdrawn.** Rung 1 is a breaking change to the sink contract, and until this section existed it
+> was a breaking change nobody had specified. Three consumers break, one of them silently and in the
+> audio path:
+>
+> | Consumer | v1 code | What v2 does to it |
+> |---|---|---|
+> | `packages/plugin/src/sinks/subprocess-sink.ts:100` | ``join(dir, `chunk.${chunk.format === 'wav' ? 'wav' : 'bin'}`)`` | `format` is now an **object**, so `=== 'wav'` is permanently `false`: **every WAV is written as `.bin`.** Silent, in the audio path, and no test would see it |
+> | `packages/plugin/src/speech-service.ts:424-425` | `for await (const audio of …generate(…)) { if (!this.#playback.push(generation, audio)) … }` (also `:228`) | pushes `SpeechEvent`s — **including `degraded` and `end`** — into the playback queue |
+> | `packages/core/src/types/index.ts:3-10` and `packages/core/src/queue/index.ts:7` | `AudioChunk` with `format: string`, `sampleRate`, `channels`; the queue is typed on it | both typed on v1 throughout |
+
+**`PlaybackSink` v2.** The v1 shape is `enqueue(chunk) / stop() / isPlaying`
+(`packages/core/src/types/index.ts:64-69`). v2 adds what a sink that owns a device needs, and what
+the format change forces:
+
+```ts
+export interface PlaybackSink {
+  /** The format now travels WITH the bytes. A sink MUST branch on `chunk.format.codec`
+   *  and MUST NOT assume WAV — `004` section 2 (`004:126-127` at HEAD). A sink that cannot play a
+   *  codec REFUSES BY NAME (Rule B); it never writes it to disk under a guessed extension. */
+  enqueue(chunk: AudioChunk): Promise<void>
+
+  /** Every format this sink can play. The registry refuses a provider/sink pair with an
+   *  empty intersection AT SELECTION TIME, aloud, rather than at the first chunk. */
+  readonly accepts: readonly AudioCodec[]
+
+  /** Stop immediately and discard anything queued. */
+  stop(): Promise<void>
+  readonly isPlaying: boolean
+
+  /** M9a. `true` only for a sink that holds one device open across an utterance.
+   *  This is the property Gate M9a measures, so it is declared, not inferred. */
+  readonly holdsDevice: boolean
+
+  /** M9a, B-04. Present only when `holdsDevice`; a spawned player can participate in no
+   *  audio-session policy, so on today's sink these are absent, not no-ops (P26). */
+  duck?(level: number): Promise<void>
+  unduck?(): Promise<void>
+}
+```
+
+**The demultiplexer is where `SpeechEvent` stops and the sink begins**, and it belongs to the client
+(R020, R021), not to any provider:
+
+| Event | Goes to |
+|---|---|
+| `audio` | `sink.enqueue(chunk)` — **the only event a sink ever sees** |
+| `word`, `sentence` | the cursor, for resume and for the panel. Never the sink |
+| `spoke-elsewhere` | the queue's `spoke-elsewhere` state machine (section 5.3). No sink involvement, no bytes |
+| `degraded` | Rule B: `spoken` is announced through the announce path, not enqueued as audio |
+| `end` | closes the generation. Exactly one per utterance, including on cancel |
+
+**Restated rung 1.** *"The seam and its consumers change together in one commit — the provider, the
+sink, the demultiplexer and the queue's types — with no latency change. If latency moves, the cause
+is unambiguous; if AUDIO moves, look here first."* The negative control that makes this checkable:
+a fixture whose provider yields one `degraded` and one `audio` event, asserting the sink received
+**exactly one** enqueue.
 
 ### 4.1 What each of the four queued extensions became
 
@@ -569,17 +709,37 @@ Compare F3: Piper synthesizes a whole sentence in 52–65 ms `[measured-here]`. 
 > zero, `generate()` alone is **2.1× the entire R4.2 budget** (F4). Residency cannot buy back time
 > the engine is spending.
 >
-> **Replacement:** *residency is necessary and not sufficient. R4.2 is reachable on the neural rung
-> and is unreachable on the OS-synth rung by any amount of residency or playback work.* Two
-> consequences:
+> **Replacement, superseded — see the next block.** It read: *"residency is necessary and not
+> sufficient. R4.2 is reachable on the neural rung and is unreachable on the OS-synth rung by any
+> amount of residency or playback work."* The falsified reasoning is left visible on purpose.
+
+> **Replacement WITHDRAWN and re-replaced, 2026-08-21 — forced by finding R7-15 and by SPIKE-1
+> (F6, F7).** *"Unreachable on the OS-synth rung by any amount of residency"* was an over-reach from
+> a measurement that could not support it: F4 times `say -o file.wav`, which returns only when the
+> **whole** WAV is written. It bounds total synthesis; it says nothing about first buffer. Measured
+> directly, a **warm** resident `AVSpeechSynthesizer` reaches its first buffer in **p50 17.7 / 17.1 ms,
+> n=20 ×2** `[measured-here]` (F6).
 >
-> 1. **`docs/TASKS.md:202`'s scoping of M9 as *"Resident service + Piper"* was right and this
->    document was wrong to try to decouple them.** The coupling is not a packaging convenience; it is
->    what the arithmetic requires. The two halves may still land as separate rungs (section 12), but
->    the **budget gate** (`docs/TASKS.md:217`) can only be met on the rung that has both.
-> 2. **R4.2's own wording is *"on the default local backend"*, and the default is Piper.** Every
->    document that scores R4.2 must say **which backend it is scoring**; STATE.md's audit row did
->    not, and read as though the 500 ms applied to the `say` path. It has been corrected.
+> **Replacement, current:** *the OS-synth rung's cost is **per-process engine and voice
+> initialisation**, not synthesis compute. Residency removes it — ~311 ms once per session `[derived]`
+> (F7) — and what is left on the critical path is the **audio device**, ~893 ms `[derived]` per
+> sentence boundary (F5). R4.2 is therefore **reachable on a resident OS-synth rung on macOS**, and
+> unreachable on the spawn-per-utterance `say -o` path shipped today, by any amount of playback work.*
+> Two consequences, both reversing what this block used to say:
+>
+> 1. **`docs/TASKS.md` Phase M9's old scoping of M9 as *"Resident service + Piper"* is wrong, and
+>    this document was right to try to decouple them — for the wrong reason.** The reason is not that
+>    "the engine choice is independent"; it is that on macOS **the engine is 2 % of the problem and
+>    the device is 98 %**. **Piper moves to M9b and is gated on QUALITY, not latency.** That
+>    milestone has been rescoped accordingly (`docs/design/015-m9-rescope.md`; `docs/TASKS.md` Phase
+>    M9), and the budget gate is now a gap-to-audio ratio and a device-open count, not a first-audio
+>    number alone.
+> 2. **R4.2's wording is *"on the default local backend"*, and every document that scores it must say
+>    WHICH backend and WHICH rung.** `STATE.md:31` does. `docs/PLAN.md`'s Definition of Done now does
+>    too — it did not until round 7 (R7-03), and the item it carried was one measurement had already
+>    proven unachievable.
+> 3. **Windows and Linux are `[claimed]`.** F6 and F7 are macOS. Nothing here licenses assuming the
+>    same shape elsewhere; `docs/TASKS.md` **T089** is one command on each of the right machines.
 
 ### 8.1 First audio: today versus resident
 
@@ -621,9 +781,37 @@ deletes both by construction — not by being faster, but by not doing them.
 
 ### 8.2 Verdict: does a resident OS-synth meet 500 ms without a neural engine?
 
-**Yes on macOS, very probably; and the claim is one probe away from being settled.**
+> **Verdict replaced by measurement, 2026-08-21 — forced by finding R7-15. SPIKE-1 has run.**
+> This section read *"**Yes on macOS, very probably**; and the claim is one probe away from being
+> settled"*, while section 8 fifty lines above read *"unreachable on the OS-synth rung by any amount
+> of residency or playback work"*. Two sentences, opposite answers, never compared — and **M9a's ship
+> gate depended on which one held**. Neither was right, and neither is a guess any more.
 
-The evidence, honestly separated:
+**Yes on macOS, measured. `[measured-here]` — not `[claimed]`, not "very probably".**
+
+**Warm first buffer: p50 17.7 ms (run 1) / 17.1 ms (run 2), n=20 each, max observed 21.6 ms**
+(F6, `docs/.research/spike1-resident-synth.md` 1). The pass condition this document set below was
+**≤ 150 ms per OS**. It is met by **8.5×**. The whole utterance renders in p50 ~38 ms; the cold first
+buffer is p50 328 ms, n=8 (F7), so residency is worth ~311 ms `[derived]` once per session and the
+synthesizer contributes essentially nothing after that.
+
+**Two corollaries, and the second is the one that changes the milestone.** First, **the falsifier did
+not fire** — *"a median above 350 ms on any platform"* — on macOS. Second, **17.7 ms of synthesis
+against ~893 ms of device cycle (F5) means the engine was never the macOS problem and Piper is not
+what R4.2 needs**; the device is. That is the whole argument of `docs/design/015-m9-rescope.md`, and
+it is why M9 is now *"hold the device open"* rather than *"ship a neural engine"*.
+
+**What is still `[claimed]`, stated so it is not read as settled:** Windows
+(`SetOutputToAudioStream` → first `Read`) and Linux (SSIP `SPEAK` → first `index-mark`) first-buffer.
+The probes are committed — `scripts/spikes/spike1-windows-firstbuffer.ps1`,
+`scripts/spikes/spike1-linux-firstindex.mjs` — and unrun (`docs/TASKS.md` **T089**). Each is one
+command on the right machine. **And the idle cost measured alongside F6 — 0.05 % CPU, 9.4 MB private
+footprint over a 30 s idle window, two runs `[measured-here]` — holds the SYNTHESIZER only and
+explicitly excludes the audio device.** The idle cost of a *held-open device* is `[claimed]`, and it
+is the half of B-03 that `docs/TASKS.md` **T097b** exists to close.
+
+The evidence as it stood before SPIKE-1, kept because the reasoning is what the measurement
+corrected:
 
 - **What is measured.** `AVSpeechSynthesizer.write(_:toBufferCallback:)` ran **headless**, produced
   **55,050 PCM frames**, delivered **9 of 9 word-boundary callbacks with exact `NSRange`s**, and
@@ -659,11 +847,18 @@ The evidence, honestly separated:
 > first-buffer ≤ 150 ms on each OS, which leaves ≥ 350 ms for everything else.
 > **What would prove this document wrong:** a median above 350 ms on any platform. Then residency
 > alone does not buy the budget, and the neural engine is back on the critical path.
-> **Updated 2026-08-21:** on F4 this outcome is now the one to plan for, not the exception.
+> **Updated 2026-08-21 (first time):** on F4 this outcome is now the one to plan for, not the
+> exception.
+> **DONE 2026-08-21 (second time). SPIKE-1 has run on macOS: p50 17.7 / 17.1 ms, n=20 ×2**
+> `[measured-here]` (F6), against a pass condition of 150 ms and a falsifier of 350 ms. **The
+> falsifier did not fire; the pass condition was met by 8.5×.** The odds did not shift towards the
+> engine — the measurement removed the engine from the macOS critical path entirely. Windows and
+> Linux arms remain unrun (T089).
 
-Run SPIKE-1 **before** T090. It is the difference between "M9 builds the thing that makes latency
-acceptable" and "M9 swaps the engine" — and finding 3 has already shifted the odds towards the
-second.
+Run SPIKE-1 **before** T090 — **done for macOS**. It was the difference between "M9 builds the thing
+that makes latency acceptable" and "M9 swaps the engine", and it settled that question in favour of
+the first: **M9 builds the thing, and the thing is the device, not the engine**
+(`docs/design/015-m9-rescope.md` section 1).
 
 > **SPIKE-2 — DONE, 2026-08-21.** `pnpm bench:latency` (`scripts/bench-latency.mjs`), reported in
 > `docs/.research/latency-measurements.md`. Result: **gap p50 950 / 937 / 897 ms, n=18 per run over
@@ -717,8 +912,19 @@ synthesis through three unrelated APIs. **Costed here rather than hidden**, per 
   parameter (`:424-680`); and the last theoretical capture route is closed at
   `src/audio/libao.c:75`, which calls `ao_open_live()` and cannot open a file driver. So **the Linux
   resident service is a `spoke-elsewhere` provider with pause/resume and index marks** — better
-  transport, still no bytes. Section 5's rung is the permanent Linux answer *unless* `espeak-ng` is
-  installed, in which case Linux gets a real streaming path via the library.
+  transport, still no bytes. Section 5's rung is the permanent Linux answer *unless* the
+  **`espeak-ng` BINARY** is present, in which case Linux keeps today's `-w` file rung.
+  > **Amended 2026-08-21 — forced by finding R7-20. This clause read *"unless `espeak-ng` is
+  > installed, in which case Linux gets a real streaming path **via the library**"*, and it proposed
+  > a route three rules close.** *"Via the library"* is either FFI into `libespeak-ng1` — a native
+  > binding, therefore `node-gyp` in the default install path, which **Principle II / R012** forbids
+  > non-negotiably — or `espeak-ng --stdout`, which **P29** records as emitting a WAV header claiming
+  > 2 GB that nothing ever fixes. The clause named neither and costed neither, in the section whose
+  > entire job is costing R1. And **P25**'s lesson is exactly that *the library is present on stock
+  > Ubuntu while the binary is not*, so "installed" was ambiguous in the one place it must not be.
+  > **Library streaming is out of scope. The `--stdout` latency argument is dead anyway**: the sink's
+  > whole temp-file round trip is **0.33 ms of the ~950 ms gap, 0.03 %** `[measured-here]` (F5, P32),
+  > so removing the file changes nothing a listener hears in either direction.
 
 **What R1 therefore costs M9:**
 
@@ -790,6 +996,32 @@ The bridge while it starts is the **existing subprocess provider**, which is exa
 *"the never-fails fallback and the first-run bridge while a model downloads, never the low-latency
 path"* (P10).
 
+> **`T093 Warm-on-start` reconciled here, 2026-08-21 — forced by finding R7-26.** `docs/TASKS.md`
+> Phase M9b lists **T093 *"Warm-on-start + one-character warm-up generation"***, which this ruling
+> silently contradicts. This document explicitly reconciles T096 and the old Phase M9 heading, so the
+> omission read as oversight rather than decision. **T093 becomes *"warm-up on first `prepare()`"***:
+> the one-character warm-up generation survives and is the thing that turns a **cold** first buffer
+> (p50 328 ms, n=8, F7) into a **warm** one (p50 17.7 / 17.1 ms, n=20 ×2, F6); only its **trigger**
+> moves from activation to first `prepare()`.
+>
+> **And lazy start has a cost this section did not name.** `prepare()` calls `listVoices()` on darwin
+> and win32 (`packages/providers/src/os-synth/index.ts`, recorded at
+> `docs/.research/latency-measurements.md` 1.6 / section on `prepare()`), and `say -v '?'` is **p50
+> 487 / 472 ms, n=6 ×2** `[measured-here]`. So *"lazy on first `prepare()`"* puts **~480 ms plus
+> service start in front of the first hotkey after every ORCA launch** — on the accessibility path,
+> once per session. **This is a taste question with a real trade on both sides and the default
+> belongs to the listener (P23), not to this document.** The option space:
+>
+> | Option | First hotkey after launch | Every ORCA launch pays |
+> |---|---|---|
+> | `lazy` (this section's ruling) | ~480 ms voice list + service start | nothing |
+> | `on-activate` | warm | service start + ~480 ms, spoken or not |
+> | `on-first-huddle-event` | warm for huddle, lazy for the hotkey | only when an agent is running |
+>
+> Ship all three behind one setting, registered in `011`'s schema as `service.startPolicy` at
+> `since: 3`, **default `lazy` and marked `provisional`** — the honest label for a default nobody has
+> listened to yet. Whoever runs M11 settles it by ear, not by argument.
+
 ### 11.2 How it is addressed
 
 **Per-worktree, never global.** P27 is unambiguous: parallel ORCA dev builds share one `userData`
@@ -797,8 +1029,21 @@ profile, so `orca <cmd>` silently addresses whichever instance started last, and
 global `/usr/local/bin/orca-dev` — it binds to whichever checkout installed it last."* Applying that
 here:
 
-- Address: a unix socket (macOS/Linux) or a named pipe (Windows) whose path is derived from the
-  **plugin data directory in use**, not from a fixed `/tmp` name.
+- Address: a unix socket (macOS/Linux) or a named pipe (Windows) rooted in
+  **`docs/design/011-settings.md`'s own configuration namespace** — `${XDG_CONFIG_HOME}/orca-tts/`,
+  `~/Library/Application Support/orca-tts/`, `%APPDATA%\orca-tts\`, with `$ORCA_TTS_CONFIG_DIR` as
+  the per-worktree escape hatch — not from a fixed `/tmp` name.
+  > **Re-anchored 2026-08-21 — forced by finding R7-19.** This read *"derived from the **plugin data
+  > directory in use**"*, and **nothing on our side can locate that directory.** Three facts against
+  > it: our whole host surface is `notifications.show`, `storage.get/set`, events and commands
+  > (`packages/plugin/src/adapter/index.ts`) and **no API returns a data-directory path** — `grep -rn
+  > "dataDir\|userData" packages/*/src` returns nothing, and `getPluginsDataDir()` is an ORCA
+  > **main-process** function (`docs/.research/orca-plugin-api.md:934`), unreachable from a worker.
+  > `011` shows the directory is a worker-only KV **deleted on uninstall**. And the service is a
+  > **separate process**, so by `011`'s own argument about the Voice Lab server it has no route to
+  > ORCA's storage at all. `011` had already chosen the namespace above; this is `009` X-06 arriving
+  > in a second document, and `011` is the owner. It also satisfies P27 better and survives
+  > uninstall — which is itself unfinished business, see finding **R7-05**.
 - On start, write `{ pid, procStart, protocolVersion, socketPath }` to a lock file beside it.
 - Liveness is `kill(pid, 0)` **and** `procStart` matches — FMA **B-02**: pids are recycled, the
   registry file survives a crash, and `kill(pid,0)` alone reports a stale entry as alive. The field
@@ -819,9 +1064,17 @@ The behaviour it should assert:
 1. The client notices (socket close, or a read timeout).
 2. It restarts the service **once**, with backoff, and does not retry a second time inside one
    utterance.
-3. It re-speaks **from the last completed sentence boundary** — the word-boundary events (extension
-   5) are what makes this possible; without them the only options are "discard" and "restart the
-   whole reply".
+3. It re-speaks **from the last completed sentence boundary**, which needs **nothing from the
+   provider**.
+   > **Corrected 2026-08-21 — forced by finding R7-25.** This read *"the word-boundary events
+   > (extension 5) are what makes this possible; without them the only options are 'discard' and
+   > 'restart the whole reply'"*. **That is false, and it mattered:** segmentation lives **above** the
+   > provider (R020) and the code proves it — `packages/plugin/src/speech-service.ts:228` and `:424`
+   > iterate an array **the client built**. The client already knows which sentence it was on.
+   > **Word events buy SUB-SENTENCE precision** — a smaller and still worthwhile claim. The
+   > consequence of the error: section 12 makes the word cursor rung 3, macOS-first, so
+   > restart-resume *looked* gated on rung 3 and is not. **T096 is implementable at rung 1**, and
+   > `docs/TASKS.md` schedules it there.
 4. It **says so**: *"The speech service restarted. Continuing from the last sentence."* — through
    `SpeechService.announce()`, at `next` urgency so it does not interrupt (P30), never `now`.
 5. If the restart fails, it falls back to the subprocess provider and announces the rung change by
@@ -907,7 +1160,14 @@ ssml:      'in-band'   // macOS; 'none' on the espeak-ng and spd-say rungs
 listener out loud* what the notification has been telling the desktop (FMA DL1). And the Linux floor
 announcement moves to the audio stream.
 
-**Why this rung first, alone:** it is a pure-refactor commit with no latency change, so if anything
+**Why this rung first, alone — restated 2026-08-21, forced by finding R7-17.** It is **not** a pure
+refactor: `AudioChunk.format` becomes an object and `generate()` yields `SpeechEvent`, which breaks
+`packages/plugin/src/sinks/subprocess-sink.ts:100` (every WAV written as `.bin`, silently, in the
+audio path), `packages/plugin/src/speech-service.ts:424-425`, and the v1 types in
+`packages/core/src/types/index.ts:3-10` and `packages/core/src/queue/index.ts:7`. **The seam and its
+consumers change together in one commit — provider, `PlaybackSink` v2, the demultiplexer and the
+queue's types — with no latency change** (section 4.0a). The original sentence read: it is a
+pure-refactor commit with no latency change, so if anything
 regresses, the cause is unambiguous. It also unblocks 004, 003 and 005 simultaneously, which is the
 entire point of C-05.
 
@@ -955,7 +1215,7 @@ rung 2, and `supports()` says so before anything is requested, rather than after
 **Amended 2026-08-21, forced by finding 3 of `docs/.research/latency-measurements.md`.** This rung
 was described as *"gated on quality and on the model manager rather than on latency"*. **That is
 withdrawn.** `OsSynthProvider.generate()` measures p50 1,054–1,163 ms `[measured-here]` for one
-sentence (F4) against Piper's 52–65 ms — so rung 4 is **the only rung on which the R4.2 gate can be
+sentence (F4) against Piper's 52–65 ms — so rung 4 is **the only rung on which the R4.2 gate is currently KNOWN to be
 met**, and it is a latency rung first and a quality rung second. An engine swap behind a seam that
 already exists, still gated on the model manager.
 
@@ -971,7 +1231,7 @@ for *features*.
 | 1 — seam v2 | spawn | spawn/chunk | unchanged | unchanged | refused **by name** | no | yes |
 | 2 — resident sink | spawn | resident **device** | unchanged — still ~1,054–1,163 ms of `say` synthesis `[measured-here]` | collapses **only if the device stays open**, not merely the process (P32) | refused by name | no | yes |
 | 3 — resident synth | resident | resident | **SPIKE-1**, `[claimed]` unknown — the 30–120 ms estimate is withdrawn (8.2) | none | **word-granular** on macOS | yes | per platform, off by default |
-| 4 — Piper | resident | resident | 52–65 ms/sentence `[measured-here]` (P11) — **the only rung the R4.2 gate can be met on** | none | yes | yes | yes |
+| 4 — Piper | resident | resident | 52–65 ms/sentence `[measured-here]` (P11) — **the only rung the R4.2 gate is currently KNOWN to be meetable on** — narrowed 2026-08-21, R7-15: SPIKE-1 makes a resident OS-synth rung a live candidate on macOS (F6) | none | yes | yes | yes |
 
 **Rungs 1 and 2 are the honest deliverable of this document.** Rung 3 is gated on a probe nobody has
 run. Rung 4 is a quality decision that this document deliberately declines to make.
@@ -980,15 +1240,27 @@ run. Rung 4 is a quality decision that this document deliberately declines to ma
 
 ## 13. What would prove this document wrong
 
+> **Table repaired 2026-08-21 — forced by finding R7-16.** A falsifier table is an instrument, and
+> two of its rows had stopped being instruments. **Row 2 held a claim its own document had already
+> refuted** — *"the budget is missed by spawn, not synthesis"*, refutable by *"real synthesis costing
+> more than ~80 ms"*, while section 8 measures segment 4 at **640–750 ms `[derived]`** and amended
+> its own heading for it. The condition was met and the row was still listed live. **Row 6 was a
+> spawn-shaped falsifier that had already fired** — *"SPIKE-2 measuring a before-gap not dominated by
+> the sink **spawn**"*. SPIKE-2 ran: 2.3 ms spawn, ~893 ms device (F5). By the row as written rung 2
+> is refuted; by P32's mechanism it is not, because rung 2 holds the **device**. That row survived
+> round 6's fold — **P32's own "an indicator that never changes is a broken indicator", inside the
+> table whose job is to change.** Row 1 is now settled by measurement rather than open, and is
+> restated as the narrower thing still open.
+
 | Claim | What would refute it |
 |---|---|
-| A resident OS-synth meets the 500 ms budget without a neural engine | SPIKE-1 returning a median first-buffer above 350 ms on any platform |
-| The budget is missed by spawn, not synthesis | isolating segment 4 and finding real synthesis costs more than ~80 ms for one sentence |
-| The seam changes once | a fifth or sixth extension arriving that section 2's six do not cover |
+| **A resident OS-synth meets the 500 ms budget without a neural engine — SETTLED ON macOS, still open on Windows and Linux** | the committed SPIKE-1 Windows or Linux arm (`docs/TASKS.md` T089) returning a median first-buffer above **350 ms**. The macOS arm has run: **p50 17.7 / 17.1 ms, n=20 ×2** `[measured-here]` (F6), so this row no longer covers macOS |
+| ~~The budget is missed by spawn, not synthesis~~ **— SETTLED, not open. Refuted 2026-08-21 by F4** | *(kept struck through, not deleted: the falsification is the finding. Segment 4 is 640–750 ms `[derived]`, ~8× the ~80 ms condition, and section 8's heading was amended for it.)* |
+| The seam changes once | a fifth or sixth extension arriving that section 2's six do not cover. **Checked 2026-08-21 against `011`, `012` and `013`: none adds one.** `013`'s STT is declared a **seventh extension on a SEPARATE seam** (`SttProvider`), not a widening of `TtsProvider` |
 | Only one platform needs a compiled sidecar | a resident PowerShell host that cannot stream PCM on stdout, or whose execution policy blocks it on a stock Windows 11 |
-| `spoke-elsewhere` is the permanent Linux floor | a capture path in speech-dispatcher we have not found — three were checked and closed at source (`parse.c:98-110`, `:424-680`, `libao.c:75`) |
-| Rung 2 collapses the inter-chunk gap | SPIKE-2 measuring a before-gap that is not dominated by the sink spawn |
-| Idle cost is zero | `powermetrics` showing wakeups with the queue empty and the service warm |
+| `spoke-elsewhere` is the permanent Linux floor | a capture path in speech-dispatcher we have not found — three were checked and closed at source. **See section 9's citation note: those five pointers are pinned to no commit and are unverifiable as written until they are (R7-21)** |
+| **Rung 2 collapses the inter-chunk gap** *(rewritten — the old row named the spawn)* | a resident sink **holding one output device open across a whole reply** still measuring a gap-to-audio ratio above **5 % p50**, or an inter-sentence gap p50 above **150 ms** — the falsifier of Gate M9a (`docs/design/015-m9-rescope.md` section 6). A row naming the *spawn* could never fire, because the spawn is 2.3 ms of 950 |
+| Idle cost is zero | `powermetrics` showing wakeups with the queue empty and the service warm. **Half-measured:** the resident **synthesizer** idles at 0.05 % CPU / 9.4 MB over 30 s, two runs `[measured-here]`; the held-open **device**'s idle cost is `[claimed]` and is `docs/TASKS.md` **T097b** |
 
 ## 14. New open questions
 
@@ -1014,6 +1286,27 @@ document — 009 records that a previous correction table was itself 16 lines st
 `:366`, which now lands on `$s.Rate = ${rate}`. The finding itself — the linear formula over-shoots
 in the middle and saturates from `rate` 2.0 upward — is unchanged and correct. Not fixed here; this
 document changes no file but itself.
+
+> **Amended 2026-08-21 — forced by finding R7-21.** Three defects in this section's own promise.
+>
+> 1. **The blanket sentence above does not cover the external citations, and reads as though it
+>    does.** Section 9 and section 13 cite `brailcom/speechd` at `src/server/parse.c:98-110`,
+>    `:424-680`, `src/audio/libao.c:75`, `src/clients/say/options.c` and `module_utils.c` with **no
+>    commit and no version**. R001 requires a recorded SHA. There is no vendored copy in this repo, so
+>    **as written those five pointers are unverifiable** — and the load-bearing claim *"`spoke-elsewhere`
+>    is the permanent Linux floor"* rests entirely on them. **Nobody in this session could reach the
+>    network to pin them.** They stay `[claimed]` **as citations**, not merely as numbers, until
+>    someone records the SHA they were read at. That is the honest state; treating them as verified
+>    because they look like `path:line` is the E-01 failure in a new coat.
+> 2. **`010:104`'s `004:102` was wrong at this document's own pinned SHA** — the sentence *"Branch on
+>    `chunk.format`, do not assume WAV"* was at `004:91` at `32b929a` and is at `004:126-127` at HEAD.
+>    Corrected in section 2. Invisible to `scripts/check-citations.mjs`, because the file and the
+>    lines both exist and simply say something else — the class only a reader catches.
+> 3. **Two checker flags below are FALSE POSITIVES; do not "fix" them.** Section 2's `003` section 8.7
+>    pointer does start where it says — the tool inherited the preceding path from the same sentence.
+>    And the six `contract.ts` pointers are **exact at `32b929a` and ~6 lines low at HEAD**, because
+>    `22269aa` (the P33 fix) added comments above them. They will keep failing until this document is
+>    re-pinned, which is a re-pin, not a correction.
 
 Also confirmed at `32b929a` and used above: `types/index.ts:3-10, 12-24, 26-31, 39-56, 46, 48, 53,
 58-63, 71` · `os-synth/index.ts:38, 40-48, 82-84, 110-117, 167, 181-188, 191, 226, 240, 243-245,

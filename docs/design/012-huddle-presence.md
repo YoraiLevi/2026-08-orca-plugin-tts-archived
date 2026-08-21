@@ -24,6 +24,34 @@ semantics and the replay-buffer rules; this document **extends** them and says s
 does not redefine the call-sign or the earcon (`005` sections 11.1, 11.2 own both). It does not mint
 control earcons. It writes no implementation code.
 
+> ### Amended 2026-08-21 — round-7 review, `docs/design/014-review-round7.md`
+>
+> Six findings landed on this document. Each is resolved **in place**, in the section that owns the
+> mechanism, and each carries the finding number that forced it. Nothing below is a new design; where
+> a finding invalidated a rule, the rule is rewritten rather than annotated.
+>
+> | Finding | What changed here |
+> |---|---|
+> | **R7-06** needs-decision — `maxQueued` specified three incompatible ways | Section 3.3 rule 3 and section 2.3's overflow row **cite `011`'s `queue.maxQueued` and restate no number**. Per-session fairness is **not defined here either**: it is `011`'s second field `queue.perSessionFairness` (`011` section 3.2a, `since: 3`). This document supplies only the *shape* the field must express. |
+> | **R7-29** needs-decision — this document invents settings `011`'s frozen schema does not carry | **Section 11a is new**: "Settings this milestone adds", one row per invented control, each shaped as an `011` `FieldDescriptor` at `since: 3`, registered through `011` section 4.2a's protocol. `011` owns every default; this document owns none. |
+> | **R7-33** needs-decision — the liveness rule and gate M16 have no Windows-executable form (R013) | **Q74 is promoted to a precondition** (section 4.2a) — T160 cannot start until it is answered — and every gate-M16 row is rewritten in a form the `windows-latest` CI job can execute (section 10). Where Windows cannot produce a start time, the `unverified` path is asserted **directly**, with a negative control. |
+> | **R7-36** worth-noting — `ceil(8/\|F\|)` admits 9 against a global cap of 8 | The arithmetic is wrong and is replaced: `floor(cap/\|F\|)` with the remainder to the current speaker, **and the total asserted** in the fairness test (section 10). The wireframe at section 7 rendered the inconsistency on screen and is corrected with it. |
+> | **R7-37** worth-noting — `main.ts:96` miscited | Corrected to `main.ts:99`, verified by `git show 1161722:packages/plugin/src/main.ts` (section 3.3). |
+> | **R7-39** worth-noting — unlabelled numbers against this document's own R006 promise | The wireframe's `58 ms` engine readout is labelled (section 7). |
+>
+> **R7-30 is `013`'s to resolve** and is resolved there. Its precondition is this document's section
+> 2.4 row *"Session appears while `F` is empty"*, which now carries the forward pointer, because a
+> reader of `012` alone would not know that `F = ∅` disarms a close signal in another milestone.
+>
+> **On the citations.** `scripts/check-citations.mjs` had never been run over this document. It was
+> run for this pass: **28 flags, and all 28 are working-tree drift, not defects.** Every `path:line`
+> here was re-verified with `git show 1161722:<path>` — the SHA this document pins — and all but one
+> (R7-37) was correct at that commit. `packages/plugin/src/huddle/index.ts` has since moved by ~30
+> lines under concurrent commits (R7-13 is the same observation), so the checker, which reads the
+> working tree and knows nothing about a pinned SHA, reports every one of them. **Do not "fix" them
+> against a tree that moved three times during this pass** — re-pin the document deliberately, in one
+> change, when the tree is quiet, and re-derive by symbol lookup.
+
 ---
 
 ## 1. What is already settled, and is therefore not re-argued here
@@ -92,8 +120,8 @@ implementation of the explicit `followNewest()` command (`:181-186`).
 
 *Why:* automatic membership is the whole of P22 and the whole of P31. Both were the machine choosing.
 
-**R2 — `F` is capped, and the cap is a spoken refusal, not a silent truncation.** `FOLLOW_MAX`,
-default **3**. A fourth `follow` is refused with the named code `follow_capacity`
+**R2 — `F` is capped, and the cap is a spoken refusal, not a silent truncation.** The cap is the
+setting **`session.followMax`** (section 11a), argued default **3**. A fourth `follow` is refused with the named code `follow_capacity`
 (`003` section 3 R5's discipline; the code is new, the mechanism is not) and one spoken sentence:
 *"Already following three. Unfollow one first, or say follow all."* A **`follow all`** verb exists and
 is capped by the same number: with seven present it refuses and **names the count**, rather than
@@ -138,7 +166,7 @@ the "announcement that interrupts is itself a harm" failure of P30.)
 | One stop timer | `#stopTimer` (`:80`), `WATCH_WINDOW_MS` (`:51`) | per file — a done-edge in session A must not stop watching session B | per-file timer |
 | One debounce | `#debounce` (`:81`) | per file — a shared 250 ms debounce coalesces two sessions' changes into one read of the wrong file | per-file debounce |
 | Ambiguity warning | `#warnedAmbiguous` (`:76`), *"two agents are active… speaking the most recent"* (`:339-342`) | **retired.** It exists because the machine was guessing; under R1 it never guesses | delete, and delete its test |
-| Queue overflow | `maxQueued`, drop oldest, announce (`speech-service.ts:155-185`) | **now the sharpest edge**: three followed fills a queue of 8 three times faster | section 3's per-session fairness rule |
+| Queue overflow | `maxQueued`, drop oldest, announce (`speech-service.ts:155-185`); the value is `011`'s `queue.maxQueued`, not this document's | **now the sharpest edge**: three followed sessions fill one queue three times faster | section 3.3 rule 3's per-session division, registered as `011`'s `queue.perSessionFairness` |
 
 **The one structural change is that four singletons become four per-file entries.** That is the whole
 of T160's mechanism. Everything else P22 bought us is already keyed by file and was always ready for
@@ -149,7 +177,7 @@ this.
 | Situation | Default | Reason |
 |---|---|---|
 | Session appears in the registry | `PRESENT`, not followed | R1 |
-| Session appears while `F` is empty and huddle is on | **still not followed** — huddle says nothing | the alternative is P22's auto-pick with a nicer name |
+| Session appears while `F` is empty and huddle is on | **still not followed** — huddle says nothing | the alternative is P22's auto-pick with a nicer name. **`F = ∅` is therefore a real, common state** — it is what every reap, restart and first run produces (R5). `013` section 3.3a depends on that and specifies what its listening window does when nothing is followed (**R7-30**); anything else that keys off *"a followed transcript"* must state its `F = ∅` behaviour too |
 | Listener presses `f` on a present session | followed; primed per file so the backlog is **not** read (`:211-224`) | P22 fault 2 |
 | Session is followed and has a persisted high-water mark from an earlier worker | resume at the mark (`:219-220`) | 006 TT10: the reply that arrived during the reap window used to vanish |
 | Followed session dies | leaves `F` and `PRESENT`; announced once *when it was the speaker*, silently otherwise | section 4 |
@@ -209,7 +237,8 @@ is not, and it should not be expected to.
 **The named risk, and its handling.** Q46 (`005` section 17) is open: whether `~/.claude/sessions/`
 registers non-Claude agent CLIs at all. If it does not, a registry-only roster makes Codex/Grok/omp
 sessions unfollowable. So presence shows a second, clearly separated region — **UNREGISTERED**: any
-transcript modified in the last `UNREGISTERED_WINDOW` (default 10 min) in a followed worktree whose
+transcript modified in the last **`session.unregisteredWindowMs`** (section 11a; argued default
+10 min) in a followed worktree whose
 `sessionId` is in no registry entry. Rules: it is **listed, never auto-followed**, follow requires an
 explicit press, and the row says *"not in the session registry — may be a subagent"*. That single
 region answers Q46 without reopening P31, because the failure mode of the unknown case is a row the
@@ -222,15 +251,41 @@ Five mechanisms, in the order they engage:
 1. **The cap (R2).** Seven present, at most three followed, and `follow all` refuses by name.
 2. **Serialization plus mandatory speaker-change announcement (R3).** Overlap is impossible;
    unattributed hand-off is impossible.
-3. **Per-session queue fairness.** `maxQueued` has one value, **8** (`003` section 8.7's amendment;
-   `speech-service.ts:74` still declares `DEFAULT_MAX_QUEUED = 20` and `main.ts:96` passes `8` — the
-   constant must be changed to 8 so there is one number). With `|F| > 1` the cap becomes **per
-   session**, `ceil(8 / |F|)`, so one chatty agent cannot evict a quiet one's reply. Drops are still
-   announced and coalesced (`speech-service.ts:184`), and the announcement now **names the session**
-   whose replies were dropped — with several agents, *"skipped 3 older replies"* does not tell the
-   listener what they lost.
+3. **Per-session queue fairness.** *(rewritten for **R7-06** and **R7-36**.)*
+
+   **This document states no number.** The queue cap is `011`'s field **`queue.maxQueued`**
+   (`docs/design/011-settings.md` sections 3.2 and 3.2a), which owns its value, its range and its
+   `provisional` flag; the earlier text here restated C3's `8` and thereby minted a fourth
+   specification of one control (R7-06). Two live defects it named are `011`'s to close under T122
+   and are recorded here only so they are not re-discovered: `speech-service.ts:74` declares
+   `DEFAULT_MAX_QUEUED = 20`, and `main.ts:99` passes `8` at the SHA this document pins — **`:99`,
+   not `:96` as this line previously read (R7-37**, verified with `git show
+   1161722:packages/plugin/src/main.ts`).
+
+   **What M16 adds is a *shape*, not a value.** With `|F| > 1` the single global cap `C` is divided:
+
+   ```
+   base    = floor(C / |F|)          each followed session's own reservation
+   bonus   = C - base * |F|          the remainder, 0 .. |F|-1
+   cap(s)  = base + (s is the current speaker ? bonus : 0)
+   invariant:  sum over s in F of cap(s) == C      exactly, always
+   ```
+
+   The previous rule was `ceil(C / |F|)`, which at `C = 8`, `|F| = 3` gives 3 per session and
+   **9 admissible against a global cap of 8** — the arithmetic contradicted the cap it derived from,
+   and section 7's own wireframe rendered the contradiction on screen (R7-36). `floor` plus a
+   remainder never can: the sum is `C` by construction, and the remainder goes to the session the
+   listener is *currently listening to*, which is the one whose next reply matters most.
+
+   This division is registered as `011`'s second queue field, **`queue.perSessionFairness`**
+   (`011` section 3.2a, `since: 3`) — a `bool`, because *whether to divide at all* is the choice; the
+   division itself is arithmetic, not taste. `011` owns its default. See section 11a.
+
+   Drops are still announced and coalesced (`speech-service.ts:184`), and the announcement now
+   **names the session** whose replies were dropped — with several agents, *"skipped 3 older
+   replies"* does not tell the listener what they lost.
 4. **Solo (section 6).** One press collapses seven to one, and the inverse press restores the set.
-5. **The loud-room warning, once.** When `|PRESENT|` first exceeds `FOLLOW_MAX` in a worktree, one
+5. **The loud-room warning, once.** When `|PRESENT|` first exceeds `session.followMax` in a worktree, one
    spoken sentence at `next` urgency: *"Seven sessions are active here; huddle is following two."*
    Once per worktree per worker lifetime, never repeated — an announcement that repeats is the P30
    harm, and a warning that never changes is a broken indicator.
@@ -295,6 +350,47 @@ The second liveness signal costs nothing and should be used as corroboration, no
 `messagingSocketPath` = `/tmp/cc-socks/<pid>.sock` existed for all five live sessions in Q27's probe.
 Socket present + pid alive + `procStart` match = live; any disagreement = `unverified`.
 
+### 4.2a Windows is a precondition, not a footnote — R7-33
+
+**Q74 is promoted from an open question to a precondition of T160. It is answered before M16 starts,
+not after M16 ships.** The reason is R013 — *a feature that degrades on one OS is not done* — and the
+degradation this document itself names: *"a dead session holds a voice slot … a stale file degrades
+the audio of every other agent"* (section 4.1). If `(Get-Process -Id <pid>).StartTime` does not
+resolve, or does not agree with `procStart`, then **every Windows row is `unverified`, the reaper of
+section 4.3 can never remove a crashed session, and that degradation is permanent on Windows.** The
+earlier text treated `unverified` as a graceful fallback; it is graceful only if something is
+*asserted* about it, and nothing was.
+
+**The precondition, stated so it can be answered in one sitting** — this is Q74, unchanged in
+substance and promoted in status:
+
+```powershell
+# on windows-latest, or any Windows host with a Claude session running
+$e = Get-Content "$HOME\.claude\sessions\<pid>.json" | ConvertFrom-Json
+$p = Get-Process -Id $e.pid
+$p.StartTime.ToUniversalTime().ToString("o")            # what Windows reports
+([datetime]::Parse($e.procStart + " UTC")).ToUniversalTime().ToString("o")   # what the registry says
+```
+
+Three answers are possible and **each has a specified consequence, decided now rather than when the
+probe returns**:
+
+| Q74 outcome | Windows liveness is | What section 4.3's reaper does | What gate M16 asserts |
+|---|---|---|---|
+| **A — `StartTime` resolves and agrees** within the 1 s tolerance | the same rule as macOS | reaps crashed sessions normally | the same rows as macOS, with the shell translated |
+| **B — `StartTime` resolves but in a different timezone or format** | the same rule, with a Windows parsing branch | reaps normally | additionally the timezone row, run under two `TZ`-equivalents (`Set-TimeZone`) |
+| **C — `StartTime` does not resolve at all** (access denied for another user's process is the documented case) | **`unverified` for every row** | **cannot reap on `procStart`; falls back to `kill(pid,0)` alone plus `messagingSocketPath` existence, and pid reuse is accepted as unhandled on Windows** | **the `unverified` path itself**, positively — see section 10 |
+
+Outcome C is the one that must not be left implicit. Under C, this document's liveness rule **is
+weaker on Windows than on macOS and the plugin must say so** — the roster renders those rows as
+`unverified`, `read-aloud.status` names the platform limitation when asked, and the README carries it
+in the same breath as the feature (the *"say why"* rule of P7/P16). A silent `unverified` is P30's
+shape: a correct mechanism reporting into a channel nobody reads.
+
+**What is not acceptable under any outcome** is the current position — a Windows path that is
+`[claimed]`, a gate written in `kill -9` / `ps` / `TZ=`, and no assertion that distinguishes *"Windows
+liveness works"* from *"Windows liveness silently never runs"*.
+
 ### 4.3 The reaper
 
 Every registry poll (section 8), an entry that fails the liveness test is removed from `PRESENT` and
@@ -329,7 +425,7 @@ presence look like on day two, and what prunes?*
 | Transcript files — **31 in this worktree already** [measured-here] | never enumerated by presence | section 3.2 |
 | `#highWater` entries | `MAX_TRACKED_FILES = 50` (`packages/plugin/src/huddle/index.ts:49`), oldest-touched evicted (`:282-290`) | already shipped |
 | `#spoken` ids | `MAX_REMEMBERED_IDS = 300` (`:44`), and **explicitly no longer load-bearing** (`:45-47`) — the gate is `replies.slice(mark)` (`:268`) | already shipped |
-| `F` membership | `FOLLOW_MAX`, and re-resolved against the live registry at restore (R5) | this document |
+| `F` membership | `session.followMax` (section 11a), and re-resolved against the live registry at restore (R5) | this document |
 | Identity assignments (`005` section 9) | pruned when the `sessionId` leaves the registry **and** its transcript is gone | `005` owns it; this document supplies the liveness input |
 | Replay buffer | last 20 (`003` section 4) | already designed |
 
@@ -396,7 +492,7 @@ moving. This document changes **one region** — SESSIONS — and one status lin
 │  │                          [ S ]   S T O P                               │  │   PRE-RESERVED,
 │  └────────────────────────────────────────────────────────────────────────┘  │   NEVER MOVES
 │    [ Space ] pause   [ N ] skip   [ M ] mute   [ O ] solo                    │
-│  QUEUE  2 waiting                                    per-session cap 3 of 8  │   rows 12-15, height 4
+│  QUEUE  2 waiting                                  per-session cap 2+2 of 8  │   rows 12-15, height 4
 │    1.  Cedar    "I have updated the roadmap and reconciled..."          0:12 │
 │    2.  Willow   "The panel bridge is a transport, not a..."             0:31 │
 │        (empty)                                                               │
@@ -412,6 +508,17 @@ moving. This document changes **one region** — SESSIONS — and one status lin
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
+**The two numbers rendered in that box carry R006 labels, which they did not (R7-39):**
+
+| Rendered as | Number | Label |
+|---|---|---|
+| `engine: Piper (amy-low) · 58 ms` | 58 ms per sentence | **[measured-here]** — the midpoint of Piper amy-low's **52–65 ms/sentence** on this machine (PITFALLS **P11**, `docs/.research/tts-engine-landscape.md`; macOS 26.5, Node 26.7, `sherpa-onnx-node` 1.13.6, 2 threads, one sentence → ~2 s of audio). **It is a synthesis figure and not a first-audio figure** — the device cost (P32) is not in it, and the header must not be read as a latency budget readout |
+| `per-session cap 2+2 of 8` | the cap | **not a measurement** — it is `011`'s `queue.maxQueued` divided by section 3.3 rule 3. Whatever `011` sets, the box shows that value; `8` here is an illustration, not a second specification (R7-06) |
+
+At runtime the header shows the **live** per-sentence figure for the resolved engine, so a listener
+on the `say` fallback sees its real cost rather than Piper's. A hard-coded 58 in the TUI would be the
+P33 shape — a number in a document that is not the number in the running system.
+
 **What changed from `003` section 4's wireframe, and why:**
 
 | Change | Reason |
@@ -422,7 +529,7 @@ moving. This document changes **one region** — SESSIONS — and one status lin
 | `MUTED` shown with the skipped count on the row | `003` section 7 rule 3 requires the count displayed continuously; on one row per session it belongs on the row |
 | `SOLO: off` and `loud room: 7 here` on row 22 | a state that changes what speaks must be visible; a solo the listener forgot is indistinguishable from a broken plugin |
 | `[ O ] solo` in the control row | section 6 |
-| QUEUE header shows `per-session cap 3 of 8` | section 3.3 rule 3 — the fairness rule is invisible otherwise, and an invisible cap reads as a bug |
+| QUEUE header shows `per-session cap 2+2 of 8` | section 3.3 rule 3 — the fairness rule is invisible otherwise, and an invisible cap reads as a bug. **The rendering is `base+bonus of C`**, so the sum across the roster is visibly `C` and never more. It previously read `cap 3 of 8`, which showed `3 × 3 = 9` against a cap of 8 on screen — **R7-36**, the arithmetic defect caught by its own wireframe |
 | Queue items labelled by **call-sign** | `005` section 11.2 owns the identity; `sessionLabel()`'s hex slice (`packages/plugin/src/huddle/index.ts:64-69`) is what M15 exists to replace |
 
 **The plugin panel is unchanged.** It is read-blind (`003` section 4), so it gains one button —
@@ -451,7 +558,8 @@ Four rules follow, and they are the design's answer to B-03 rather than a note:
 2. **The registry poll stops when huddle is off**, and `restore()` (`:108-119`) does not start it.
 3. **Nothing wakes the audio device.** `010` section 11.5 already adopted B-03's back-off for the
    paused heartbeat; presence adds no periodic sound at all.
-4. **The poll interval is a setting with a floor of 1 000 ms.** At 0.115 ms of work, the interval is
+4. **The poll interval is the setting `session.registryPollMs`, with a floor of 1 000 ms** (section
+   11a). At 0.115 ms of work, the interval is
    chosen for *freshness*, not for cost — 2 s means a crashed session's row is wrong for at most 2 s.
 
 **The honest gap.** The 0.17 events/sec figure was taken while the watched agents were between turns;
@@ -510,17 +618,30 @@ runnable as written. Restated:
 > **The control-pane TUI shows who is in the room and who is talking, more than one session can be
 > followed at once without either being spoken unattributed, and one press silences all but one.**
 
-| Test | What would prove us wrong |
-|---|---|
-| **Two followed, interleaved replies.** Feed two transcripts, alternating. | any utterance whose speaker differs from the previous one and was not preceded by an identity announcement (R3) |
-| **The P31 fixture.** Seven transcripts in one directory, one registered. Follow the registered one. | the sink speaking **any** text from the six unregistered transcripts. *Negative control:* explicitly follow one unregistered row and assert it now speaks — otherwise the test passes on a plugin that is simply broken |
-| **Pid reuse.** `kill -9` a session, leave its registry file, spawn a process that takes the pid. | the row surviving on the roster. *Negative control:* the same fixture with the `procStart` comparison disabled must leave it present |
-| **Timezone.** Run the liveness check under `TZ=UTC` and `TZ=Asia/Jerusalem`. | any difference in the verdict — this is the exact defect section 4.2 measured |
-| **Solo restores.** Mute A, solo B, unsolo. | A coming back unmuted |
-| **Capacity refusal.** Follow four with `FOLLOW_MAX = 3`. | a silent fourth join, or a refusal that is not spoken and not named `follow_capacity` |
-| **Death mid-utterance (T164).** Kill the speaking session mid-reply, with `log` and `notify` both disabled. | no **spoken** sentence naming the end (P30 — the discipline that announced into a channel the listener does not read) |
-| **Per-session fairness.** One agent emits 20 replies while another emits 1, two followed. | the single reply being evicted, or the drop announcement not naming which session lost replies |
-| **Idle cost.** `powermetrics`, huddle on and queue empty, versus plugin disabled. | any measurable wakeup delta (Q73) |
+**Rewritten for R7-33.** The previous table was written in `kill -9`, `ps` and `TZ=`, none of which
+runs on `windows-latest`, on a project whose first hard requirement is three-OS parity. Every row now
+declares **where it runs** and, where the mechanism differs, **the Windows form of the same
+assertion**. Rows that genuinely cannot be OS-neutral are marked, and the reason is a fact about the
+platform rather than a gap in the test.
+
+A rule that makes the difference reviewable rather than accidental: **the fixture is a directory of
+files, never a process**, wherever that is possible. A registry entry is JSON on disk and a transcript
+is a `.jsonl`; both can be written by the test in any language on any OS. Only two rows genuinely
+need a live process, and they are the two marked `real process`.
+
+| Test | Runs on | What would prove us wrong |
+|---|---|---|
+| **Two followed, interleaved replies.** Write two transcript fixtures, alternating. | all three (pure fixture) | any utterance whose speaker differs from the previous one and was not preceded by an identity announcement (R3) |
+| **The P31 fixture.** Seven transcript files in one directory, one of them named by a registry-entry fixture. Follow the registered one. | all three (pure fixture) | the sink speaking **any** text from the six unregistered transcripts. *Negative control:* explicitly follow one unregistered row and assert it now speaks — otherwise the test passes on a plugin that is simply broken |
+| **Pid reuse.** `real process`. Start a child, record its pid and start time into a registry-entry fixture, terminate it, then occupy the pid.<br>**POSIX:** `kill -9`, `kill(pid,0)`.<br>**Windows:** `Stop-Process -Force`, and the pid check is `Get-Process -Id` throwing `ProcessCommandException`. Occupying a specific pid is not scriptable on Windows, so the Windows form instead **rewrites `procStart` in the fixture to a different instant while the process is still alive** — which is the same assertion (a `procStart` that disagrees means dead) reached without pid arithmetic. | all three, two forms | the row surviving on the roster. *Negative control (both forms):* the same fixture with the `procStart` comparison disabled must leave it present |
+| **Timezone.** Assert the liveness verdict is identical under two host timezones.<br>**POSIX:** `TZ=UTC` and `TZ=Asia/Jerusalem` in the env.<br>**Windows:** `TZ` is not honoured by .NET or by `Get-Process`, so the row is run twice against a **`procStart` string fixture** with the parser's timezone injected, plus one CI leg with the runner's timezone changed (`Set-TimeZone -Id 'Israel Standard Time'`), which requires the elevated `windows-latest` runner. | all three, two forms | any difference in the verdict — this is the exact defect section 4.2 measured, and it is *more* likely on Windows, not less, because outcome B of section 4.2a is a live possibility |
+| **Windows liveness, positively asserted (new — R7-33).** `real process`. On `windows-latest` only: start a child, read `(Get-Process -Id $pid).StartTime`, and assert the liveness rule returns **`live`** for it. | Windows only | the rule returning `unverified` for a process whose start time Windows *did* report — which is the silent-degradation failure section 4.2a names. **This row is what turns Q74 from a claim into a check.** |
+| **The `unverified` path, positively asserted (new — R7-33).** Force the start-time derivation to fail (inject a deriver that throws) and assert: the roster row reads `unverified`, the reaper does **not** remove it, it is followable, and nothing auto-follows it. | all three (fixture) | an `unverified` row being reaped, auto-followed, or silently rendered as `present`. *Negative control:* the same fixture with a working deriver must produce `present` and must be reapable — otherwise the test passes on a plugin that treats every row as unverified |
+| **Solo restores.** Mute A, solo B, unsolo. | all three (pure fixture) | A coming back unmuted |
+| **Capacity refusal.** Follow four with `session.followMax = 3`. | all three (pure fixture) | a silent fourth join, or a refusal that is not spoken and not named `follow_capacity` |
+| **Death mid-utterance (T164).** Remove the speaking session's registry entry mid-reply — a file delete, not a signal — with `log` and `notify` both disabled. | all three (pure fixture) | no **spoken** sentence naming the end (P30 — the discipline that announced into a channel the listener does not read) |
+| **Per-session fairness, and the total.** One agent emits 20 replies while another emits 1, two followed. | all three (pure fixture) | the single reply being evicted; the drop announcement not naming which session lost replies; **or the sum of the admitted items exceeding `queue.maxQueued`** — asserted as a total, not per session, because the total is exactly what `ceil` got wrong (**R7-36**). Run at `\|F\| = 1, 2, 3, 5` so a division that happens to work at one roster size cannot pass |
+| **Idle cost.** huddle on and queue empty, versus plugin disabled.<br>**macOS:** `powermetrics`. **Linux:** `perf stat -e sched:sched_wakeup` or `/proc/<pid>/schedstat`. **Windows:** `Get-Counter '\Thread(...)\Context Switches/sec'`. | all three, three tools | any measurable wakeup delta (Q73). **This row is a probe, not a CI gate** — the three tools do not produce comparable units, and pretending they do would be a permanently-green indicator |
 
 ---
 
@@ -530,10 +651,45 @@ runnable as written. Restated:
 |---|---|
 | Subagent sessions never register in `~/.claude/sessions/` | one registry entry whose `sessionId` matches a Task-tool subagent transcript. The measurement in 3.1 is **one machine, one CLI version** (Claude Code 2.1.238, macOS 26.5) |
 | The P22 protections are already per-file | any of `#primed` (`:82`), `#highWater` (`:97`) or the utterance label (`:275`) turning out to need cross-file state |
-| Three concurrent speakers are trackable by a listener | the M15 blind listening test scoring below 10/10 at three followed but passing at two followed — in which case `FOLLOW_MAX` drops to 2 and nothing else changes |
+| Three concurrent speakers are trackable by a listener | the M15 blind listening test scoring below 10/10 at three followed but passing at two followed — in which case `session.followMax` drops to 2 and nothing else changes |
 | Serialized speech is enough | a listener reporting that waiting for agent A to finish makes agent B's reply useless by the time it is spoken, which would argue for *interrupting* by priority — a different design |
 | `procStart` + `kill(pid,0)` is pid-reuse-proof | a pid recycled inside one second, which the 1-second resolution cannot see [measured-here] |
 | Presence costs nothing while idle | Q73's `powermetrics` run |
+
+---
+
+## 11a. Settings this milestone adds — R7-29
+
+`011` freezes `SCHEMA_VERSION = 2` over an enumerated control set and makes T124 assert
+schema-versus-type coverage against a named `EXCLUDED` list (`docs/design/011-settings.md` sections
+3.1, 3.3). **This document invented four controls and cited `011` nowhere**, so M16 as written would
+have landed four ids that the schema, the starter-file generator and T124's gap report know nothing
+about — a control that cannot be walked from the file to its consumer is not a setting, it is a
+comment (**P26**).
+
+The mechanism for adding ids after a freeze is `011`'s and is not re-argued here: a later milestone
+registers new ids at **`since: 3`**, an M12-era plugin ignores an id it does not know and **says so**,
+and no migration is required (`011` section 4.2, and the registration protocol in `011` section
+4.2a). **`011` owns every default, range and `provisional` flag below.** The `default` column is this
+document's *argued starting position*, offered as input to `011`, not as a decision — where a row is
+marked taste, the value is the listener's (**P23**) and Voice Lab settles it.
+
+| `id` | `owner` | `kind` / `values` | `default` | `provisional` | `effect` | `wire` | `since` | `help` |
+|---|---|---|---|---|---|---|---|---|
+| `session.followMax` | `session` | `int`, range 1–7, step 1, plus the sentinel `0` meaning *all present* | `3` | **`true`** — taste, argued in section 2 R2, settled in Voice Lab against a recorded multi-session fixture (**Q70**). `1` reproduces today's single lock exactly | `immediate` | `HuddleController.followMax` | `3` | *How many agents may speak to you at once. A further follow is refused out loud.* |
+| `session.registryPollMs` | `session` | `int`, range 1 000–30 000, step 500 | `2000` | `false` — rationale: at 0.115 ms per scan **[measured-here]** (section 8) the interval is chosen for freshness, not cost; 2 s bounds how long a crashed session's row can be wrong. **The floor of 1 000 ms is correctness, not taste** — below it the poll is a busy loop against `~/.claude/sessions/` | `immediate` | `HuddleController.registryPollMs` | `3` | *How often the roster is refreshed. Lower is fresher, never cheaper.* |
+| `session.unregisteredWindowMs` | `session` | `int`, range 60 000–3 600 000, step 60 000 | `600000` (10 min) | **`true`** — taste; section 3.2 argues 10 min from nothing measured | `immediate` | `HuddleController.unregisteredWindowMs` | `3` | *How recently a transcript must have changed to appear in the UNREGISTERED region.* |
+| `session.unregisteredRows` | `session` | `enum`: `'hidden' \| 'count' \| 'expanded'` | `'count'` | **`true`** — **this is Q76 and it is explicitly not decided here.** The option space is designed (three values); the default belongs to the listener. `'hidden'` makes Q46's non-Claude agents unreachable; `'expanded'` renders seven subagent rows during a fan-out. `'count'` is the reversible middle and is offered as the starting position, not as an answer | `immediate` | `HuddleController.unregisteredRows` | `3` | *Whether transcripts with no session-registry entry are listed, counted, or hidden.* |
+| `queue.perSessionFairness` | `queue` | `bool` | — | — | `immediate` | — | `3` | **Not this document's field.** Registered by `011` section 3.2a alongside `queue.maxQueued`; section 3.3 rule 3 supplies only the division it expresses. Listed here so the count is complete |
+
+**Four ids, plus one that belongs to `011`.** T124's gap report counts all five (`011` section 3.3
+(d)); none is wired today, so all four of ours carry `wire` as a *target*, and T124 excludes an
+unwired id from the reachability assertion while still counting it in the gap.
+
+**What is deliberately not a setting.** The mandatory speaker-change announcement (R3), the
+`follow_capacity` refusal being spoken, the once-per-worker loud-room warning, and the `o` key for
+solo. The first three are correctness — a listener who can turn off attribution has re-created P22 by
+configuration — and the fourth is a keybinding, which `003` section 4a owns.
 
 ---
 
@@ -545,10 +701,10 @@ cited document-qualified until someone reconciles them.
 
 | # | Kind | Question | Cheapest reversible option |
 |---|---|---|---|
-| **Q70** | T | **`FOLLOW_MAX`'s default.** 3 is argued in R2; the listener settles it in Voice Lab against a recorded multi-session fixture. `1` reproduces today's lock exactly. | ship 3, expose 1..7 plus `all` |
+| **Q70** | T | **`session.followMax`'s default.** 3 is argued in R2; the listener settles it in Voice Lab against a recorded multi-session fixture. `1` reproduces today's lock exactly. **Registered as a schema field by section 11a (R7-29)**, so the question is now *which value*, not *where it lives*. | ship 3, expose 1..7 plus `all` |
 | **Q71** | D | **Interrupt or wait.** R3 serializes: agent B waits for agent A. Should a *directly addressed* session pre-empt instead? buzz's *"the pickup is the feedback that you heard them"* (`q-round1-buzz-transcript.md`, "What buzz does that we do not" item 1) argues yes; P22 argues no. | ship wait; pre-emption is additive later |
 | **Q72** | D | Does `solo` / `unsolo` enter `003` section 4a.3's spoken control vocabulary? It would forbid those words as call-signs (`005` section 11.2). `003` owns that list; this document only takes the `o` key. | add both words — the cost is two of 64 call-sign slots |
 | **Q73** | E | **Idle cost, properly.** `powermetrics` with huddle on, three followed, queue empty, versus the plugin disabled. Section 8's figures are CPU-time and event counts, not wakeups. Shares its shape with `010` Q66 and should be run once for both. | if it is not ~zero, the poll interval rises until it is |
-| **Q74** | E | **Windows liveness.** Does `(Get-Process -Id <pid>).StartTime` agree with the registry's `procStart`, and in which timezone? Section 4.2 measured macOS and reasoned about the rest. Lands inside `010`'s open C-03. | `unverified` state (4.2) is the fallback and is already specified |
+| **Q74** | E | **Windows liveness — PROMOTED TO A PRECONDITION OF T160 (R7-33).** Does `(Get-Process -Id <pid>).StartTime` agree with the registry's `procStart`, and in which timezone? Section 4.2 measured macOS and reasoned about the rest; **section 4.2a states the probe, the three possible outcomes and the consequence of each, and M16 does not start until one of them is chosen.** Lands inside `010`'s open C-03. | outcome C — `unverified` everywhere on Windows, `kill(pid,0)` plus socket existence only, pid reuse unhandled and **said out loud** — is fully specified in 4.2a and asserted by gate M16's two new rows |
 | **Q75** | E | **Is `procStart` UTC by construction or by this machine's accident?** The offset was exactly +3 h here, matching `IDT`. A machine running in UTC would make a string comparison pass and hide the bug. Probe: read a registry entry on a UTC host. | the epoch comparison with a one-second tolerance is correct either way |
-| **Q76** | D | **Unregistered rows (3.2).** Shown always, shown only when a followed worktree has them, or hidden behind a keypress? Showing seven subagent rows during a fan-out is noise; hiding them makes Q46's non-Claude agents unreachable. | show, collapsed to a count, expandable with `↑↓` |
+| **Q76** | D | **Unregistered rows (3.2).** Shown always, shown only when a followed worktree has them, or hidden behind a keypress? Showing seven subagent rows during a fan-out is noise; hiding them makes Q46's non-Claude agents unreachable. **The option space is now designed and registered as `session.unregisteredRows` with three values (section 11a); the default is the listener's and this document does not pick it (P23).** | ship `'count'` as the reversible middle, expandable with `↑↓` |

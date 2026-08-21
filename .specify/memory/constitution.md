@@ -1,6 +1,6 @@
 # ORCA TTS Plugin Constitution
 
-**Version:** 2.0.0 · **Ratified:** 2026-08-20 · **Last Amended:** 2026-08-20
+**Version:** 2.0.1 · **Ratified:** 2026-08-20 · **Last Amended:** 2026-08-21
 
 > The single authority for this project. Part I is the principles; Part II is the standing
 > rules (86, individually numbered and citable); Part III is the autonomous operating
@@ -111,12 +111,36 @@ Barge-in means **cancel in-flight synthesis AND flush buffered audio**. (User re
 
 Standing constraints, not aspirations. A change that regresses one is a bug.
 
-| Path | Budget | Source |
-|---|---|---|
-| Hotkey press → first audio (default local engine, warm) | **< 500 ms** | User requirement R4.2 |
-| Agent sentence complete → first audio (huddle mode) | **< 500 ms** | R4.1/R4.2 |
-| Barge-in signal → audio stops | **< 50 ms** | buzz measures ~15 ms with a 10 ms monitor thread |
-| Inter-sentence gap during continuous speech | **< 50 ms** | `afplay`-per-file measures ~970 ms; that is the failure to avoid |
+| Path | Budget | Measured today | Source |
+|---|---|---|---|
+| Hotkey press → first audio (default local engine, warm) | **< 500 ms** | on the OS-synth rung, **1,112–2,017 ms** `[measured-here]` (p50 lower/upper bracket, n=10 ×2) | User requirement R4.2; `docs/.research/latency-measurements.md` 1.2 |
+| Agent sentence complete → first audio (huddle mode) | **< 500 ms** | as above | R4.1/R4.2 |
+| Barge-in signal → audio stops | **< 50 ms** | `[claimed]` — kill-to-exit is ~3 ms `[measured-here]`, but **audio drain is not observable in userland** and has never been measured | buzz measures **~15 ms** `[documented]` with a 10 ms monitor thread; `packages/providers/src/contract.ts:12` |
+| Inter-sentence gap during continuous speech | **< 50 ms** | **p50 950 / 937 / 897 ms** `[measured-here]`, n=18 ×3 — **19×** | `docs/.research/latency-measurements.md` 1.1; PITFALLS **P32** |
+
+> **Amended 2026-08-21 (2.0.1) — forced by round-7 finding R7-02
+> (`docs/design/014-review-round7.md` section 2).** Three defects in this table, in the document that
+> mandates R006:
+>
+> 1. **`~970 ms` and `~15 ms` were the only latency numbers in the repo carrying no R006 label.**
+>    Both now carry one, and a **Measured today** column has been added so the gap between the
+>    constraint and reality is visible here rather than only in `STATE.md`.
+> 2. **The mechanism was wrong.** The source column read *"`afplay`**-per-file**"*. It is
+>    **`afplay`-per-**device-open**: player fork/exec is **2.3 ms** of the 950 (n=12) and the
+>    temp-file round trip **0.33 ms** (n=20); **~893 ms `[derived]`** is CoreAudio device open,
+>    pre-roll, post-roll and teardown (**P32**). A fix aimed at the spawn recovers 0.25 %.
+> 3. **Row four had no instrument.** *"A change that regresses one is a bug"* was unenforceable:
+>    nothing in `docs/PLAN.md`'s Definition of Done, `docs/TASKS.md`, CI or the suite scored it, so
+>    Part III's *"the project is done when every Definition of Done item in `docs/PLAN.md` is
+>    observably true"* could be satisfied with this row violated 19×. **`docs/PLAN.md` now carries a
+>    Definition-of-Done item for it**, instrumented by Gate M9a (`docs/TASKS.md` Phase M9a;
+>    `docs/design/015-m9-rescope.md` section 6). This is the correction; the budget itself is
+>    unchanged.
+>
+> **Row three is left at 50 ms deliberately.** `docs/design/010-…md` section 4 redefines `cancel()`
+> to resolve when *sound has stopped* rather than when the process exits, and drain is not measurable
+> without a loopback capture or a CoreAudio probe. **Moving this number is a constitution amendment,
+> not a design-doc sentence** — see R7-18 and R7-28, and `docs/design/016-reconciliation-round7.md`.
 
 Model load is **not** on these paths: a resident warm service serves a thin client, because a
 hotkey must not pay a multi-second model load per press. (The user's two-process rule.)
