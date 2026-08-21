@@ -27,7 +27,7 @@
  * — which is itself why this seam had no test.
  */
 import { describe, expect, it } from 'vitest'
-import { SpeechService } from '../speech-service.ts'
+import { SpeechService } from '../speech-service.js'
 import type {
   AudioChunk, PlaybackSink, ProviderCapabilities, SynthesizeOptions, TtsProvider
 } from '@orca-tts/core'
