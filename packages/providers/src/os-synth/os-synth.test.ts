@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { OsSynthProvider, linuxCommand, neutralizeInBandCommands } from './index.js'
+import { OsSynthProvider, darwinCommand, linuxCommand, neutralizeInBandCommands, win32Command } from './index.js'
 import { runProviderContract, CANCEL_BUDGET_MS } from '../contract.js'  // test-only entry, never via the barrel
 
 // T045: the contract runs against the real OS synthesizer on whatever platform CI is on.
@@ -340,5 +340,196 @@ describe('006 site 39 / C6 — a daemon cancel that failed is reported, and is a
     const p = new OsSynthProvider({ platform: 'linux', linuxBackend: 'espeak-ng' })
     expect(p.cancel(), 'only the spd-say floor needs a second process').toBeUndefined()
     expect(p.lastCancelFailure).toBeNull()
+  })
+})
+
+/**
+ * R8-04 / R8-06 — the leading-`-` argv class, checked on every platform branch over ONE corpus.
+ *
+ * The defect: `#command`'s darwin branch appended the chunk text to argv with no end-of-options
+ * separator, so `say` parsed a leading `-` as a flag, exited 1 and wrote no file. Live trigger,
+ * measured through the running Voice Lab before this fix:
+ *
+ *   POST /speak "First point here.\n\n---\n\nSecond point here."
+ *     chunk 0  OK   "First point here."
+ *     chunk 1  FAIL "--- Second point here."  -> OsSynthEmptyOutputError
+ *     end: delivered 2, lost 1, "one of two parts could not be spoken and was skipped."
+ *
+ * A markdown horizontal rule is how agents separate sections and how YAML frontmatter is
+ * delimited, so half of an ordinary reply was lost, on the author's own platform.
+ *
+ * WHY A CORPUS AND NOT A `---` CASE. A test for `---` would pass over a fix that special-cased
+ * `---`, and a blocklist of dangerous prefixes is how this bug got here. The corpus is every shape
+ * of leading `-` an agent reply actually produces, plus the strings that would do real damage if
+ * they reached the option parser (`-o` would redirect the output file). None of these are HTML
+ * comments: J21 removed those from the pipeline entirely, so a test built on one would be testing
+ * someone else's fix.
+ */
+describe('R8-04/R8-06 no chunk text can be interpreted as an option, on any platform', () => {
+  // Independently restated, NOT imported from the source (P36). Each row is a thing a real agent
+  // reply contains.
+  const HOSTILE = [
+    '--- Second point here.',            // markdown horizontal rule — the live defect
+    '-- a dash-led aside.',
+    '- first bullet item.',
+    '-5 degrees today.',                 // a negative number opening a sentence
+    '--data-format=BOGUS',               // an option say really has, and really rejects
+    '-o /tmp/orca-tts-should-not-exist.wav hi',  // would redirect the output file
+    '-v Alex hello',
+    '-f /etc/passwd',
+    '--',                                // the separator itself, as content
+    '\u2014 an em-dash-led aside.'
+  ] as const
+
+  it('darwin: every hostile string lands strictly after the `--` separator', () => {
+    for (const text of HOSTILE) {
+      const { cmd, args } = darwinCommand(text, '/tmp/a.wav', {})
+      expect(cmd).toBe('say')
+      const sep = args.indexOf('--')
+      expect(sep, `no end-of-options separator for ${JSON.stringify(text)}`).toBeGreaterThanOrEqual(0)
+      // The text must be present, and it must be AFTER the separator. Both halves matter: a fix
+      // that dropped the text would satisfy "not parsed as an option" and lose the reply.
+      expect(args.slice(sep + 1), `text not after the separator for ${JSON.stringify(text)}`)
+        .toContain(text)
+      // Nothing before the separator may be user text — that is the option-position region.
+      expect(args.slice(0, sep), `user text sits in option position for ${JSON.stringify(text)}`)
+        .not.toContain(text)
+    }
+  })
+
+  it('linux: same property, on every rung of the ladder', () => {
+    for (const backend of ['espeak-ng', 'espeak', 'spd-say'] as const) {
+      for (const text of HOSTILE) {
+        const { args } = linuxCommand(backend, text, '/tmp/a.wav', {})
+        const sep = args.indexOf('--')
+        expect(sep, `${backend} has no separator for ${JSON.stringify(text)}`).toBeGreaterThanOrEqual(0)
+        expect(args.slice(sep + 1)).toContain(text)
+        expect(args.slice(0, sep)).not.toContain(text)
+      }
+    }
+  })
+
+  it('win32: the text never occupies an argv position at all', () => {
+    for (const text of HOSTILE) {
+      const { cmd, args } = win32Command(text, 'C:\\a.wav', {})
+      expect(cmd).toBe('powershell')
+      // Windows reaches the property a different way — the text is inside a single-quoted
+      // PowerShell literal in ONE `-Command` argument — so the assertion is different too.
+      expect(args, `${JSON.stringify(text)} became its own argv element`).not.toContain(text)
+      expect(args.filter((a) => a.startsWith('-'))).toEqual(
+        ['-NoProfile', '-NonInteractive', '-STA', '-Command'])
+      // Present, not dropped: the same both-halves check as darwin.
+      expect(args[4]).toContain(text.replace(/'/g, "''"))
+    }
+  })
+
+  it('a voice name with a leading dash cannot displace the text either', () => {
+    const { args } = darwinCommand('hello', '/tmp/a.wav', { voice: '--data-format=BOGUS' })
+    const sep = args.indexOf('--')
+    expect(args.slice(sep + 1)).toEqual(['hello'])
+    // `-v` consumes the next element as its operand, so the voice stays a voice.
+    expect(args[args.indexOf('-v') + 1]).toBe('--data-format=BOGUS')
+  })
+
+  it.skipIf(process.platform !== 'darwin')(
+    'VERIFY BY EFFECT: a reply opening with a horizontal rule is synthesized, not lost (macOS)',
+    async () => {
+      // The live defect, end to end through the real `say`. Before the fix this threw
+      // OsSynthEmptyOutputError and yielded zero bytes. `say -o <file>` opens no audio device (P31).
+      const p = new OsSynthProvider()
+      let bytes = 0
+      for await (const c of p.generate('--- Second point here.')) bytes += c.data.length
+      expect(bytes, 'the chunk produced no audio — it was parsed as an option').toBeGreaterThan(10_000)
+    }, 30_000)
+})
+
+/**
+ * R8-05 — two causes, two messages.
+ *
+ * `#synthesizeToFile` ignored the child's exit code while `#capture`, twenty lines away, checked
+ * it. So `say` exiting **1** with `say: unrecognized option` resolved normally, `readFile` returned
+ * null, and the listener was told:
+ *
+ *   "say exited successfully but its audio file could not be read"
+ *
+ * That sentence is false about a process that exited 1, and its sibling message volunteers "is the
+ * disk full?" — sending a reader chasing R8-04 to the filesystem. The engine's own stderr is the
+ * real diagnosis and was being discarded by `stdio: 'ignore'`.
+ */
+describe('R8-05 a non-zero exit is reported as a non-zero exit, in the engine\'s own words', () => {
+  const withFakeEngine = async (
+    body: string, fn: (p: OsSynthProvider) => Promise<void>, timeoutMs = 30_000
+  ): Promise<void> => {
+    const { mkdtemp, writeFile, chmod } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'orca-tts-exitcode-'))
+    const bin = join(dir, 'espeak-ng')
+    await writeFile(bin, `#!/bin/sh\n${body}\n`)
+    await chmod(bin, 0o755)
+    const realPath = process.env['PATH']
+    try {
+      process.env['PATH'] = dir
+      await fn(new OsSynthProvider({ platform: 'linux', linuxBackend: 'espeak-ng', timeoutMs }))
+    } finally {
+      process.env['PATH'] = realPath
+    }
+  }
+
+  const thrownBy = async (p: OsSynthProvider, text = 'hello there'): Promise<Error | null> => {
+    try {
+      for await (const _ of p.generate(text)) { void _ }
+      return null
+    } catch (e) { return e as Error }
+  }
+
+  it('names the exit code and carries the child\'s stderr verbatim', async () => {
+    if (process.platform === 'win32') return   // no /bin/sh
+    await withFakeEngine(
+      'echo "espeak-ng: unrecognized option \'--- Heading.\'" >&2; exit 1',
+      async (p) => {
+        const err = await thrownBy(p)
+        expect(err, 'a synthesizer that exited 1 produced no audio and no word').not.toBeNull()
+        expect(err?.name).toBe('OsSynthExitError')
+        expect(err?.message).toContain('exited 1')
+        // The whole point: the engine's own diagnosis reaches the listener's channel.
+        expect(err?.message, 'the child\'s stderr was discarded').toContain('unrecognized option')
+        // And the sentence that used to be told about this event must NOT be told about it.
+        expect(err?.message).not.toContain('exited successfully')
+        expect(err?.message, 'still pointing at the filesystem').not.toContain('disk full')
+      })
+  })
+
+  it('CONTROL: exit 0 with no audio is still the OTHER error, with the OTHER message', async () => {
+    if (process.platform === 'win32') return
+    // Proves the assertions above discriminate: the two causes must not collapse back into one.
+    await withFakeEngine('exit 0', async (p) => {
+      const err = await thrownBy(p)
+      expect(err?.name).toBe('OsSynthEmptyOutputError')
+      expect(err?.message).toContain('exited successfully')
+    })
+  })
+
+  it('a non-zero exit with a silent child still says something actionable', async () => {
+    if (process.platform === 'win32') return
+    await withFakeEngine('exit 3', async (p) => {
+      const err = await thrownBy(p)
+      expect(err?.name).toBe('OsSynthExitError')
+      expect(err?.message).toContain('exited 3')
+      expect(err?.message).toMatch(/said nothing about why/)
+    })
+  })
+
+  it('barge-in is not reported as an engine fault', async () => {
+    if (process.platform === 'win32') return
+    // cancel() SIGKILLs the child, so `close` fires with code null. Before the exit-code check
+    // existed this could not misfire; now it can, and a listener told "the engine failed" every
+    // time they pressed skip is a worse regression than the bug being fixed.
+    await withFakeEngine('exec /bin/sleep 5', async (p) => {
+      const run = thrownBy(p)
+      await new Promise((r) => setTimeout(r, 200))
+      await p.cancel()
+      expect(await run, 'pressing skip was reported as a synthesis failure').toBeNull()
+    })
   })
 })

@@ -111,6 +111,32 @@ export class OsSynthEmptyOutputError extends Error {
   }
 }
 
+/**
+ * The synthesizer ran and exited non-zero. R8-05: this used to be indistinguishable from
+ * "exited 0 and wrote nothing" — `#synthesizeToFile` ignored the exit code, so a `say` that died
+ * with `say: unrecognized option` resolved normally, `readFile` then returned `null`, and the
+ * listener was told *"say exited successfully but its audio file could not be read"* about a
+ * process that exited **1**. That message is false about the event, and it points at the
+ * filesystem when the fault is in the argument vector.
+ *
+ * The engine's own stderr is carried verbatim because it is strictly better than anything we
+ * would write: `say: unrecognized option ...` names the fault exactly. `stdio` therefore pipes
+ * stderr where it used to be `'ignore'`.
+ */
+export class OsSynthExitError extends Error {
+  readonly code: number | null
+  readonly stderr: string
+  constructor(cmd: string, code: number | null, stderr: string) {
+    const said = stderr.trim()
+    super(said.length > 0
+      ? `${cmd} exited ${String(code)}: ${said}`
+      : `${cmd} exited ${String(code)} without writing audio and said nothing about why`)
+    this.name = 'OsSynthExitError'
+    this.code = code
+    this.stderr = said
+  }
+}
+
 export class OsSynthTimeoutError extends Error {
   constructor(cmd: string, ms: number) {
     super(`${cmd} did not finish within ${ms} ms and was killed`)
@@ -212,6 +238,67 @@ export function linuxCommand(
   if (opts.rate !== undefined) args.push('-s', String(clamp(Math.round(opts.rate * ESPEAK_BASE_WPM), 80, 450)))
   args.push('--', text)
   return { cmd: backend, args }
+}
+
+/**
+ * Pure, and exported for the same reason `linuxCommand` is: an argument vector is the one thing in
+ * this file that can be checked without a machine of that OS. R8-06 — `#command` had one branch
+ * per platform and each invented its own answer to *"how does user text reach an engine safely?"*,
+ * with no test comparing them. Three branches reviewed over three different inputs is what produced
+ * R8-04. These exports exist so ONE hostile corpus can be run through ALL THREE.
+ *
+ * R8-04, measured on macOS 26.5 (25F71) `[measured-here]`:
+ *
+ *     say -o out.wav --data-format=LEI16@22050 "--- Heading."      -> exit 1, no file
+ *          say: unrecognized option `--- Heading.'
+ *     say -o out.wav --data-format=LEI16@22050 -- "--- Heading."   -> exit 0, 29,732 bytes
+ *
+ * `--` is the POSIX end-of-options separator: everything after it is an operand, whatever it begins
+ * with. That is what makes this a CLASS fix rather than a `---` special case — a blocklist of
+ * dangerous prefixes is how this bug got here. Measured inert after the separator, same corpus,
+ * n=1 each: `-v Alex hello`, `-o /tmp/evil.wav hi` (no `/tmp/evil.wav` was created), a bare `--`,
+ * `-f /etc/passwd`, `--rate=300 hello`, `-5 degrees today.`
+ *
+ * `say -f -` (read the text from stdin) was measured as an alternative and is byte-for-byte
+ * equivalent on all eight corpus rows and on UTF-8 with and without a trailing newline. It was
+ * REJECTED: it buys nothing `--` does not, and it costs a stdin pipe in `#synthesizeToFile` — a
+ * fourth I/O contract in a file whose defect is that it already has three.
+ */
+export function darwinCommand(
+  text: string, outFile: string, opts: SynthesizeOptions
+): { cmd: string; args: string[] } {
+  // WAV, never the default AIFF: decodeAudioData rejects AIFF-C (measured, E6e).
+  const args = ['-o', outFile, '--data-format=LEI16@22050']
+  if (opts.voice !== undefined) args.push('-v', opts.voice)
+  if (opts.rate !== undefined) args.push('-r', String(Math.round(opts.rate * 175)))
+  args.push('--', text)
+  return { cmd: 'say', args }
+}
+
+/**
+ * Windows takes a different route to the same property and therefore needs a different assertion:
+ * the text NEVER occupies an argv position at all. It is interpolated into a PowerShell
+ * single-quoted string literal inside one `-Command` argument, where `'` is the only metacharacter
+ * and is doubled. A leading `-` inside a quoted literal is a character, not an option — so the
+ * R8-04 class cannot exist here by construction, not by a separator.
+ *
+ * Stated as a property so the shared corpus can check it: `args` contains exactly five elements,
+ * the last of which is the script, and no element IS the user's text.
+ */
+export function win32Command(
+  text: string, outFile: string, opts: SynthesizeOptions
+): { cmd: string; args: string[] } {
+  const esc = (s: string): string => s.replace(/'/g, "''")
+  const rate = opts.rate === undefined ? 0 : Math.max(-10, Math.min(10, Math.round((opts.rate - 1) * 10)))
+  const voice = opts.voice === undefined ? '' : `$s.SelectVoice('${esc(opts.voice)}'); `
+  const ps =
+    'Add-Type -AssemblyName System.Speech; ' +
+    '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ' +
+    voice +
+    `$s.Rate = ${rate}; ` +
+    `$s.SetOutputToWaveFile('${esc(outFile)}'); ` +
+    `$s.Speak('${esc(text)}'); $s.Dispose()`
+  return { cmd: 'powershell', args: ['-NoProfile', '-NonInteractive', '-STA', '-Command', ps] }
 }
 
 export class OsSynthProvider implements TtsProvider {
@@ -431,27 +518,10 @@ export class OsSynthProvider implements TtsProvider {
     // engine we are about to hand the string to.
     const text = neutralizeInBandCommands(rawText)
     switch (this.#platform) {
-      case 'darwin': {
-        // WAV, never the default AIFF: decodeAudioData rejects AIFF-C (measured, E6e).
-        const args = ['-o', outFile, '--data-format=LEI16@22050']
-        if (opts.voice !== undefined) args.push('-v', opts.voice)
-        if (opts.rate !== undefined) args.push('-r', String(Math.round(opts.rate * 175)))
-        args.push(text)
-        return { cmd: 'say', args }
-      }
-      case 'win32': {
-        const esc = (s: string) => s.replace(/'/g, "''")
-        const rate = opts.rate === undefined ? 0 : Math.max(-10, Math.min(10, Math.round((opts.rate - 1) * 10)))
-        const voice = opts.voice === undefined ? '' : `$s.SelectVoice('${esc(opts.voice)}'); `
-        const ps =
-          'Add-Type -AssemblyName System.Speech; ' +
-          '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ' +
-          voice +
-          `$s.Rate = ${rate}; ` +
-          `$s.SetOutputToWaveFile('${esc(outFile)}'); ` +
-          `$s.Speak('${esc(text)}'); $s.Dispose()`
-        return { cmd: 'powershell', args: ['-NoProfile', '-NonInteractive', '-STA', '-Command', ps] }
-      }
+      case 'darwin':
+        return darwinCommand(text, outFile, opts)
+      case 'win32':
+        return win32Command(text, outFile, opts)
       case 'linux': {
         // Backend is resolved before generate() reaches here; default to the best rung so the
         // pure command builder stays total.
@@ -465,20 +535,43 @@ export class OsSynthProvider implements TtsProvider {
     await new Promise<void>((resolve, reject) => {
       let child: ChildProcess
       try {
-        child = spawn(cmd, args, { stdio: 'ignore' })
+        // stderr is PIPED, not ignored (R8-05). The engine's own diagnosis — `say: unrecognized
+        // option ...` — is the useful half of a non-zero exit, and it used to be thrown away.
+        child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] })
       } catch (err) {
         reject(new OsSynthUnavailableError(this.#platform, [cmd]))
         void err
         return
       }
       this.#child = child
+      let stderr = ''
+      // Bounded: a wedged engine must not be able to grow this without limit. The first 4 kB
+      // carries the message; the rest is repetition.
+      child.stderr?.on('data', (d: Buffer) => {
+        if (stderr.length < 4096) stderr += d.toString('utf8')
+      })
       const timer = setTimeout(() => {
         if (child.exitCode === null) child.kill('SIGKILL')
         reject(new OsSynthTimeoutError(cmd, this.#timeoutMs))
       }, this.#timeoutMs)
       const settle = (fn: () => void) => { clearTimeout(timer); fn() }
       child.on('error', () => settle(() => reject(new OsSynthUnavailableError(this.#platform, [cmd]))))
-      child.on('close', () => settle(() => { this.#child = null; resolve() }))
+      child.on('close', (code) => settle(() => {
+        this.#child = null
+        // R8-05: the synthesis path accepted ANY exit status while `#capture`, twenty lines away,
+        // checked it. Two causes now get two messages: a non-zero exit carries the child's own
+        // words, and `OsSynthEmptyOutputError` is reserved for the exit-0-but-no-audio case its
+        // wording actually describes.
+        //
+        // `code === null` means killed by a signal — that is OUR SIGKILL, from cancel() or the
+        // timeout. Barge-in must not be reported as an engine fault: cancel() already set
+        // `#cancelled` and generate() returns on it, and the timeout has its own rejection queued.
+        if (code === null || code === 0 || this.#cancelled || opts.signal?.aborted === true) {
+          resolve()
+          return
+        }
+        reject(new OsSynthExitError(cmd, code, stderr))
+      }))
       opts.signal?.addEventListener('abort', () => this.cancel(), { once: true })
     })
   }

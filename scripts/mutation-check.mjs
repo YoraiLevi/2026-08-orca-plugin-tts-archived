@@ -307,6 +307,33 @@ const MUTANTS = [
     from: "  return text.replace(/\\[\\[/g, '[ [')",
     to: '  return text',
     test: 'packages/providers/src/os-synth/os-synth.test.ts'
+  },
+  {
+    id: 'darwin-text-in-option-position',
+    claim: "R8-04: no chunk text, however it begins, may be parsed by `say` as an option",
+    file: 'packages/providers/src/os-synth/index.ts',
+    from: "  args.push('--', text)\n  return { cmd: 'say', args }",
+    to: "  args.push(text)\n  return { cmd: 'say', args }",
+    test: 'packages/providers/src/os-synth/os-synth.test.ts',
+    only: 'R8-04'
+  },
+  {
+    id: 'synth-ignores-exit-code',
+    claim: "R8-05: a non-zero exit must not be reported as `exited successfully`",
+    file: 'packages/providers/src/os-synth/index.ts',
+    from: "        if (code === null || code === 0 || this.#cancelled || opts.signal?.aborted === true) {",
+    to: '        if (true) {',
+    test: 'packages/providers/src/os-synth/os-synth.test.ts',
+    only: 'R8-05'
+  },
+  {
+    id: 'synth-discards-stderr',
+    claim: "R8-05: the engine's own diagnosis must reach the listener, not be thrown away",
+    file: 'packages/providers/src/os-synth/index.ts',
+    from: "        child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] })",
+    to: "        child = spawn(cmd, args, { stdio: 'ignore' })",
+    test: 'packages/providers/src/os-synth/os-synth.test.ts',
+    only: 'R8-05'
   }
 ]
 
