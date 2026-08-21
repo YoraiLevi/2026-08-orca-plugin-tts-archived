@@ -816,7 +816,12 @@ function unreadSuppressions() {
 const UNREAD = unreadSuppressions()
 
 
-if (stale.length) {
+/**
+ * The detail is printed when the run FAILS, or on demand. On a green run the counts above are the
+ * report, and 154 lines of "here is a pointer that is off by 40" would train the reader to scroll
+ * past output that matters — the same way a permanently-red gate trains them to ignore a job.
+ */
+if (stale.length && (problems || LIST)) {
   console.error(`\nSTALE CITATIONS (${stale.length})\n`)
   for (const { cit, r } of stale) {
     console.error(`  ${cit.doc}:${cit.docLine}`)
@@ -831,7 +836,7 @@ if (stale.length) {
 
 // Named, always, when there are any: this is the one bucket a human must look at row by row, and
 // a count alone gives them nothing to look at.
-if (quoteGone.length) {
+if (quoteGone.length && (problems || LIST)) {
   console.error(`\nQUOTE-GONE (${quoteGone.length}) — the document quotes code verbatim and that exact code is`)
   console.error(`no longer in the cited file. Re-pointing these makes the pointer green beside a sentence`)
   console.error(`describing something that is no longer true. READ THE ROW; do not re-number it.\n`)
@@ -847,7 +852,7 @@ if (quoteGone.length) {
   }
 }
 
-if (UNREAD.length) {
+if (UNREAD.length && (problems || LIST)) {
   console.error(`\nUNREAD ANNOTATIONS (${UNREAD.length}) — written for this tool, or read as if they were,`)
   console.error(`and NOT parsed by it. A suppression the parser does not read is a suppression that never`)
   console.error(`happened (PITFALLS P35). Valid: <!-- citation-check: ignore --> with the reason in a`)
@@ -902,8 +907,9 @@ console.error(
 // UNCONDITIONAL, including on a green run. The gate was narrowed from the total to LOST, and a
 // narrowed gate that also stopped printing the wider number would be indistinguishable from a
 // number that had been hidden. DRIFTED is not a gate any more; it is still evidence.
+const detailHint = (problems || LIST) ? '' : '   (--list to see them)'
 console.error(
-  `stale:     ${stale.length} total = ${drifted} DRIFTED (pointer off, claim intact — moves with` +
+  `stale:     ${stale.length} total${detailHint} = ${drifted} DRIFTED (pointer off, claim intact — moves with` +
   ` code churn, NOT gated)\n` +
   `                     + ${lost} LOST (anchor nowhere in the file — the claim is in question, GATED)\n` +
   `                     + ${quoteGone.length} QUOTE-GONE (quoted code is gone — likely REMEDIED,` +

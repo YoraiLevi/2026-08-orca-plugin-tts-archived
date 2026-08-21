@@ -165,7 +165,7 @@ describe('QUOTE-GONE separates a remedied claim from a drifted pointer', () => {
       'The bare catch at `packages/core/src/thing.ts:2` — `try { return read(root) } catch { return null }`' +
       ' in `readRoot` swallows the cause.\n',
       SOURCE_REMEDIED,
-    )().out
+    )(['--list']).out
     // The COUNT, not the word: the summary line names every bucket including the empty ones, so
     // `toContain('QUOTE-GONE')` would be true no matter what the checker decided.
     expect(out).toMatch(/\+ 1 QUOTE-GONE/)
@@ -180,7 +180,7 @@ describe('QUOTE-GONE separates a remedied claim from a drifted pointer', () => {
       'The catch at `packages/core/src/thing.ts:2` — `catch (err) { return { reason: err.code } }`' +
       ' in `readRoot` names the cause.\n',
       SOURCE_REMEDIED,
-    )().out
+    )(['--list']).out
     expect(out).toContain('STALE CITATIONS')
     expect(out).toMatch(/\+ 0 QUOTE-GONE/)
     expect(out).not.toMatch(/^QUOTE-GONE \(/m)
@@ -190,7 +190,7 @@ describe('QUOTE-GONE separates a remedied claim from a drifted pointer', () => {
     const out = fixture(
       'The call at `packages/core/src/thing.ts:2` — `try { return read(…) } catch { … }` in `readRoot`.\n',
       SOURCE_REMEDIED,
-    )().out
+    )(['--list']).out
     expect(out).toContain('STALE CITATIONS')
     expect(out).toMatch(/\+ 0 QUOTE-GONE/)
     expect(out).not.toMatch(/^QUOTE-GONE \(/m)
@@ -201,7 +201,7 @@ describe('QUOTE-GONE separates a remedied claim from a drifted pointer', () => {
     const out = fixture(
       'It answers `packages/core/src/thing.ts:2` with `200 { played: \'elsewhere\' }` from `readRoot`.\n',
       SOURCE_REMEDIED,
-    )().out
+    )(['--list']).out
     expect(out).toContain('STALE CITATIONS')
     expect(out).toMatch(/\+ 0 QUOTE-GONE/)
     expect(out).not.toMatch(/^QUOTE-GONE \(/m)
@@ -220,7 +220,7 @@ describe('an annotation the parser does not read is named, not silently ignored'
   it('names a `[live tree]`-style prose stamp sitting on a citation', () => {
     const out = fixture(
       'See `packages/core/src/thing.ts:2` `[live tree]` in `readRoot`.\n', SOURCE_REMEDIED,
-    )().out
+    )(['--list']).out
     expect(out).toMatch(/^UNREAD ANNOTATIONS \(1\)/m)
     expect(out).toContain('prose stamp')
   })
@@ -239,7 +239,7 @@ describe('an annotation the parser does not read is named, not silently ignored'
     const out = fixture(
       'See `packages/core/src/thing.ts:2` in `readRoot`. <!-- citation-check: ignore — verified by hand -->\n',
       SOURCE_REMEDIED,
-    )().out
+    )(['--list']).out
     expect(out).toMatch(/^UNREAD ANNOTATIONS \(1\)/m)
     expect(out).toContain('malformed marker')
     // And the proof that it suppressed nothing: the citation is still counted.
@@ -250,7 +250,7 @@ describe('an annotation the parser does not read is named, not silently ignored'
     const out = fixture(
       'See `packages/core/src/thing.ts:2` in `readRoot`. <!-- citation-check: ignore --><!-- why: checked -->\n',
       SOURCE_REMEDIED,
-    )().out
+    )(['--list']).out
     expect(out).not.toMatch(/^UNREAD ANNOTATIONS/m)
     expect(out).not.toContain('STALE CITATIONS')
   })
