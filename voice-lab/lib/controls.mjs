@@ -21,7 +21,15 @@ export const STAGES = [
 // Stages nothing in the control surface governs. 004 section 6 "What is deliberately absent":
 // the listener sees these in the ladder marked "fixed by design", so a decision that was MADE
 // is never mistaken for one that was overlooked.
-export const FIXED_BY_DESIGN_STAGES = [3, 9, 10, 14, 15]
+//
+// 004 disagrees with itself about stage 9, and this list resolves it. Section 4's ladder wireframe
+// uses `stripMarkdownMarkers` as the canonical "fixed by design" example, while rows 22 and 23 of
+// section 6 both name "stages 2 + 9" in their Feeds column — and section 6 goes on to say WHY:
+// "stage 9 keeps [underscores] intact so that [ident.style] can" decide what one sounds like.
+// A stage that two controls feed is not a stage with no control, so 9 is not on this list. The
+// ladder still renders "no change" for it on any fixture it did not touch, which is what the
+// wireframe was actually showing.
+export const FIXED_BY_DESIGN_STAGES = [3, 10, 14, 15]
 
 export const PANELS = [
   { id: 'A', key: 'omit', title: 'What gets left out', short: 'WHAT GETS LEFT OUT' },

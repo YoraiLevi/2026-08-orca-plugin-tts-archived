@@ -1,0 +1,2294 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Lab</title>
+
+<!--
+  Voice Lab — docs/design/004-voice-lab.md, job J13.
+
+  Self-contained on purpose: no CDN, no external fetch, no build step. The only network traffic is
+  to the local server that served this page. Served by scripts/voice-lab.mjs (job J12).
+
+  Sound discipline, non-negotiable (PITFALLS P31): this page makes noise ONLY when the listener
+  presses a key or a button. No autoplay, no startup chime, no sound on load or on reconnect. The
+  AudioContext is not even constructed until the first press.
+
+  The modules under voice-lab/lib/ are inlined below, verbatim, between markers.
+  `node voice-lab/build-inline.mjs` regenerates them; voice-lab/lib/inline.test.mjs fails if the
+  copy here has drifted from the source.
+-->
+
+<style>
+  :root {
+    --bg: #12110f;
+    --panel: #1b1a17;
+    --panel-focus: #232120;
+    --ink: #f3efe7;
+    --ink-dim: #a8a196;
+    --rule: #3a3733;
+    --accent: #f0b429;
+    --added: #7bd88f;
+    --removed: #e2725b;
+    --focus: #7cc7ff;
+    --row-min: 64px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #faf7f0; --panel: #fff; --panel-focus: #fffdf6; --ink: #1a1815; --ink-dim: #57534c;
+      --rule: #d9d2c6; --added: #17692f; --removed: #a3341f; --focus: #0b5fa5;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 400 19px/1.6 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    padding-bottom: 5rem;
+  }
+  /* Respect the listener's motion setting; nothing here needs to move. */
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+  :focus-visible, [data-focused="true"] {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--bg);
+    border-bottom: 2px solid var(--rule); padding: .9rem 1.2rem;
+    display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;
+  }
+  header h1 { font-size: 1.05rem; letter-spacing: .18em; text-transform: uppercase; margin: 0; }
+  .grow { flex: 1 1 auto; }
+  button, select, input[type="text"] {
+    font: inherit; font-size: .95rem; color: var(--ink); background: var(--panel);
+    border: 2px solid var(--rule); border-radius: 8px; padding: .55rem .9rem; min-height: 48px;
+    cursor: pointer;
+  }
+  button[disabled] { opacity: .55; cursor: not-allowed; }
+  .kbd {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8em;
+    border: 1px solid var(--rule); border-bottom-width: 3px; border-radius: 5px;
+    padding: .05em .4em; color: var(--ink-dim);
+  }
+
+  main { max-width: 68rem; margin: 0 auto; padding: 1.2rem; }
+
+  /* ── Written vs spoken ─────────────────────────────────────────────────────── */
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+  @media (max-width: 60rem) { .panes { grid-template-columns: 1fr; } }
+  .pane {
+    background: var(--panel); border: 2px solid var(--rule); border-radius: 12px;
+    padding: 1.1rem 1.3rem; min-height: 12rem;
+  }
+  .pane h2 {
+    font-size: .78rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ink-dim);
+    margin: 0 0 .7rem;
+  }
+  .pane .body { white-space: pre-wrap; line-height: 1.85; }
+  /* Colour is never the sole carrier: a changed span is underlined and keyboard-reachable. */
+  .w {
+    border-radius: 3px; padding: 0 1px;
+  }
+  .w.added { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px;
+    text-decoration-color: var(--added); }
+  .w.removed { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--ink-dim); }
+  .w[tabindex] { cursor: pointer; }
+  .attribution {
+    margin-top: .9rem; padding-top: .8rem; border-top: 1px dashed var(--rule);
+    font-size: .92rem; color: var(--ink-dim); min-height: 3.4rem;
+  }
+  .attribution strong { color: var(--ink); }
+
+  /* ── Control surface: one column, one control per row, full width ──────────── */
+  .panel {
+    border: 2px solid var(--rule); border-radius: 12px; background: var(--panel);
+    margin: 1.2rem 0; overflow: hidden;
+  }
+  .panel[data-open="true"] { background: var(--panel-focus); border-color: var(--accent); }
+  .panel > .head {
+    display: flex; align-items: center; gap: .8rem; width: 100%; min-height: var(--row-min);
+    padding: .8rem 1.2rem; background: none; border: 0; border-radius: 0; text-align: left;
+  }
+  .panel > .head .title { font-size: 1.05rem; font-weight: 600; }
+  .panel > .head .count { color: var(--ink-dim); font-size: .9rem; }
+  .rows { border-top: 2px solid var(--rule); }
+  .row {
+    display: flex; align-items: center; gap: 1rem; width: 100%;
+    min-height: var(--row-min); padding: .8rem 1.2rem;
+    border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left;
+    border-radius: 0;
+  }
+  .row:last-child { border-bottom: 0; }
+  .row .label { flex: 1 1 auto; font-size: 1.02rem; }
+  .row .value { color: var(--accent); font-size: 1.02rem; }
+  .row .tag {
+    font-family: ui-monospace, monospace; font-size: .72rem; color: var(--ink-dim);
+    border: 1px solid var(--rule); border-radius: 4px; padding: .1em .4em;
+  }
+  .row .unwired { font-size: .72rem; color: var(--ink-dim); }
+  .tier-more { display: none; }
+  .panel[data-more="true"] .tier-more { display: flex; }
+  .row[data-focused="true"] { background: rgba(124,199,255,.12); }
+
+  /* ── Overlays ──────────────────────────────────────────────────────────────── */
+  .overlay {
+    position: fixed; inset: 0; background: var(--bg); overflow: auto; padding: 1.5rem; z-index: 20;
+  }
+  .overlay[hidden] { display: none; }
+  .ladder-row { border-bottom: 1px solid var(--rule); padding: .8rem 0; }
+  .ladder-row .n { font-family: ui-monospace, monospace; color: var(--ink-dim); }
+  .ladder-row .fixed { color: var(--ink-dim); font-style: italic; }
+  .ladder-row .out { display: block; margin: .4rem 0 .4rem 2.4rem; }
+
+  /* ── Status bar ────────────────────────────────────────────────────────────── */
+  footer {
+    position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
+    border-top: 2px solid var(--rule); padding: .7rem 1.2rem;
+    display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; font-size: .9rem;
+  }
+  .banner {
+    border: 2px solid var(--removed); border-left-width: 8px; border-radius: 10px;
+    padding: 1rem 1.2rem; margin: 1.2rem 0; background: var(--panel);
+  }
+  .banner[hidden] { display: none; }
+  .banner h3 { margin: 0 0 .4rem; font-size: 1rem; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+</style>
+
+<header>
+  <h1>Voice Lab</h1>
+  <label>fixture
+    <select id="fixture" aria-label="fixture"></select>
+  </label>
+  <span class="grow"></span>
+  <button id="btn-play"><span class="kbd">Space</span> Play</button>
+  <button id="btn-stop"><span class="kbd">s</span> Stop</button>
+  <button id="btn-replay"><span class="kbd">R</span> Replay</button>
+  <button id="btn-compare"><span class="kbd">C</span> Compare</button>
+  <button id="btn-blind3">Blind × 3</button>
+  <button id="btn-explain"><span class="kbd">E</span> Explain</button>
+  <button id="btn-mute" aria-pressed="false"><span class="kbd">m</span> Speak-on-change: on</button>
+</header>
+
+<main>
+  <div id="banner-server" class="banner" hidden>
+    <h3>The lab server is not answering.</h3>
+    <p id="banner-server-body"></p>
+  </div>
+  <div id="banner-speak" class="banner" hidden>
+    <h3 id="banner-speak-title"></h3>
+    <p id="banner-speak-body"></p>
+  </div>
+
+  <section class="panes">
+    <div class="pane">
+      <h2>Written</h2>
+      <div class="body" id="pane-written"></div>
+    </div>
+    <div class="pane">
+      <h2>Spoken</h2>
+      <div class="body" id="pane-spoken"></div>
+      <div class="attribution" id="attribution">
+        Underlined words were added by the pipeline; struck-through words were removed.
+        Focus one with <span class="kbd">Tab</span> to hear which transform made it and which
+        control governs it, then <span class="kbd">Enter</span> to jump to that control.
+      </div>
+    </div>
+  </section>
+
+  <div id="controls"></div>
+
+  <p style="color:var(--ink-dim);font-size:.9rem">
+    Set <strong id="ab-set">A</strong> ·
+    <button id="btn-swap">Switch to the other set</button>
+    <button id="btn-copy-ab">Copy this set to the other</button>
+    <span class="kbd">K</span> snapshot · <span class="kbd">L</span> restore ·
+    <span class="kbd">+</span>/<span class="kbd">-</span> more controls ·
+    <span class="kbd">?</span> describe the focused control
+  </p>
+</main>
+
+<footer>
+  <span id="status">Ready. Nothing has played. Press <span class="kbd">Space</span>.</span>
+  <span class="grow"></span>
+  <span id="timing">—</span>
+  <button id="btn-save">Save to plugin</button>
+  <button id="btn-export">Export a copy</button>
+  <span id="count"></span>
+</footer>
+
+<div class="overlay" id="ladder" hidden aria-label="stage ladder">
+  <p><strong>Stage ladder</strong> — <span id="ladder-fixture"></span>
+    <button id="ladder-close"><span class="kbd">Esc</span> close</button></p>
+  <div id="ladder-body"></div>
+</div>
+
+<div class="overlay" id="help" hidden aria-label="keyboard">
+  <p><strong>Keys</strong> <button id="help-close"><span class="kbd">Esc</span> close</button></p>
+  <div id="help-body"></div>
+</div>
+
+<!-- Everything the page says is also announced here, for a screen reader that is not our TTS. -->
+<div class="sr-only" id="live" aria-live="polite" role="status"></div>
+
+<script type="module">
+/* ==INLINE BEGIN lib/controls.mjs== */
+// The control inventory — 46 controls, six panels, from docs/design/004-voice-lab.md section 6.
+//
+// Counted against 004: Panel A 7 (rows 1-7) · B 7 (8-14) · C 9 (15-23) · D 4 (24-27) ·
+// E 9 (28-35, 44) · F 10 (36-43, 45, 46) = 46. The wireframe's footer says "46 controls".
+//
+// `settingsId` is the dotted id this control becomes in the settings file
+// (docs/design/011-settings.md section 3.1, `<owner>.<name>`). `wire` is the exact property the
+// value becomes on the object the consumer receives, or null for DESIGNED BUT NOT WIRED
+// (011 section 3.1) — nine controls are wired today and the rest are countable gaps, not lies.
+//
+// This module is inlined verbatim into index.html; voice-lab/lib/inline.test.mjs fails if the
+// two copies drift.
+
+const STAGES = [
+  'stripFencedCode', 'stripInlineCode', 'expandMarkdownLinks', 'stripUrls', 'headingsToPauses',
+  'listItemsToSentences', 'tablesToRows', 'speakFilePaths', 'stripMarkdownMarkers',
+  'speakKeyGlyphs', 'stripEmoji', 'expandUnits', 'expandNumbers', 'collapseWhitespace',
+  'tidyPunctuation'
+]
+
+// Stages nothing in the control surface governs. 004 section 6 "What is deliberately absent":
+// the listener sees these in the ladder marked "fixed by design", so a decision that was MADE
+// is never mistaken for one that was overlooked.
+//
+// 004 disagrees with itself about stage 9, and this list resolves it. Section 4's ladder wireframe
+// uses `stripMarkdownMarkers` as the canonical "fixed by design" example, while rows 22 and 23 of
+// section 6 both name "stages 2 + 9" in their Feeds column — and section 6 goes on to say WHY:
+// "stage 9 keeps [underscores] intact so that [ident.style] can" decide what one sounds like.
+// A stage that two controls feed is not a stage with no control, so 9 is not on this list. The
+// ladder still renders "no change" for it on any fixture it did not touch, which is what the
+// wireframe was actually showing.
+const FIXED_BY_DESIGN_STAGES = [3, 10, 14, 15]
+
+const PANELS = [
+  { id: 'A', key: 'omit', title: 'What gets left out', short: 'WHAT GETS LEFT OUT' },
+  { id: 'B', key: 'struct', title: 'How structure is spoken', short: 'STRUCTURE' },
+  { id: 'C', key: 'path', title: 'Names, paths and identifiers', short: 'NAMES & PATHS' },
+  { id: 'D', key: 'num', title: 'Numbers and units', short: 'NUMBERS' },
+  { id: 'E', key: 'voice', title: 'Voice and pacing', short: 'VOICE & PACING' },
+  { id: 'F', key: 'runtime', title: 'What interrupts what, and what gets announced', short: 'INTERRUPTIONS' }
+]
+
+const sel = (values) => ({ kind: 'enum', values })
+
+const CONTROLS = [
+  // ── Panel A — what gets left out, and how you are told ────────────────────────────────
+  { row: 1, id: 'omit.codeBlocks', panel: 'A', tier: 'common', tag: 'EI', stages: [1],
+    label: 'How a code block is handled', help: 'Whether an omitted code block is announced or dropped in silence.',
+    ...sel(['announce', 'drop']), words: { announce: 'announced', drop: 'dropped in silence' },
+    default: 'announce', owner: 'normalize', settingsId: 'normalize.codeBlocks', wire: 'NormalizeOptions.codeBlocks' },
+  { row: 2, id: 'omit.codeBlockPhrase', panel: 'A', tier: 'common', tag: 'EI', stages: [1],
+    label: 'What a code block is called', help: 'The sentence spoken in place of a code block. {lang} and {lines} are filled in.',
+    kind: 'template', maxLength: 120, default: ' . Here, a code block is omitted. ',
+    owner: 'announce', settingsId: 'announce.codeBlockPhrase', wire: null },
+  { row: 3, id: 'omit.codeBlockDetail', panel: 'A', tier: 'more', tag: 'EI', stages: [1],
+    label: 'What a code block tells you', help: 'Whether the language and the line count are named in the announcement.',
+    kind: 'multi', values: ['language', 'lineCount'], words: { language: 'the language', lineCount: 'the line count' },
+    default: [], owner: 'normalize', settingsId: 'normalize.codeBlockDetail', wire: null },
+  { row: 4, id: 'omit.inlineCode', panel: 'A', tier: 'more', tag: 'EI', stages: [2],
+    label: 'How inline code is said', help: 'Backticked code inside a sentence: stripped to its text, read verbatim, or announced.',
+    ...sel(['strip', 'verbatim', 'announce']), words: { strip: 'stripped', verbatim: 'read as written', announce: 'announced' },
+    default: 'strip', owner: 'normalize', settingsId: 'normalize.inlineCode', wire: null },
+  { row: 5, id: 'omit.urls', panel: 'A', tier: 'common', tag: 'EI', stages: [4],
+    label: 'How a link is said', help: 'What you hear where a URL was. A link that vanishes with no signal is the loss this control exists for.',
+    ...sel(['host-phrase', 'host-and-path', 'label-only', 'drop-silent']),
+    words: { 'host-phrase': 'the host, in a phrase', 'host-and-path': 'the host and the path', 'label-only': 'the link text only', 'drop-silent': 'dropped in silence' },
+    default: 'host-phrase', owner: 'normalize', settingsId: 'normalize.urls', wire: null },
+  { row: 6, id: 'omit.urlPhrase', panel: 'A', tier: 'more', tag: 'EI', stages: [4],
+    label: 'What a link is called', help: 'The phrase spoken for a link. {host} and {path} are filled in.',
+    kind: 'template', maxLength: 120, default: 'a link to {host}',
+    owner: 'announce', settingsId: 'announce.urlPhrase', wire: null },
+  { row: 7, id: 'omit.emoji', panel: 'A', tier: 'common', tag: 'EI', stages: [11],
+    label: 'How an emoji is handled', help: 'Emoji vanish with no signal today, while code blocks and links get one. Same loss, opposite treatment.',
+    ...sel(['silent', 'announce-count', 'name']),
+    words: { silent: 'dropped in silence', 'announce-count': 'counted aloud', name: 'named' },
+    default: 'silent', owner: 'normalize', settingsId: 'normalize.emoji', wire: null },
+
+  // ── Panel B — how structure is spoken ─────────────────────────────────────────────────
+  { row: 8, id: 'struct.headingCue', panel: 'B', tier: 'common', tag: 'EI', stages: [5],
+    label: 'How a heading is marked', help: 'All six heading levels collapse to nothing today.',
+    ...sel(['none', 'level-word', 'prefix-word', 'pause-only']),
+    words: { none: 'not marked', 'level-word': 'named by level', 'prefix-word': 'given a prefix word', 'pause-only': 'a pause only' },
+    default: 'none', owner: 'normalize', settingsId: 'normalize.headingCue', wire: null },
+  { row: 9, id: 'struct.headingPauseMs', panel: 'B', tier: 'more', tag: 'EP', stages: [5],
+    label: 'How long a heading pauses', help: 'Milliseconds, never "comma versus full stop" — a number survives the arrival of SSML; a punctuation mark does not.',
+    kind: 'int', range: { min: 0, max: 1500, step: 50 }, unit: 'ms', default: 0,
+    owner: 'unassigned', settingsId: 'normalize.headingPauseMs', wire: null },
+  { row: 10, id: 'struct.orderedLists', panel: 'B', tier: 'common', tag: 'EI', stages: [6],
+    label: 'How a numbered list is said', help: 'A numbered item can keep its numeral, become an ordinal word, or lose its number.',
+    ...sel(['numeral', 'word', 'drop']),
+    words: { numeral: 'by numeral, one, alpha', word: 'by word, first, alpha', drop: 'without the number' },
+    default: 'numeral', owner: 'normalize', settingsId: 'normalize.orderedLists', wire: 'NormalizeOptions.orderedLists' },
+  { row: 11, id: 'struct.bulletMarker', panel: 'B', tier: 'more', tag: 'EI', stages: [6],
+    label: 'How a bullet is said', help: 'Whether a bullet marker is dropped or spoken as "item".',
+    ...sel(['drop', 'say-item']), words: { drop: 'dropped', 'say-item': 'spoken as item' },
+    default: 'drop', owner: 'normalize', settingsId: 'normalize.bulletMarker', wire: null },
+  { row: 12, id: 'struct.tableLeadIn', panel: 'B', tier: 'more', tag: 'EI', stages: [7],
+    label: 'What a table is called', help: 'The lead-in sentence spoken before a table.',
+    kind: 'template', maxLength: 60, default: 'Table.',
+    owner: 'announce', settingsId: 'announce.tableLeadIn', wire: null },
+  { row: 13, id: 'struct.tableHeaderRepeat', panel: 'B', tier: 'common', tag: 'EI', stages: [7],
+    label: 'How often a table header repeats', help: 'Table rows were "too quick, not obvious what I am hearing" until every value carried its header.',
+    ...sel(['every-cell', 'row-start', 'first-row-only', 'never']),
+    words: { 'every-cell': 'with every value', 'row-start': 'once a row', 'first-row-only': 'in the first row only', never: 'never' },
+    default: 'every-cell', owner: 'normalize', settingsId: 'normalize.tableHeaderRepeat', wire: null },
+  { row: 14, id: 'struct.tableFirstCellHeader', panel: 'B', tier: 'more', tag: 'EI', stages: [7],
+    label: 'Whether the first cell is a header', help: 'Treat the leading cell of each row as that row\'s name rather than a bare value.',
+    kind: 'bool', default: false, words: { true: 'treated as a header', false: 'spoken bare' },
+    owner: 'normalize', settingsId: 'normalize.tableFirstCellHeader', wire: null },
+
+  // ── Panel C — names, paths and identifiers ────────────────────────────────────────────
+  { row: 15, id: 'path.style', panel: 'C', tier: 'common', tag: 'EI', stages: [8],
+    label: 'How a path is said', help: 'Paths "made no sense whatsoever" read raw. This is the shape of the repair.',
+    ...sel(['spoken', 'terse', 'verbatim']),
+    words: { spoken: 'spoken in full', terse: 'terse', verbatim: 'read as written' },
+    default: 'spoken', owner: 'normalize', settingsId: 'normalize.pathStyle', wire: 'NormalizeOptions.pathStyle' },
+  { row: 16, id: 'path.extensionStyle', panel: 'C', tier: 'common', tag: 'EI', stages: [8],
+    label: 'Where the file kind goes', help: 'The file kind was "garbled noise" in front of the name, and wanted to come last.',
+    ...sel(['word-last', 'word-first', 'raw-last', 'omit']),
+    words: { 'word-last': 'kind last, as a word', 'word-first': 'kind first, as a word', 'raw-last': 'kind last, as written', omit: 'not said at all' },
+    default: 'word-last', owner: 'normalize', settingsId: 'normalize.extensionStyle', wire: 'NormalizeOptions.extensionStyle' },
+  { row: 17, id: 'path.namePhrase', panel: 'C', tier: 'more', tag: 'EI', stages: [8],
+    label: 'What a file is called', help: 'The phrase that introduces a file name. {name} is filled in.',
+    kind: 'template', maxLength: 60, default: 'file named {name}',
+    owner: 'announce', settingsId: 'announce.pathNamePhrase', wire: null },
+  { row: 18, id: 'path.folderPhrase', panel: 'C', tier: 'more', tag: 'EI', stages: [8],
+    label: 'What a folder is called', help: 'The phrase that introduces the folders. {folders} is filled in.',
+    kind: 'template', maxLength: 60, default: 'in folder {folders}',
+    owner: 'announce', settingsId: 'announce.pathFolderPhrase', wire: null },
+  { row: 19, id: 'path.depthPolicy', panel: 'C', tier: 'common', tag: 'EI', stages: [8],
+    label: 'How much of the folder', help: 'Four folders of flat word list, and by the third you have lost the first. This is Q41\'s option space; which one is the default is yours.',
+    ...sel(['full', 'last-n', 'first-n', 'filename-only', 'filename-then-location', 'elide-middle']),
+    words: { full: 'the whole path', 'last-n': 'the last folders', 'first-n': 'the first folders', 'filename-only': 'the file name only', 'filename-then-location': 'the name, then where it is', 'elide-middle': 'the ends, with the middle elided' },
+    default: 'full', owner: 'normalize', settingsId: 'normalize.pathDepthPolicy', wire: null },
+  { row: 20, id: 'path.depthN', panel: 'C', tier: 'common', tag: 'EI', stages: [8],
+    label: 'How many folders', help: 'How many folders the policy above keeps.',
+    kind: 'int', range: { min: 1, max: 8, step: 1 }, unit: 'folders', default: 2,
+    owner: 'normalize', settingsId: 'normalize.pathDepthN', wire: null },
+  { row: 21, id: 'path.extensionWords', panel: 'C', tier: 'more', tag: 'EI', stages: [8],
+    label: 'What each file kind is called', help: 'The suffix-to-word table. An unknown suffix is spelled out.',
+    kind: 'map', default: {}, owner: 'normalize', settingsId: 'normalize.extensionWords', wire: null },
+  { row: 22, id: 'ident.style', panel: 'C', tier: 'common', tag: 'EI', stages: [2, 9],
+    label: 'How an identifier is said', help: 'Underscore flush underscore buffer is spoken raw today. This is Q39\'s option space; the default is yours.',
+    ...sel(['verbatim', 'underscore-pause', 'split-words', 'split-and-announce', 'spell-leading-underscore']),
+    words: { verbatim: 'as written', 'underscore-pause': 'with a pause at each underscore', 'split-words': 'as separate words', 'split-and-announce': 'as words, announced as a function', 'spell-leading-underscore': 'with the leading underscore spoken' },
+    default: 'verbatim', owner: 'normalize', settingsId: 'normalize.identStyle', wire: null },
+  { row: 23, id: 'ident.parens', panel: 'C', tier: 'more', tag: 'EI', stages: [2, 9],
+    label: 'How a call\'s brackets are said', help: 'What happens to the parentheses after a function name.',
+    ...sel(['keep', 'drop', 'say-call']), words: { keep: 'kept', drop: 'dropped', 'say-call': 'spoken as a call to' },
+    default: 'keep', owner: 'normalize', settingsId: 'normalize.identParens', wire: null },
+
+  // ── Panel D — numbers and units ──────────────────────────────────────────────────────
+  { row: 24, id: 'num.expandIntegers', panel: 'D', tier: 'common', tag: 'EI', stages: [13],
+    label: 'Whether numbers become words', help: 'One flag gates both this and units today, so "fifty two milliseconds" with numeral-shaped counts is unreachable. Split here.',
+    kind: 'bool', default: true, words: { true: 'spoken as words', false: 'left as numerals' },
+    owner: 'normalize', settingsId: 'normalize.expandIntegers', wire: 'NormalizeOptions.expandNumbers' },
+  { row: 25, id: 'num.expandUnits', panel: 'D', tier: 'common', tag: 'EI', stages: [12],
+    label: 'Whether units become words', help: '"52 ms was odd to hear" — units are expanded before the number.',
+    kind: 'bool', default: true, words: { true: 'spoken as words', false: 'left as symbols' },
+    owner: 'normalize', settingsId: 'normalize.expandUnits', wire: null },
+  { row: 26, id: 'num.unitWords', panel: 'D', tier: 'more', tag: 'EI', stages: [12],
+    label: 'What each unit is called', help: 'The symbol-to-word table for units.',
+    kind: 'map', default: {}, owner: 'normalize', settingsId: 'normalize.unitWords', wire: null },
+  { row: 27, id: 'num.decimals', panel: 'D', tier: 'more', tag: 'EP', stages: [13],
+    label: 'How a decimal is said', help: 'Hand three point one four to the engine, or say it in words.',
+    ...sel(['engine', 'words']), words: { engine: 'left to the engine', words: 'spoken as words' },
+    default: 'engine', owner: 'normalize', settingsId: 'normalize.decimals', wire: null },
+
+  // ── Panel E — voice and pacing ───────────────────────────────────────────────────────
+  { row: 28, id: 'voice.id', panel: 'E', tier: 'common', tag: 'EP', stages: [],
+    label: 'Which voice', help: 'Filled in from the machine\'s own voice list. Never free text: an unknown name exits zero and silently substitutes the default.',
+    kind: 'voice', default: null, owner: 'synthesize', settingsId: 'synthesize.voiceIndex', wire: 'SynthesizeOptions.voice' },
+  { row: 29, id: 'voice.rate', panel: 'E', tier: 'common', tag: 'EP', stages: [],
+    label: 'How fast', help: 'Speaking rate, as a multiple of the voice\'s own.',
+    kind: 'float', range: { min: 0.5, max: 2.0, step: 0.05 }, unit: 'times', default: 1.0,
+    owner: 'synthesize', settingsId: 'synthesize.rate', wire: 'SynthesizeOptions.rate' },
+  { row: 30, id: 'voice.pitch', panel: 'E', tier: 'more', tag: 'EP', stages: [],
+    label: 'How high', help: 'No field exists yet — this control renders and the schema carries it, so the gap stays countable.',
+    kind: 'int', range: { min: -50, max: 50, step: 5 }, unit: 'steps', default: 0,
+    owner: 'synthesize', settingsId: 'synthesize.pitch', wire: null },
+  { row: 31, id: 'voice.volume', panel: 'E', tier: 'more', tag: 'EP', stages: [],
+    label: 'How loud', help: 'No field exists yet — designed, not wired.',
+    kind: 'int', range: { min: 0, max: 100, step: 5 }, unit: 'percent', default: 100,
+    owner: 'synthesize', settingsId: 'synthesize.volume', wire: null },
+  { row: 32, id: 'pace.chunkMaxUnits', panel: 'E', tier: 'common', tag: 'PP', stages: [],
+    label: 'How long a chunk', help: 'How much text is synthesized at once. Judged today against a floor that changes.',
+    kind: 'int', range: { min: 40, max: 600, step: 20 }, unit: 'characters', default: 200,
+    owner: 'chunk', settingsId: 'chunk.maxUnits', wire: 'ChunkerOptions.maxUnits' },
+  { row: 33, id: 'pace.isolateFirstSentence', panel: 'E', tier: 'more', tag: 'PP', stages: [],
+    label: 'Whether the first sentence goes alone', help: 'Send sentence one on its own so the first audio arrives sooner.',
+    kind: 'bool', default: true, words: { true: 'sent on its own', false: 'sent with the rest' },
+    owner: 'chunk', settingsId: 'chunk.isolateFirstSentence', wire: 'ChunkerOptions.isolateFirstSentence' },
+  { row: 34, id: 'pace.simulateChunkGapMs', panel: 'E', tier: 'common', tag: 'PP', stages: [],
+    label: 'The gap between chunks', help: 'The lab has no gap; the shipped plugin has about nine hundred and fifty milliseconds of one. Hear either world.',
+    kind: 'int', range: { min: 0, max: 1500, step: 50 }, unit: 'ms', default: 0,
+    presets: [{ value: 0, label: 'no gap — where we are going' }, { value: 950, label: 'nine hundred and fifty — version one on this machine' }],
+    owner: 'lab', settingsId: 'lab.simulateChunkGapMs', wire: null },
+  { row: 35, id: 'pace.sentencePauseMs', panel: 'E', tier: 'more', tag: 'EP', stages: [],
+    label: 'How long a sentence pauses', help: 'Milliseconds between sentences. In milliseconds so the number survives when SSML lands.',
+    kind: 'int', range: { min: 0, max: 800, step: 25 }, unit: 'ms', default: 0,
+    owner: 'unassigned', settingsId: 'normalize.sentencePauseMs', wire: null },
+  { row: 44, id: 'pace.pauseBackend', panel: 'E', tier: 'common', tag: 'EP', stages: [],
+    label: 'How a pause is written', help: 'Punctuation is the only one implemented; the others are here so the cost of SSML can be heard before it is paid.',
+    ...sel(['punctuation', 'ssml', 'in-band']),
+    words: { punctuation: 'as punctuation', ssml: 'as markup', 'in-band': 'as an in-band command' },
+    default: 'punctuation', owner: 'unassigned', settingsId: 'synthesize.pauseBackend', wire: null },
+
+  // ── Panel F — what interrupts what, and what gets announced ───────────────────────────
+  { row: 36, id: 'queue.maxQueued', panel: 'F', tier: 'common', tag: 'EI', stages: [],
+    label: 'How many replies wait', help: 'Twenty queued replies is roughly three minutes of unrequested speech. Eight is what you have been living with.',
+    kind: 'int', range: { min: 1, max: 20, step: 1 }, unit: 'replies', default: 8,
+    owner: 'queue', settingsId: 'queue.maxQueued', wire: null },
+  { row: 37, id: 'queue.overflowPolicy', panel: 'F', tier: 'more', tag: 'EI', stages: [],
+    label: 'Which reply is dropped when full', help: 'Dropping the oldest silently was the third fault behind the session that hijacked your audio.',
+    ...sel(['drop-oldest', 'drop-newest']), words: { 'drop-oldest': 'the oldest', 'drop-newest': 'the newest' },
+    default: 'drop-oldest', owner: 'queue', settingsId: 'queue.overflowPolicy', wire: null },
+  { row: 38, id: 'announce.mode', panel: 'F', tier: 'common', tag: 'EI', stages: [],
+    label: 'Whether an announcement interrupts', help: 'Replace cuts off a reply in progress; queue waits for it.',
+    ...sel(['replace', 'queue']), words: { replace: 'it interrupts', queue: 'it waits its turn' },
+    default: 'replace', owner: 'queue', settingsId: 'queue.announceMode', wire: null },
+  { row: 39, id: 'announce.sessionLabel', panel: 'F', tier: 'common', tag: 'EI', stages: [],
+    label: 'How a session is named', help: 'Hex is not on this list, and that is deliberate: two designs call eight hex characters a non-answer to who is speaking.',
+    ...sel(['call-sign', 'call-sign-plus-name', 'registry-name', 'branch', 'displayName']),
+    words: { 'call-sign': 'by call sign', 'call-sign-plus-name': 'by call sign and name', 'registry-name': 'by its registry name', branch: 'by branch', displayName: 'by display name' },
+    default: 'call-sign', owner: 'announce', settingsId: 'announce.sessionLabel', wire: null },
+  { row: 40, id: 'announce.sessionLabelHashChars', panel: 'F', tier: 'more', tag: 'EI', stages: [],
+    label: 'How many hex characters', help: 'Zero. The control exists only so you can say "none" and see that it was decided, not overlooked. Above zero, the lab warns you aloud, once.',
+    kind: 'int', range: { min: 0, max: 8, step: 1 }, unit: 'characters', default: 0,
+    warnAbove: 0, warning: 'Hex read aloud is close to the worst case this project has. Two designs call it a non-answer to who is speaking.',
+    owner: 'lab', settingsId: 'lab.sessionLabelHashChars', wire: null },
+  { row: 41, id: 'announce.switchPhrase', panel: 'F', tier: 'more', tag: 'EI', stages: [],
+    label: 'What a session switch says', help: 'Spoken when the audio moves to another session. {label} is filled in.',
+    kind: 'template', maxLength: 80, default: 'Now reading from {label}.',
+    owner: 'announce', settingsId: 'announce.switchPhrase', wire: null },
+  { row: 42, id: 'announce.statusTemplate', panel: 'F', tier: 'more', tag: 'EI', stages: [],
+    label: 'What status says', help: 'The wording and order of the spoken status report.',
+    kind: 'template', maxLength: 160, default: '{state}. {queued} waiting. Following {label}.',
+    owner: 'announce', settingsId: 'announce.statusTemplate', wire: null },
+  { row: 43, id: 'input.clipboardCap', panel: 'F', tier: 'more', tag: 'EI', stages: [],
+    label: 'How much clipboard is read', help: 'Above this, the clipboard read is truncated and the truncation is announced.',
+    kind: 'int', range: { min: 2000, max: 50000, step: 1000 }, unit: 'characters', default: 20000,
+    owner: 'input', settingsId: 'input.clipboardCap', wire: null },
+  { row: 46, id: 'input.huddleReplyCap', panel: 'F', tier: 'common', tag: 'EI', stages: [],
+    label: 'How much of a reply is read', help: 'No cap exists at all today, and the reply queue counts replies, so one forty-thousand-character reply is thirty-three minutes and nothing can drop it.',
+    kind: 'int', range: { min: 2000, max: 50000, step: 1000 }, unit: 'characters', default: 8000,
+    owner: 'session', settingsId: 'session.huddleReplyCap', wire: null },
+  { row: 45, id: 'interrupt.granularity', panel: 'F', tier: 'common', tag: 'EP', stages: [],
+    label: 'How a stop lands', help: 'Cut now, finish the word first, or pause and keep the position.',
+    ...sel(['immediate', 'at-word', 'pause-keeps-position']),
+    words: { immediate: 'immediately', 'at-word': 'at the end of the word', 'pause-keeps-position': 'as a pause, keeping the place' },
+    default: 'immediate', owner: 'unassigned', settingsId: 'synthesize.interruptGranularity', wire: null }
+]
+
+/** Which controls govern a given normalizer stage — the diff's "which knob do I turn" answer. */
+function controlsForStage (stageNumber) {
+  return CONTROLS.filter((c) => c.stages.includes(stageNumber))
+}
+
+function controlById (id) {
+  return CONTROLS.find((c) => c.id === id) ?? null
+}
+
+function defaultValues () {
+  const out = {}
+  for (const c of CONTROLS) out[c.id] = Array.isArray(c.default) ? c.default.slice() : c.default
+  return out
+}
+
+const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen',
+  'nineteen', 'twenty']
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
+
+/** Numbers as words. 004 section 8 rule 4: a value is a word, never a number alone. */
+function numberWords (n) {
+  if (!Number.isFinite(n)) return String(n)
+  if (n < 0) return 'minus ' + numberWords(-n)
+  if (!Number.isInteger(n)) {
+    const [w, f] = String(n).split('.')
+    return numberWords(Number(w)) + ' point ' + f.split('').map((d) => ONES[Number(d)]).join(' ')
+  }
+  if (n <= 20) return ONES[n]
+  if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? ' ' + ONES[n % 10] : '')
+  if (n < 1000) return ONES[Math.floor(n / 100)] + ' hundred' + (n % 100 ? ' ' + numberWords(n % 100) : '')
+  if (n < 1000000) {
+    return numberWords(Math.floor(n / 1000)) + ' thousand' + (n % 1000 ? ' ' + numberWords(n % 1000) : '')
+  }
+  return String(n)
+}
+
+/**
+ * What the page SAYS a value is. Never a bare number: `path.depthN` at 2 reads
+ * "last two folders", not "2" (004 section 8 rule 4).
+ */
+function speakValue (control, value) {
+  if (control == null) return ''
+  switch (control.kind) {
+    case 'bool':
+      return control.words?.[String(Boolean(value))] ?? (value ? 'on' : 'off')
+    case 'enum':
+      return control.words?.[value] ?? String(value)
+    case 'multi': {
+      const list = Array.isArray(value) ? value : []
+      if (list.length === 0) return 'nothing'
+      return list.map((v) => control.words?.[v] ?? v).join(' and ')
+    }
+    case 'int':
+    case 'float': {
+      const preset = control.presets?.find((p) => p.value === value)
+      if (preset) return preset.label
+      const n = numberWords(value)
+      return control.unit ? `${n} ${control.unit}` : n
+    }
+    case 'template':
+      return value === '' ? 'empty' : String(value).trim()
+    case 'map':
+      return `${numberWords(Object.keys(value ?? {}).length)} entries`
+    case 'voice':
+      return value == null ? 'the system default' : String(value.name ?? value)
+    default:
+      return String(value)
+  }
+}
+
+/** "How much of the folder, the last folders" — control name, then value, nothing else. */
+function changeSentence (control, value) {
+  return `${control.label}, ${speakValue(control, value)}.`
+}
+
+/** Step a control's value by one notch. Returns the new value, or the old one at the end. */
+function stepValue (control, value, direction) {
+  switch (control.kind) {
+    case 'bool':
+      return direction > 0 ? true : false
+    case 'enum': {
+      const i = control.values.indexOf(value)
+      const next = Math.min(control.values.length - 1, Math.max(0, i + direction))
+      return control.values[next]
+    }
+    case 'multi': {
+      const list = Array.isArray(value) ? value.slice() : []
+      // One step cycles through the subsets in a stable order: none -> first -> both -> ...
+      const all = control.values
+      const idx = all.length === 0 ? 0 : list.length
+      const next = Math.min(all.length, Math.max(0, idx + direction))
+      return all.slice(0, next)
+    }
+    case 'int':
+    case 'float': {
+      const { min, max, step } = control.range
+      const raw = Number(value) + direction * step
+      const clamped = Math.min(max, Math.max(min, raw))
+      // Float steps of 0.05 accumulate error; round to the step grid.
+      const decimals = (String(step).split('.')[1] ?? '').length
+      return Number(clamped.toFixed(decimals))
+    }
+    default:
+      return value
+  }
+}
+/* ==INLINE END lib/controls.mjs== */
+
+/* ==INLINE BEGIN lib/diff.mjs== */
+// Word-level, stage-attributed diff — docs/design/004-voice-lab.md section 4 (Q24).
+//
+// Word-level, not character-level, and the reason is in the document: `session_handler.py` ->
+// `session handler, python` diffs into a dozen character fragments that carry no meaning to a
+// dyslexic reader. Word-level with no attribution tells you WHAT changed and leaves you guessing
+// WHICH CONTROL TO TURN. So every changed span carries the stage that produced it, and the page
+// turns that into the control that governs it.
+//
+// 004 specifies the output of `POST /normalize` (`{spoken, stages:[{n,name,text}]}`) and says
+// "the page computes the word diff locally" — but it never says how a span in the FINAL spoken
+// text is traced back to the stage that made it, given fifteen successive rewrites. The answer
+// implemented here is a forward provenance pass: diff each stage against the one before it, and
+// carry each surviving token's origin forward across the alignment. A token that is aligned is
+// inherited; a token that is an insertion belongs to the stage that inserted it. After fifteen
+// passes every token of the spoken text names its author, and `stage 0` means "this word came
+// through untouched from what you wrote".
+//
+// No diff library, by design: the page is CDN-free and this is ~60 lines.
+//
+// This module is inlined verbatim into index.html; voice-lab/lib/inline.test.mjs fails if the
+// two copies drift.
+
+/** Split into whitespace-delimited tokens, keeping each one's offsets into the source string. */
+function tokenize (text) {
+  const out = []
+  const re = /\S+/g
+  let m
+  while ((m = re.exec(text)) !== null) {
+    out.push({ text: m[0], start: m.index, end: m.index + m[0].length })
+  }
+  return out
+}
+
+/**
+ * Longest common subsequence over token text. Returns aligned index pairs [ai, bi], ascending.
+ * Classic dynamic programme — quadratic, which is correct for the few hundred tokens a fixture has.
+ */
+function lcsPairs (a, b) {
+  const n = a.length
+  const m = b.length
+  // Row-major (n+1) x (m+1) table of common-length.
+  const dp = new Uint32Array((n + 1) * (m + 1))
+  const at = (i, j) => i * (m + 1) + j
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[at(i, j)] = a[i] === b[j]
+        ? dp[at(i + 1, j + 1)] + 1
+        : Math.max(dp[at(i + 1, j)], dp[at(i, j + 1)])
+    }
+  }
+  const pairs = []
+  let i = 0
+  let j = 0
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { pairs.push([i, j]); i++; j++ } else if (dp[at(i + 1, j)] >= dp[at(i, j + 1)]) i++
+    else j++
+  }
+  return pairs
+}
+
+/**
+ * A word diff of two strings, as a flat op list.
+ * ops: {type: 'same'|'add'|'del', text, start, end} — offsets are into whichever side owns the op.
+ */
+function wordDiff (before, after) {
+  const A = tokenize(before)
+  const B = tokenize(after)
+  const pairs = lcsPairs(A.map((t) => t.text), B.map((t) => t.text))
+  const ops = []
+  let i = 0
+  let j = 0
+  const flushDel = (upto) => { while (i < upto) { ops.push({ type: 'del', ...A[i] }); i++ } }
+  const flushAdd = (upto) => { while (j < upto) { ops.push({ type: 'add', ...B[j] }); j++ } }
+  for (const [ai, bi] of pairs) {
+    flushDel(ai)
+    flushAdd(bi)
+    ops.push({ type: 'same', ...B[j] })
+    i++
+    j++
+  }
+  flushDel(A.length)
+  flushAdd(B.length)
+  return ops
+}
+
+/**
+ * Trace every token of the final text back to the stage that produced it.
+ *
+ * @param {string} source        the text as written
+ * @param {{n:number, name:string, text:string}[]} stages  fifteen stage outputs, in order
+ * @returns {{
+ *   spoken: {text:string,start:number,end:number,stage:number,stageName:string|null}[],
+ *   removed: {text:string,start:number,end:number,stage:number,stageName:string|null}[]
+ * }}
+ *   `stage: 0` on a spoken token means it came through untouched from the source.
+ *   `removed` are source tokens that no stage carried forward, each naming the stage that dropped it.
+ */
+function attribute (source, stages) {
+  let prevTokens = tokenize(source)
+  // Provenance of each token of the CURRENT stage output: 0 = came from the source untouched.
+  let origin = prevTokens.map(() => 0)
+  // Provenance of each SOURCE token: null while it survives, else the stage that dropped it.
+  const sourceIndexOf = prevTokens.map((_, k) => k)
+  const removedAt = prevTokens.map(() => null)
+  let traceToSource = sourceIndexOf.slice()
+
+  for (const stage of stages) {
+    const nextTokens = tokenize(stage.text)
+    const pairs = lcsPairs(prevTokens.map((t) => t.text), nextTokens.map((t) => t.text))
+    const nextOrigin = new Array(nextTokens.length).fill(stage.n)
+    const nextTrace = new Array(nextTokens.length).fill(-1)
+    const survived = new Array(prevTokens.length).fill(false)
+    for (const [pi, ni] of pairs) {
+      nextOrigin[ni] = origin[pi]
+      nextTrace[ni] = traceToSource[pi]
+      survived[pi] = true
+    }
+    for (let k = 0; k < prevTokens.length; k++) {
+      const src = traceToSource[k]
+      if (!survived[k] && src >= 0 && removedAt[src] === null) removedAt[src] = stage.n
+    }
+    prevTokens = nextTokens
+    origin = nextOrigin
+    traceToSource = nextTrace
+  }
+
+  const nameOf = (n) => stages.find((s) => s.n === n)?.name ?? null
+  const spoken = prevTokens.map((t, k) => ({
+    text: t.text, start: t.start, end: t.end, stage: origin[k], stageName: nameOf(origin[k])
+  }))
+  const sourceTokens = tokenize(source)
+  const removed = []
+  for (let k = 0; k < sourceTokens.length; k++) {
+    if (removedAt[k] !== null) {
+      removed.push({ ...sourceTokens[k], stage: removedAt[k], stageName: nameOf(removedAt[k]) })
+    }
+  }
+  return { spoken, removed }
+}
+/* ==INLINE END lib/diff.mjs== */
+
+/* ==INLINE BEGIN lib/cache-key.mjs== */
+// The AudioBuffer cache key — docs/design/004-voice-lab.md section 2.
+//
+// Replay is a cache hit or the two-second gate is not met. Playing again from the server re-pays
+// 414 ms of `say` spawn plus p50 1,054-1,163 ms of synthesis [measured-here], EVERY press. Playing
+// again from a decoded AudioBuffer is `source.start()`. So the page decodes each chunk exactly once
+// and keys it by everything that can change the bytes.
+//
+// 004 writes the key as `hash(chunkText + voice + rate)`. Those are the three inputs that reach
+// the synthesizer today (`SynthesizeOptions.voice`, `.rate` — the only two fields the provider
+// honours). `keyFor` takes the whole synthesize record rather than three positional arguments, so
+// that when `pitch` and `volume` are wired the key gains them by construction instead of silently
+// serving stale audio for a changed voice. `KEYED_FIELDS` names exactly what participates, and a
+// test asserts each one moves the key.
+//
+// This module is inlined verbatim into index.html; voice-lab/lib/inline.test.mjs fails if the
+// two copies drift.
+
+/** Every synthesize input that changes the bytes. Adding a field here changes every key. */
+const KEYED_FIELDS = ['voice', 'rate', 'pitch', 'volume']
+
+/** FNV-1a over two 32-bit lanes, rendered as 16 hex characters. No dependency, synchronous. */
+function hash (str) {
+  let h1 = 0x811c9dc5
+  let h2 = 0x01000193
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i)
+    h1 ^= c
+    h1 = Math.imul(h1, 0x01000193) >>> 0
+    h2 ^= c + i
+    h2 = Math.imul(h2, 0x85ebca6b) >>> 0
+  }
+  return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0')
+}
+
+/**
+ * The cache key for one synthesized chunk.
+ * @param {string} chunkText  the text handed to the provider, AFTER normalize and chunk
+ * @param {object} synth      the synthesize options — voice, rate, and anything later wired
+ */
+function keyFor (chunkText, synth = {}) {
+  // A stable, order-independent rendering: a key that changed when a caller reordered its object
+  // literal would miss every cache hit and the gate would fail for an invisible reason.
+  const parts = KEYED_FIELDS.map((f) => `${f}=${serializeField(synth[f])}`)
+  return hash(`${parts.join(' ')} text=${chunkText}`)
+}
+
+function serializeField (v) {
+  if (v === undefined || v === null) return '~'
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+/**
+ * A bounded map of decoded AudioBuffers. Eviction is least-recently-used, because the listener
+ * replays what they just changed and the gate lives on exactly those entries.
+ */
+function makeCache (limit = 256) {
+  const map = new Map()
+  return {
+    get (key) {
+      if (!map.has(key)) return undefined
+      const v = map.get(key)
+      map.delete(key)
+      map.set(key, v) // re-insert: Map preserves insertion order, so this is the LRU touch
+      return v
+    },
+    set (key, value) {
+      if (map.has(key)) map.delete(key)
+      map.set(key, value)
+      while (map.size > limit) map.delete(map.keys().next().value)
+      return value
+    },
+    has (key) { return map.has(key) },
+    get size () { return map.size },
+    clear () { map.clear() }
+  }
+}
+/* ==INLINE END lib/cache-key.mjs== */
+
+/* ==INLINE BEGIN lib/settings.mjs== */
+// The settings serializer — docs/design/011-settings.md sections 3 and 7.
+//
+// The export format IS the settings format (004 section 7: Q35 resolved negative, so there is no
+// host settings form and M11 and M12 fuse at the schema). Two documents describe the file and they
+// do not agree: 004 section 7 shows a NESTED object at `schemaVersion: 1` with no `revision`;
+// 011 sections 3.1 and 6 show one FLAT record of dotted ids at `schemaVersion: 2` with `revision`,
+// and gives three reasons for flat (the KV mirror is flat, per-field fallback is a loop, T124 is a
+// set comparison). 011 is the later document, it is the one the plugin worker reads, and it is the
+// one that carries `revision`. This module emits 011's shape. `provenance` is kept from 004,
+// because 011 section 9 Q64 depends on `provenance.platform` existing.
+//
+// This module is inlined verbatim into index.html; voice-lab/lib/inline.test.mjs fails if the
+// two copies drift.
+
+
+const SCHEMA_VERSION = 2
+const KIND = 'orca-tts-settings'
+const LAB_VERSION = '0.1.0'
+
+/** Build the settings file object from the lab's in-memory control values. */
+function toSettingsFile (values, { revision = 1, provenance = {}, writtenBy = `voice-lab/${LAB_VERSION}` } = {}) {
+  const settings = {}
+  for (const c of CONTROLS) {
+    const v = values[c.id]
+    settings[c.settingsId] = v === undefined ? c.default : v
+  }
+  return {
+    kind: KIND,
+    schemaVersion: SCHEMA_VERSION,
+    revision,
+    writtenBy,
+    provenance: {
+      tunedWith: provenance.tunedWith ?? 'os-synth',
+      platform: provenance.platform ?? 'unknown',
+      voiceListHash: provenance.voiceListHash ?? null,
+      labVersion: LAB_VERSION,
+      tunedAt: provenance.tunedAt ?? null
+    },
+    settings
+  }
+}
+
+/**
+ * Read a settings file back into control values, falling back PER FIELD (T123) and reporting what
+ * it rejected. A whole-file throw would lose forty-five good values to one bad one.
+ * @returns {{values: object, revision: number, rejected: {id:string, why:string}[], unknown: string[]}}
+ */
+function fromSettingsFile (file) {
+  const values = defaultValues()
+  const rejected = []
+  const unknown = []
+  if (file == null || typeof file !== 'object') {
+    return { values, revision: 0, rejected: [{ id: '(file)', why: 'not an object' }], unknown }
+  }
+  const record = file.settings && typeof file.settings === 'object' ? file.settings : {}
+  const bySettingsId = new Map(CONTROLS.map((c) => [c.settingsId, c]))
+  for (const [key, raw] of Object.entries(record)) {
+    const control = bySettingsId.get(key)
+    if (!control) { unknown.push(key); continue }
+    const verdict = coerce(control, raw)
+    if (verdict.ok) values[control.id] = verdict.value
+    else rejected.push({ id: key, why: verdict.why })
+  }
+  const revision = Number.isInteger(file.revision) && file.revision >= 0 ? file.revision : 0
+  return { values, revision, rejected, unknown }
+}
+
+function coerce (control, raw) {
+  switch (control.kind) {
+    case 'bool':
+      return typeof raw === 'boolean' ? { ok: true, value: raw } : { ok: false, why: 'not a true/false value' }
+    case 'enum':
+      return control.values.includes(raw) ? { ok: true, value: raw } : { ok: false, why: `not one of ${control.values.join(', ')}` }
+    case 'multi': {
+      if (!Array.isArray(raw)) return { ok: false, why: 'not a list' }
+      const bad = raw.find((v) => !control.values.includes(v))
+      return bad === undefined ? { ok: true, value: raw.slice() } : { ok: false, why: `${bad} is not a legal entry` }
+    }
+    case 'int':
+    case 'float': {
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) return { ok: false, why: 'not a number' }
+      if (control.kind === 'int' && !Number.isInteger(raw)) return { ok: false, why: 'not a whole number' }
+      const { min, max } = control.range
+      if (raw < min || raw > max) return { ok: false, why: `outside ${min} to ${max}` }
+      return { ok: true, value: raw }
+    }
+    case 'template':
+      if (typeof raw !== 'string') return { ok: false, why: 'not text' }
+      if (control.maxLength && raw.length > control.maxLength) return { ok: false, why: `longer than ${control.maxLength} characters` }
+      return { ok: true, value: raw }
+    case 'map':
+      return raw != null && typeof raw === 'object' && !Array.isArray(raw)
+        ? { ok: true, value: { ...raw } }
+        : { ok: false, why: 'not a table of entries' }
+    case 'voice':
+      return raw === null || typeof raw === 'number' || typeof raw === 'string'
+        ? { ok: true, value: raw }
+        : { ok: false, why: 'not a voice index' }
+    default:
+      return { ok: true, value: raw }
+  }
+}
+
+/**
+ * The Save guard — 011 section 7: the lab re-reads the file before every Save and refuses to save
+ * over a revision it did not last see. Without this, a hand-edit made while the lab was open is
+ * destroyed by the next Save with nothing said about it.
+ * @param {number} lastSeen  the revision the lab read when it last loaded or saved
+ * @param {number} onDisk    the revision just re-read from the file
+ */
+function saveDecision (lastSeen, onDisk) {
+  if (onDisk === lastSeen) return { ok: true, nextRevision: onDisk + 1 }
+  return {
+    ok: false,
+    nextRevision: null,
+    reason: `The settings file changed underneath the lab: it was revision ${lastSeen} when you loaded it and it is revision ${onDisk} now. Reload it, or overwrite it on purpose.`
+  }
+}
+
+/**
+ * Render the file as JSONC — 011 section 6. Comments are generated from the control inventory, so
+ * a listener editing by hand reads what a control means AT THE POINT OF EDIT, and the comments
+ * cannot drift from the code.
+ */
+function serializeJsonc (file) {
+  const lines = ['{']
+  lines.push(`  "kind": ${JSON.stringify(file.kind)},`)
+  lines.push(`  "schemaVersion": ${file.schemaVersion},`)
+  lines.push(`  "revision": ${file.revision},`)
+  lines.push(`  "writtenBy": ${JSON.stringify(file.writtenBy)},`)
+  lines.push(`  "provenance": ${JSON.stringify(file.provenance)},`)
+  lines.push('')
+  lines.push('  "settings": {')
+  const rows = []
+  for (const panel of PANELS) {
+    rows.push({ banner: panel.title })
+    for (const c of CONTROLS.filter((x) => x.panel === panel.id)) rows.push({ control: c })
+  }
+  const written = []
+  for (const row of rows) {
+    if (row.banner) {
+      written.push('')
+      written.push(`    // ${'─'.repeat(3)} ${row.banner} ${'─'.repeat(Math.max(3, 64 - row.banner.length))}`)
+      continue
+    }
+    const c = row.control
+    written.push(`    // ${c.label}. ${c.help}`)
+    if (c.kind === 'enum') written.push(`    //   one of: ${c.values.join(' · ')}`)
+    if (c.range) written.push(`    //   ${c.range.min} to ${c.range.max}, in steps of ${c.range.step}`)
+    if (c.wire === null) written.push('    //   designed, not yet wired: the plugin carries this value and does not read it yet.')
+    written.push(`    ${JSON.stringify(c.settingsId)}: ${JSON.stringify(file.settings[c.settingsId])},`)
+  }
+  // Trailing commas are legal in JSONC, but a file a human reads should not end on one.
+  const lastValue = written.map((l, i) => [l, i]).filter(([l]) => /^\s{4}"/.test(l)).pop()
+  if (lastValue) written[lastValue[1]] = written[lastValue[1]].replace(/,$/, '')
+  lines.push(...written)
+  lines.push('  }')
+  lines.push('}')
+  return lines.join('\n') + '\n'
+}
+
+/** Strip `//` and block comments so JSON.parse can read a hand-edited JSONC file. */
+function stripJsonComments (text) {
+  let out = ''
+  let inString = false
+  let inLine = false
+  let inBlock = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    const d = text[i + 1]
+    if (inLine) { if (c === '\n') { inLine = false; out += c } continue }
+    if (inBlock) { if (c === '*' && d === '/') { inBlock = false; i++ } continue }
+    if (inString) {
+      out += c
+      if (c === '\\') { out += d ?? ''; i++ } else if (c === '"') inString = false
+      continue
+    }
+    if (c === '"') { inString = true; out += c; continue }
+    if (c === '/' && d === '/') { inLine = true; i++; continue }
+    if (c === '/' && d === '*') { inBlock = true; i++; continue }
+    out += c
+  }
+  // Trailing commas, which JSONC tolerates and JSON.parse does not.
+  return out.replace(/,(\s*[}\]])/g, '$1')
+}
+/* ==INLINE END lib/settings.mjs== */
+
+/* ==INLINE BEGIN lib/keys.mjs== */
+// The keyboard vocabulary — docs/.discussion/003-panel-and-control-channel.md section 4a.
+//
+// 4a is THE SOURCE. This table is transcribed from it and nothing here is invented: a control that
+// means two things on two surfaces is the muscle-memory bug X-09 and 007 C1 both pin, and the
+// listener is not looking at the screen. `s` is stop on both surfaces because it is the fastest
+// press-to-silence route in the system; `R` is replay, not restore; `m` is mute, not more;
+// snapshot and restore are `K` and `L`; the More tier is `+` and `-`.
+//
+// This module is inlined verbatim into index.html; voice-lab/lib/inline.test.mjs fails if the
+// two copies drift.
+
+/** 4a.1 — transport. Identical meaning on every surface. */
+const TRANSPORT = [
+  { key: ' ', display: 'Space', verb: 'play-pause', does: 'play, pause, resume' },
+  { key: 'p', display: 'p', verb: 'play-pause', does: 'pause or resume' },
+  { key: 's', display: 's', verb: 'stop', does: 'stop' },
+  { key: '.', display: '.', verb: 'stop', does: 'stop (alias)' },
+  { key: 'R', display: 'R', verb: 'replay', does: 'replay the last thing played' },
+  { key: 'm', display: 'm', verb: 'mute', does: 'mute the speak-on-change confirmations' },
+  { key: '?', display: '?', verb: 'describe', does: 'speak the focused control\'s description' },
+  { key: 'Escape', display: 'Esc', verb: 'close', does: 'close whatever opened' }
+]
+
+/** 4a.2 — surface-specific to the lab. */
+const LAB_KEYS = [
+  { key: 'ArrowUp', display: '↑', verb: 'prev-control', does: 'previous control' },
+  { key: 'ArrowDown', display: '↓', verb: 'next-control', does: 'next control' },
+  { key: 'ArrowLeft', display: '←', verb: 'step-down', does: 'change the focused control down one step' },
+  { key: 'ArrowRight', display: '→', verb: 'step-up', does: 'change the focused control up one step' },
+  { key: 'Tab', display: 'Tab', verb: 'next-panel', does: 'next panel' },
+  { key: '+', display: '+', verb: 'more', does: 'reveal this panel\'s More tier' },
+  { key: '-', display: '-', verb: 'less', does: 'collapse this panel\'s More tier' },
+  { key: 'C', display: 'C', verb: 'compare', does: 'compare A against B, blind' },
+  { key: '1', display: '1', verb: 'keep-first', does: 'keep the first set' },
+  { key: '2', display: '2', verb: 'keep-second', does: 'keep the second set' },
+  { key: 'E', display: 'E', verb: 'explain', does: 'explain — open the fifteen-stage ladder' },
+  { key: 'K', display: 'K', verb: 'snapshot', does: 'keep — snapshot this set' },
+  { key: 'L', display: 'L', verb: 'restore', does: 'load — restore a snapshot' }
+]
+
+const BINDINGS = [...TRANSPORT, ...LAB_KEYS]
+
+/** Look up the verb for a KeyboardEvent. Case matters: `R` is replay, `r` is nothing. */
+function verbFor (event) {
+  const k = event.key
+  const hit = BINDINGS.find((b) => b.key === k)
+  return hit ? hit.verb : null
+}
+
+/**
+ * No key may mean two things on this surface (4a.2's own title). This is asserted by a test
+ * rather than trusted, because the collision it prevents is invisible until a listener who is not
+ * looking presses the key.
+ */
+function collisions () {
+  const seen = new Map()
+  const out = []
+  for (const b of BINDINGS) {
+    const prior = seen.get(b.key)
+    if (prior && prior.verb !== b.verb) out.push([prior, b])
+    else if (!prior) seen.set(b.key, b)
+  }
+  return out
+}
+/* ==INLINE END lib/keys.mjs== */
+
+/* ==INLINE BEGIN lib/earcons.mjs== */
+// The control band — docs/design/005-agent-identity.md section 11.1b.
+//
+// THE LAB DOES NOT MINT TONES. 005 section 11.1 allocates all thirty motifs of a six-note
+// pentatonic space to agent identity; any tone this page invented would, by construction, be some
+// live agent's identity, and a listener who has learned "rising G5-A5 is Cedar" would hear that
+// motif as the confirmation of a Stop. Every earcon below is copied from the named table, with its
+// notes and its duration. Identity is two notes from the pentatonic set; control is one or three
+// notes from a DISJOINT set — C4, F4, A4 low and E6, G6 high — and never two.
+//
+// Sound discipline (PITFALLS P31): nothing here is played on load, on reconnect, or on any timer.
+// An earcon sounds when the listener pressed something. That is the whole rule.
+//
+// This module is inlined verbatim into index.html; voice-lab/lib/inline.test.mjs fails if the
+// two copies drift.
+
+/** The control band's pitches, in hertz. Disjoint from the identity set by construction. */
+const CONTROL_PITCHES = { C4: 261.63, F4: 349.23, A4: 440.0, E6: 1318.51, G6: 1567.98 }
+
+/** The identity band's pitches, listed only so a test can assert the two sets do not overlap. */
+const IDENTITY_PITCHES = { C5: 523.25, D5: 587.33, E5: 659.26, G5: 783.99, A5: 880.0, C6: 1046.5 }
+
+const GAIN = 0.05
+
+const EARCONS = {
+  'control.play': { notes: ['E6'], totalMs: 150 },
+  'control.stop': { notes: ['C4'], totalMs: 150 },
+  'control.pause': { notes: ['F4'], totalMs: 150 },
+  'control.skip': { notes: ['C4', 'A4', 'E6'], totalMs: 150 },
+  'control.error': { notes: ['C4', 'C4', 'C4'], totalMs: 150 },
+  'control.refused': { notes: ['E6', 'A4', 'C4'], totalMs: 150 },
+  // The one deliberate exception to the 150 ms rule: a separator has to read as a gap.
+  'control.compare': { notes: ['G6'], totalMs: 300 }
+}
+
+/**
+ * The note schedule for one earcon: one note filling the duration, or three of 40 ms with 15 ms
+ * gaps (005 section 11.1's envelope column).
+ * @returns {{freq:number, offsetMs:number, durationMs:number}[]}
+ */
+function schedule (id) {
+  const spec = EARCONS[id]
+  if (!spec) return []
+  if (spec.notes.length === 1) {
+    return [{ freq: CONTROL_PITCHES[spec.notes[0]], offsetMs: 0, durationMs: spec.totalMs }]
+  }
+  return spec.notes.map((n, i) => ({
+    freq: CONTROL_PITCHES[n], offsetMs: i * 55, durationMs: 40
+  }))
+}
+/* ==INLINE END lib/earcons.mjs== */
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   The page.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+const $ = (id) => document.getElementById(id)
+
+const state = {
+  fixtures: [],
+  fixture: null,
+  sets: { A: defaultValues(), B: defaultValues() },
+  active: 'A',
+  focusIndex: 0,
+  openPanel: 'C',           // 004's wireframe opens on names and paths; the rest are collapsed.
+  morePanels: new Set(),
+  speakOnChange: true,
+  stages: [],
+  spokenText: '',
+  attribution: { spoken: [], removed: [] },
+  voices: [],
+  platform: null,
+  provider: null,
+  voiceListHash: null,
+  playedElsewhere: null,    // { backend, hint } when the OS daemon owns the audio
+  lastSpeakError: null,
+  serverDown: null,
+  lastPlayed: null,         // { text, synth, keys } — what R replays
+  compare: null,
+  hexWarned: false,
+  settingsRevision: 0,
+  snapshots: []
+}
+
+const values = () => state.sets[state.active]
+
+/* ── Audio ───────────────────────────────────────────────────────────────────
+   One AudioContext for the whole session, so the device is opened once rather than once per
+   chunk — that is where the ~950 ms inter-sentence gap went (PITFALLS P32). It is constructed on
+   the first press and never before: a page that opens the audio device on load is the P31
+   scenario with extra steps. */
+let ctx = null
+const buffers = makeCache(256)
+let voices = []      // live AudioBufferSourceNodes, so Stop can reach all of them
+let playing = false
+let paused = false
+
+function audio () {
+  if (ctx === null) ctx = new (window.AudioContext || window.webkitAudioContext)()
+  return ctx
+}
+
+function earcon (id) {
+  const a = audio()
+  const now = a.currentTime
+  for (const note of schedule(id)) {
+    const osc = a.createOscillator()
+    const gain = a.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = note.freq
+    const t0 = now + note.offsetMs / 1000
+    const t1 = t0 + note.durationMs / 1000
+    // 5 ms raised-cosine-ish fades: a square-edged tone clicks, and a click is not information.
+    gain.gain.setValueAtTime(0, t0)
+    gain.gain.linearRampToValueAtTime(GAIN, t0 + 0.005)
+    gain.gain.setValueAtTime(GAIN, Math.max(t0 + 0.005, t1 - 0.005))
+    gain.gain.linearRampToValueAtTime(0, t1)
+    osc.connect(gain).connect(a.destination)
+    osc.start(t0)
+    osc.stop(t1 + 0.01)
+  }
+}
+
+/** Branch on chunk.format — 004 section 2: today 'wav', tomorrow 'pcm-s16le' from a sidecar. */
+async function decodeChunk (chunk) {
+  const bytes = base64ToBytes(chunk.base64)
+  if (chunk.format === 'wav') return await audio().decodeAudioData(bytes.buffer)
+  if (chunk.format === 'pcm-s16le') {
+    const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2))
+    const channels = chunk.channels || 1
+    const frames = Math.floor(pcm.length / channels)
+    const buf = audio().createBuffer(channels, frames, chunk.sampleRate || 22050)
+    for (let c = 0; c < channels; c++) {
+      const out = buf.getChannelData(c)
+      for (let i = 0; i < frames; i++) out[i] = pcm[i * channels + c] / 32768
+    }
+    return buf
+  }
+  throw new Error(`the provider returned a format this page cannot decode: ${chunk.format}`)
+}
+
+function base64ToBytes (b64) {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+function stopAudio () {
+  for (const v of voices) { try { v.stop() } catch { /* already ended */ } }
+  voices = []
+  playing = false
+  paused = false
+  if (ctx && ctx.state === 'suspended') ctx.resume()
+}
+
+/**
+ * Schedule already-decoded buffers back to back on the one context, plus the listener's simulated
+ * inter-chunk gap. Returns a promise that settles when the last chunk has finished.
+ */
+function scheduleBuffers (bufs, gapMs, onDone) {
+  const a = audio()
+  let t = a.currentTime + 0.02
+  playing = true
+  paused = false
+  for (const buf of bufs) {
+    const src = a.createBufferSource()
+    src.buffer = buf
+    src.connect(a.destination)
+    src.start(t)
+    voices.push(src)
+    t += buf.duration + gapMs / 1000
+  }
+  const last = voices[voices.length - 1]
+  if (!last) { playing = false; onDone?.(); return }
+  last.onended = () => { if (playing) { playing = false; voices = []; onDone?.() } }
+}
+
+/* ── The server ──────────────────────────────────────────────────────────────
+   The contract is docs/design/004-voice-lab.md section 2. `scripts/voice-lab.mjs` (job J12) owns
+   the other end; this page never spawns anything and never plays server-side. */
+
+async function api (path, body) {
+  const res = await fetch(path, body === undefined
+    ? { headers: { accept: 'application/json' } }
+    : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const text = await res.text()
+  let json = null
+  try { json = text ? JSON.parse(text) : null } catch { /* a non-JSON body is reported as-is */ }
+  return { status: res.status, ok: res.ok, json, text }
+}
+
+function serverIsDown (err) {
+  state.serverDown = err
+  $('banner-server').hidden = false
+  $('banner-server-body').textContent =
+    'Start it with  pnpm voice-lab  in the repository root, then reload this page. ' +
+    'Nothing on this page will play until it answers. (' + String(err && err.message || err) + ')'
+  setStatus('The lab server is not answering. Start it with pnpm voice-lab.')
+}
+
+function serverIsUp () {
+  state.serverDown = null
+  $('banner-server').hidden = true
+}
+
+/* The server consumes the REAL options objects, not the settings file: `NormalizeOptions`,
+   `ChunkerOptions`, `SynthesizeOptions`. Only nine of the forty-six controls reach one today
+   (011 section 3.2), and this function is the honest list of which nine. The other thirty-seven
+   are carried in the settings file and marked "not yet wired" on their row, so the gap is
+   countable rather than invisible — P26's lesson, applied to the lab itself. */
+function normalizeOptions () {
+  const v = values()
+  return {
+    codeBlocks: v['omit.codeBlocks'],
+    pathStyle: v['path.style'],
+    extensionStyle: v['path.extensionStyle'],
+    expandNumbers: v['num.expandIntegers'],
+    orderedLists: v['struct.orderedLists']
+  }
+}
+
+function chunkOptions () {
+  const v = values()
+  return { maxUnits: v['pace.chunkMaxUnits'], isolateFirstSentence: v['pace.isolateFirstSentence'] }
+}
+
+/** The voice travels to the provider as a NAME and is persisted as an INDEX (P28, 005 section 9). */
+function synthOptions () {
+  const v = values()
+  const chosen = state.voices.find((x) => x.index === v['voice.id'])
+  return { voice: chosen ? chosen.name : undefined, rate: v['voice.rate'] }
+}
+
+function speakOptions () {
+  return { normalize: normalizeOptions(), chunk: chunkOptions(), synthesize: synthOptions() }
+}
+
+/* ── Normalize: re-render written vs spoken ─────────────────────────────────── */
+
+async function renormalize () {
+  if (!state.fixture) return
+  try {
+    const r = await api('/normalize', { text: state.fixture.text, options: normalizeOptions() })
+    serverIsUp()
+    if (!r.ok || !r.json) { setStatus('The server could not normalize that fixture.'); return }
+    state.spokenText = r.json.spoken ?? ''
+    state.stages = r.json.stages ?? []
+    state.attribution = attribute(state.fixture.text, state.stages)
+    renderPanes()
+  } catch (err) {
+    serverIsDown(err)
+  }
+}
+
+function renderPanes () {
+  const written = $('pane-written')
+  const spoken = $('pane-spoken')
+  written.textContent = ''
+  spoken.textContent = ''
+
+  // Written pane: source tokens, with the ones no stage carried forward struck through.
+  const removedByStart = new Map(state.attribution.removed.map((t) => [t.start, t]))
+  for (const tok of tokenize(state.fixture.text)) {
+    const rem = removedByStart.get(tok.start)
+    const el = document.createElement('span')
+    el.className = 'w' + (rem ? ' removed' : '')
+    el.textContent = tok.text
+    if (rem) {
+      el.tabIndex = 0
+      el.dataset.stage = String(rem.stage)
+      el.dataset.start = String(tok.start)
+      el.dataset.end = String(tok.end)
+      el.dataset.kind = 'removed'
+    }
+    written.append(el, ' ')
+  }
+
+  // Spoken pane. EVERY span carries data-start / data-end into the spoken string — not merely a
+  // diff class. That is 004 section 6a's cheap non-foreclosure: a live word cursor later becomes
+  // "add a class to the span whose range contains the callback offset", not a rewrite of the pane.
+  for (const tok of state.attribution.spoken) {
+    const el = document.createElement('span')
+    el.className = 'w' + (tok.stage > 0 ? ' added' : '')
+    el.textContent = tok.text
+    el.dataset.start = String(tok.start)
+    el.dataset.end = String(tok.end)
+    el.dataset.stage = String(tok.stage)
+    if (tok.stage > 0) {
+      el.tabIndex = 0
+      el.dataset.kind = 'added'
+      el.addEventListener('focus', () => describeSpan(el))
+      el.addEventListener('mouseenter', () => describeSpan(el))
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); jumpToControlFor(Number(el.dataset.stage)) }
+      })
+      el.addEventListener('click', () => { describeSpan(el); jumpToControlFor(Number(el.dataset.stage)) })
+    }
+    spoken.append(el, ' ')
+  }
+  for (const el of $('pane-written').querySelectorAll('[data-kind="removed"]')) {
+    el.addEventListener('focus', () => describeSpan(el))
+    el.addEventListener('mouseenter', () => describeSpan(el))
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); jumpToControlFor(Number(el.dataset.stage)) }
+    })
+  }
+}
+
+function describeSpan (el) {
+  const n = Number(el.dataset.stage)
+  const stageName = STAGES[n - 1] ?? '(unchanged)'
+  const governing = controlsForStage(n)
+  const verb = el.dataset.kind === 'removed' ? 'removed by' : 'produced by'
+  let text
+  if (FIXED_BY_DESIGN_STAGES.includes(n) || governing.length === 0) {
+    text = `“${el.textContent}” — ${verb} stage ${n}, ${stageName} — fixed by design. There is no control for this.`
+  } else {
+    const names = governing.map((c) => c.label).join(' · ')
+    text = `“${el.textContent}” — ${verb} stage ${n}, ${stageName}. Governed by: ${names}. Press Enter to jump to it.`
+  }
+  $('attribution').textContent = text
+  announce(text)
+}
+
+function jumpToControlFor (stageNumber) {
+  const governing = controlsForStage(stageNumber)
+  if (governing.length === 0) {
+    speakConfirmation('That transform is fixed by design. There is no control for it.')
+    return
+  }
+  const target = governing[0]
+  state.openPanel = target.panel
+  if (target.tier === 'more') state.morePanels.add(target.panel)
+  renderControls()
+  const idx = visibleControls().findIndex((c) => c.id === target.id)
+  if (idx >= 0) { state.focusIndex = idx; focusRow(true) }
+}
+
+/* ── The control surface ─────────────────────────────────────────────────────
+   One column. One control per row. Full width. No two-dimensional scanning, ever. Panels are
+   collapsed except the one in focus (004 section 8 rule 1). */
+
+function visibleControls () {
+  return CONTROLS.filter((c) =>
+    c.panel === state.openPanel && (c.tier === 'common' || state.morePanels.has(c.panel)))
+}
+
+function renderControls () {
+  const root = $('controls')
+  root.textContent = ''
+  for (const panel of PANELS) {
+    const count = CONTROLS.filter((c) => c.panel === panel.id).length
+    const open = state.openPanel === panel.id
+    const el = document.createElement('section')
+    el.className = 'panel'
+    el.dataset.open = String(open)
+    el.dataset.more = String(state.morePanels.has(panel.id))
+
+    const head = document.createElement('button')
+    head.className = 'head'
+    head.setAttribute('aria-expanded', String(open))
+    head.innerHTML = `<span class="title">${panel.title}</span>
+      <span class="count">${count} control${count === 1 ? '' : 's'}</span>`
+    head.addEventListener('click', () => {
+      state.openPanel = panel.id
+      state.focusIndex = 0
+      renderControls()
+      focusRow(false)
+      speakConfirmation(`${panel.title}, ${numberWords(count)} controls.`)
+    })
+    el.append(head)
+
+    if (open) {
+      const rows = document.createElement('div')
+      rows.className = 'rows'
+      for (const c of CONTROLS.filter((x) => x.panel === panel.id)) {
+        rows.append(renderRow(c))
+      }
+      const moreBtn = document.createElement('button')
+      moreBtn.className = 'row'
+      const hidden = CONTROLS.filter((x) => x.panel === panel.id && x.tier === 'more').length
+      moreBtn.innerHTML = state.morePanels.has(panel.id)
+        ? `<span class="label">Hide the ${numberWords(hidden)} less-used controls</span><span class="kbd">-</span>`
+        : `<span class="label">Show ${numberWords(hidden)} more controls</span><span class="kbd">+</span>`
+      moreBtn.addEventListener('click', () => toggleMore(panel.id))
+      rows.append(moreBtn)
+      el.append(rows)
+    }
+    root.append(el)
+  }
+  $('count').textContent =
+    `${CONTROLS.length} controls · ${CONTROLS.filter((c) => c.tag !== 'EI').length} engine- or pacing-provisional` +
+    ` · ${CONTROLS.filter((c) => c.wire === null).length} designed, not wired`
+  markFocus()
+}
+
+function renderRow (c) {
+  const row = document.createElement('button')
+  row.className = 'row' + (c.tier === 'more' ? ' tier-more' : '')
+  row.dataset.control = c.id
+  const label = document.createElement('span')
+  label.className = 'label'
+  label.textContent = c.label
+  const value = document.createElement('span')
+  value.className = 'value'
+  value.textContent = '‹ ' + speakValue(c, values()[c.id]) + ' ›'
+  const tag = document.createElement('span')
+  tag.className = 'tag'
+  tag.textContent = c.tag
+  tag.title = { EI: 'engine-independent — this decision transfers to any engine',
+    EP: 'engine-provisional — another engine or platform may invalidate this value',
+    PP: 'pacing-provisional — judged against a floor that is going to change' }[c.tag]
+  row.append(label, value, tag)
+  if (c.wire === null) {
+    const un = document.createElement('span')
+    un.className = 'unwired'
+    un.textContent = 'not yet wired'
+    un.title = 'The lab renders this control and the settings file carries it; the plugin does not read it yet.'
+    row.append(un)
+  }
+  row.setAttribute('aria-label', `${c.label}, ${speakValue(c, values()[c.id])}`)
+  row.addEventListener('click', () => {
+    const idx = visibleControls().findIndex((x) => x.id === c.id)
+    if (idx >= 0) { state.focusIndex = idx; focusRow(true) }
+  })
+  return row
+}
+
+function focused () {
+  const list = visibleControls()
+  if (list.length === 0) return null
+  state.focusIndex = Math.min(list.length - 1, Math.max(0, state.focusIndex))
+  return list[state.focusIndex]
+}
+
+function markFocus () {
+  for (const el of document.querySelectorAll('.row[data-focused]')) el.dataset.focused = 'false'
+  const c = focused()
+  if (!c) return
+  const el = document.querySelector(`.row[data-control="${CSS.escape(c.id)}"]`)
+  if (el) el.dataset.focused = 'true'
+}
+
+function focusRow (speak) {
+  markFocus()
+  const c = focused()
+  if (!c) return
+  const el = document.querySelector(`.row[data-control="${CSS.escape(c.id)}"]`)
+  if (el) el.focus({ preventScroll: false })
+  if (speak) speakConfirmation(`${c.label}, ${speakValue(c, values()[c.id])}.`)
+}
+
+function toggleMore (panelId) {
+  if (state.morePanels.has(panelId)) state.morePanels.delete(panelId)
+  else state.morePanels.add(panelId)
+  renderControls()
+  speakConfirmation(state.morePanels.has(panelId) ? 'More controls shown.' : 'More controls hidden.')
+}
+
+function setControl (c, next) {
+  const before = values()[c.id]
+  if (before === next) return
+  values()[c.id] = next
+  persist()
+  renderControls()
+  markFocus()
+  if (c.warnAbove !== undefined && Number(next) > c.warnAbove && !state.hexWarned) {
+    state.hexWarned = true
+    speakConfirmation(c.warning, { force: true })
+  } else {
+    // "path depth, last two folders" — control name, then value, nothing else.
+    speakConfirmation(changeSentence(c, next))
+  }
+  renormalize()
+}
+
+/* ── Speak-on-change ─────────────────────────────────────────────────────────
+   Debounced 250 ms, replace mode — dragging a slider must not queue thirty confirmations (P21).
+   Spoken through the SAME normalize -> chunk -> synthesize path as the fixture, so it is a live
+   sample of the voice and rate under test and never a second speech implementation that can drift.
+   Muted automatically while a fixture is playing. */
+let confirmTimer = null
+function speakConfirmation (text, { force = false } = {}) {
+  announce(text)
+  if (!state.speakOnChange && !force) return
+  if (playing && !force) return
+  if (state.playedElsewhere) return   // the daemon owns the audio; do not talk over the fixture
+  clearTimeout(confirmTimer)
+  confirmTimer = setTimeout(() => { void speak(text, { confirmation: true }) }, 250)
+}
+
+function announce (text) { $('live').textContent = text }
+
+function setStatus (text) { $('status').textContent = text }
+
+/* ── Play, replay, stop ──────────────────────────────────────────────────────
+   Replay is a cache hit. The bytes for `hash(chunkText + voice + rate)` are decoded exactly once,
+   so pressing R is `source.start()` on an AudioBuffer that already exists. Going back to the
+   server would re-pay 414 ms of spawn and p50 1,054-1,163 ms of synthesis, every press, and the
+   two-second gate would be lost on the one action the listener repeats most. */
+
+async function speak (text, { confirmation = false } = {}) {
+  if (!text || !text.trim()) return
+  const synth = synthOptions()
+  const t0 = performance.now()
+
+  // The warm path first, and it never touches the network.
+  const cachedKeys = state.chunkKeysFor?.get(text)
+  if (cachedKeys && cachedKeys.every((k) => buffers.has(k))) {
+    if (!confirmation) earcon('control.play')
+    const bufs = cachedKeys.map((k) => buffers.get(k))
+    state.lastPlayed = { text, synth, keys: cachedKeys }
+    scheduleBuffers(bufs, values()['pace.simulateChunkGapMs'], () => onPlaybackEnd())
+    setTiming('warm', performance.now() - t0)
+    if (!confirmation) setStatus('Playing, from the cache.')
+    return
+  }
+
+  if (!confirmation) setStatus('Synthesizing…')
+  let r
+  try {
+    r = await api('/speak', { text, options: speakOptions() })
+    serverIsUp()
+  } catch (err) { serverIsDown(err); earcon('control.error'); return }
+
+  if (r.status === 503) {
+    // The PROVIDER'S own words, not a generic "synthesis failed" — a defensive re-wording here
+    // would be P18 exactly, and on a stock Ubuntu desktop the message already carries the remedy.
+    const why = [r.json && r.json.message, r.json && r.json.installHint]
+      .filter(Boolean).join(' ') || r.text || 'the synthesizer refused'
+    state.lastSpeakError = why
+    earcon('control.error')
+    showSpeakBanner('The synthesizer could not speak that.', why +
+      ' Play is not dead — it will work again as soon as the synthesizer does. Nothing here fails silently.')
+    setStatus('Synthesis failed: ' + why)
+    // Said aloud AND in text, per 004 section 2 — but it cannot be said through the thing that
+    // just failed, so the screen reader channel and the banner carry it.
+    announce('The synthesizer could not speak that. ' + why)
+    return
+  }
+  if (!r.ok || !r.json) {
+    earcon('control.error')
+    showSpeakBanner('The lab server answered with something this page cannot use.',
+      `HTTP ${r.status}. ${r.text.slice(0, 300)}`)
+    return
+  }
+
+  if (r.json.played === 'elsewhere' || r.json.played === 'elsewhere-forced') {
+    enterSpokeElsewhere(r.json)
+    return
+  }
+
+  clearSpeakBanner()
+  const chunks = r.json.chunks ?? []
+  const keys = []
+  const bufs = []
+  for (const chunk of chunks) {
+    const key = keyFor(chunk.text ?? text, synth)
+    keys.push(key)
+    let buf = buffers.get(key)
+    if (!buf) { buf = buffers.set(key, await decodeChunk(chunk)) }
+    bufs.push(buf)
+  }
+  state.chunkKeysFor ??= new Map()
+  state.chunkKeysFor.set(text, keys)
+  state.lastPlayed = { text, synth, keys }
+  if (!confirmation) earcon('control.play')
+  scheduleBuffers(bufs, values()['pace.simulateChunkGapMs'], () => onPlaybackEnd())
+  setTiming('cold', performance.now() - t0, r.json.timings && r.json.timings.synthMs)
+  if (!confirmation) setStatus('Playing.')
+}
+
+function onPlaybackEnd () {
+  if (state.compare) revealCompare()
+  else setStatus('Finished.')
+}
+
+function setTiming (path, elapsedMs, synthMs) {
+  // An indicator that never changes is a broken indicator. This one must show the cold path being
+  // slower than the warm one, or it is not measuring anything.
+  const gate = elapsedMs <= 2000 ? 'inside the two-second gate' : 'OVER the two-second gate'
+  const server = synthMs === undefined ? '' : ` · server synthesis ${Math.round(synthMs)} ms`
+  $('timing').textContent = `${path} · ${Math.round(elapsedMs)} ms · ${gate}${server}`
+  $('timing').style.color = elapsedMs <= 2000 ? '' : 'var(--removed)'
+}
+
+function replay () {
+  if (state.playedElsewhere) { refuse('Replay'); return }
+  if (!state.lastPlayed) { speakConfirmation('Nothing has played yet.'); return }
+  const { keys } = state.lastPlayed
+  if (!keys.every((k) => buffers.has(k))) { void speak(state.lastPlayed.text); return }
+  const t0 = performance.now()
+  earcon('control.play')
+  stopAudio()
+  scheduleBuffers(keys.map((k) => buffers.get(k)), values()['pace.simulateChunkGapMs'], () => onPlaybackEnd())
+  setTiming('warm', performance.now() - t0)
+  setStatus('Replaying, from the cache.')
+}
+
+function playFixture () {
+  if (!state.fixture) return
+  if (playing && !paused) { pauseResume(); return }
+  if (paused) { pauseResume(); return }
+  stopAudio()
+  void speak(state.spokenText || state.fixture.text)
+}
+
+function pauseResume () {
+  const a = audio()
+  if (a.state === 'running' && playing) {
+    a.suspend(); paused = true; earcon('control.pause'); setStatus('Paused.')
+  } else if (a.state === 'suspended') {
+    a.resume(); paused = false; earcon('control.play'); setStatus('Playing.')
+  }
+}
+
+function stop () {
+  const wasCompare = state.compare
+  stopAudio()
+  // Two-sided: stopping the player is not stopping the synthesizer. Without this the server keeps
+  // producing speech for text the listener already interrupted (HANDOFF, barge-in).
+  api('/stop', {}).catch(() => {})
+  earcon('control.stop')
+  setStatus('Stopped.')
+  if (wasCompare) revealCompare()
+}
+
+/* ── A/B compare ─────────────────────────────────────────────────────────────
+   Blind while it plays, revealed the instant it stops, and what is revealed is the SINGLE
+   DIFFERING CONTROL, not the whole set. */
+
+function differingControls () {
+  return CONTROLS.filter((c) => JSON.stringify(state.sets.A[c.id]) !== JSON.stringify(state.sets.B[c.id]))
+}
+
+async function compare ({ trials = 1 } = {}) {
+  if (state.playedElsewhere) { refuse('Compare'); return }
+  const diff = differingControls()
+  if (diff.length === 0) {
+    speakConfirmation('The two sets are identical. Change a control, then compare.')
+    return
+  }
+  const order = trials === 1 ? [['A', 'B']] : Array.from({ length: trials }, () => shuffledPair())
+  state.compare = { order, trial: 0, choices: [], diff, trials }
+  setStatus(trials === 1
+    ? 'Comparing. You will hear the first set, a tone, then the second set.'
+    : `Blind, ${numberWords(trials)} times. The order is shuffled on every trial.`)
+  await runTrial()
+}
+
+function shuffledPair () {
+  // No Math.random seeding games: an honest shuffle is the point of a blind trial.
+  return Math.random() < 0.5 ? ['A', 'B'] : ['B', 'A']
+}
+
+async function runTrial () {
+  const c = state.compare
+  if (!c) return
+  const [first, second] = c.order[c.trial]
+  const saved = state.active
+  state.active = first
+  await speakSilentlyInto('first')
+  state.active = second
+  await speakSilentlyInto('second')
+  state.active = saved
+}
+
+// Renders both halves into one scheduled run: set 1, the compare separator, set 2.
+async function speakSilentlyInto (which) {
+  // Implemented as two sequential /speak calls scheduled by the browser; the separator between
+  // them is `control.compare`, 300 ms, from the reserved band.
+  if (which === 'second') earcon('control.compare')
+  await speak(state.spokenText || state.fixture.text)
+}
+
+function revealCompare () {
+  const c = state.compare
+  if (!c) return
+  const [first] = c.order[c.trial]
+  const names = c.diff.map((x) => `${x.label}, ${speakValue(x, state.sets.B[x.id])}`).join('; ')
+  const single = c.diff.length === 1
+    ? `${c.diff[0].label}, ${speakValue(c.diff[0], state.sets[first === 'A' ? 'B' : 'A'][c.diff[0].id])}`
+    : names
+  if (c.trials === 1) {
+    const line = `First was your ${first} set; second was ${single}. Press 1 to keep the first, 2 to keep the second.`
+    setStatus(line)
+    state.compare.awaitingChoice = true
+    speakConfirmation(line, { force: true })
+    return
+  }
+  const line = `Trial ${numberWords(c.trial + 1)} of ${numberWords(c.trials)} finished. Press 1 or 2.`
+  setStatus(line)
+  state.compare.awaitingChoice = true
+  speakConfirmation(line, { force: true })
+}
+
+function chooseCompare (which) {
+  const c = state.compare
+  if (!c || !c.awaitingChoice) return
+  const chosen = c.order[c.trial][which - 1]
+  c.choices.push(chosen)
+  c.awaitingChoice = false
+  if (c.trial + 1 < c.trials) {
+    c.trial++
+    void runTrial()
+    return
+  }
+  if (c.trials > 1) {
+    const counts = { A: 0, B: 0 }
+    for (const ch of c.choices) counts[ch]++
+    const winner = counts.A >= counts.B ? 'A' : 'B'
+    const n = counts[winner]
+    const secondCount = c.choices.filter((ch, i) => ch === c.order[i][1]).length
+    const line = `You chose the second set ${numberWords(secondCount)} of ${numberWords(c.trials)} times. ` +
+      `The set you preferred differs by: ${c.diff.map((x) => x.label).join(', ')}. Keeping it.`
+    adoptSet(winner)
+    state.compare = null
+    setStatus(line)
+    speakConfirmation(line, { force: true })
+    return
+  }
+  adoptSet(chosen)
+  state.compare = null
+  const line = `Keeping that set. It differs by ${c.diff.map((x) => x.label).join(', ')}.`
+  setStatus(line)
+  speakConfirmation(line, { force: true })
+}
+
+function adoptSet (which) {
+  const chosen = { ...state.sets[which] }
+  state.sets.A = { ...chosen }
+  state.sets.B = { ...chosen }
+  state.active = 'A'
+  $('ab-set').textContent = 'A'
+  persist()
+  renderControls()
+  renormalize()
+}
+
+/* ── spoke-elsewhere ─────────────────────────────────────────────────────────
+   On the stock Ubuntu spd-say rung the provider speaks out loud and yields no bytes. The lab must
+   not appear to work and be silent: it names the state, disables exactly the four affordances that
+   need the bytes WITH THE REASON ATTACHED (never hides them), keeps the written-vs-spoken half
+   working, and says plainly that the two-second gate is not satisfiable here. */
+
+function enterSpokeElsewhere (payload) {
+  state.playedElsewhere = payload
+  // The server names which affordances lose their basis; the page does not re-derive the list.
+  const disabled = payload.disabled ?? ['compare', 'replay', 'stage-play', 'timing']
+  const buttons = { compare: ['btn-compare', 'btn-blind3'], replay: ['btn-replay'] }
+  const why = payload.reason ||
+    `${payload.backend} spoke that through this machine's speech service, so the lab never received the audio.`
+  for (const name of disabled) {
+    for (const id of buttons[name] ?? []) {
+      const el = $(id)
+      el.disabled = true            // disabled WITH THE REASON ATTACHED, never hidden (003 section 5)
+      el.title = `Disabled: ${why}`
+    }
+  }
+  if (disabled.includes('timing')) $('timing').textContent = 'no timing — the audio never reached this page'
+  const hint = payload.installHint || 'Install espeak-ng to use the lab.'
+  showSpeakBanner(
+    `This machine's speech service (${payload.backend}) played that.`,
+    why + ' Per-stage play and the timing readout are disabled for the same reason. ' +
+    'The written-versus-spoken pane, the word diff, the stage ladder and the export all still work: ' +
+    'tuning WHAT THE WORDS ARE works on this machine; tuning HOW THEY SOUND does not. ' +
+    'The two-second gate — change a control, hear the difference in under two seconds — is NOT ' +
+    'satisfiable on this rung. ' + hint)
+  setStatus(`${payload.backend} spoke that. The lab has no audio to work with.`)
+  announce(payload.announcement ||
+    `This machine's speech service played that. The lab cannot replay, compare or scrub it. ${hint}`)
+}
+
+function refuse (what) {
+  const why = state.playedElsewhere
+    ? `${what} needs the audio, and ${state.playedElsewhere.backend} spoke it through this machine's speech service instead.`
+    : `${what} is not available right now.`
+  earcon('control.refused')
+  setStatus(why)
+  announce(why)
+}
+
+function showSpeakBanner (title, body) {
+  $('banner-speak').hidden = false
+  $('banner-speak-title').textContent = title
+  $('banner-speak-body').textContent = body
+}
+function clearSpeakBanner () { if (!state.playedElsewhere) $('banner-speak').hidden = true }
+
+/* ── The stage ladder, behind one keystroke ──────────────────────────────────
+   Never on screen unless asked for (004 section 4, Q23: progressive disclosure). Fifteen rows, each
+   showing only what THAT stage changed. */
+
+function openLadder () {
+  const body = $('ladder-body')
+  body.textContent = ''
+  $('ladder-fixture').textContent = state.fixture ? state.fixture.name : ''
+  let previous = state.fixture ? state.fixture.text : ''
+  for (let i = 0; i < STAGES.length; i++) {
+    const n = i + 1
+    const stage = state.stages.find((s) => s.n === n)
+    const text = stage ? stage.text : previous
+    const changed = text !== previous
+    const row = document.createElement('div')
+    row.className = 'ladder-row'
+    row.tabIndex = 0
+    const governing = controlsForStage(n)
+    const fixed = FIXED_BY_DESIGN_STAGES.includes(n) || governing.length === 0
+    const head = document.createElement('div')
+    head.innerHTML = `<span class="n">${String(n).padStart(2, ' ')}</span> <strong>${STAGES[i]}</strong>`
+    row.append(head)
+    if (!changed) {
+      const dim = document.createElement('span')
+      dim.className = 'fixed'
+      dim.textContent = fixed ? '  no change — fixed by design' : '  no change'
+      head.append(dim)
+    } else {
+      const out = document.createElement('span')
+      out.className = 'out'
+      out.textContent = '→ ' + firstDifference(previous, text)
+      row.append(out)
+      const gov = document.createElement('div')
+      gov.className = 'out'
+      gov.textContent = fixed
+        ? 'fixed by design — there is no control for this stage'
+        : 'governed by: ' + governing.map((c) => c.label).join(' · ')
+      row.append(gov)
+      const play = document.createElement('button')
+      play.textContent = 'Play this stage'
+      play.disabled = Boolean(state.playedElsewhere)
+      if (play.disabled) play.title = 'Disabled: the audio never reached this page on this machine.'
+      play.addEventListener('click', () => void speak(text))
+      const before = document.createElement('button')
+      before.textContent = 'Play the stage before'
+      before.disabled = Boolean(state.playedElsewhere)
+      if (before.disabled) before.title = play.title
+      const prevText = previous
+      before.addEventListener('click', () => void speak(prevText))
+      row.append(play, ' ', before)
+      row.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return
+        e.preventDefault()
+        if (state.playedElsewhere) { refuse('Playing one stage'); return }
+        void speak(e.shiftKey ? prevText : text)
+      })
+    }
+    body.append(row)
+    previous = text
+  }
+  $('ladder').hidden = false
+  body.querySelector('.ladder-row')?.focus()
+  announce('Stage ladder, fifteen transforms. Enter plays a stage, shift Enter plays the one before it.')
+}
+
+/** Only the text the stage changed, not the whole document. */
+function firstDifference (before, after) {
+  const ops = wordDiff(before, after)
+  const interesting = ops.filter((o) => o.type !== 'same').slice(0, 24)
+  if (interesting.length === 0) return '(no visible change)'
+  return interesting.map((o) => (o.type === 'add' ? o.text : '−' + o.text)).join(' ')
+}
+
+/* ── Persistence ─────────────────────────────────────────────────────────────
+   A reload that loses ten minutes of ear-tuning re-creates P23 in miniature. localStorage may
+   throw or come back empty; every read and write is wrapped and the page renders from defaults. */
+
+let persistTimer = null
+function persist () {
+  clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => {
+    try {
+      localStorage.setItem('voice-lab.current', JSON.stringify(state.sets[state.active]))
+      localStorage.setItem('voice-lab.a', JSON.stringify(state.sets.A))
+      localStorage.setItem('voice-lab.b', JSON.stringify(state.sets.B))
+      localStorage.setItem('voice-lab.snapshots', JSON.stringify(state.snapshots))
+    } catch { /* private window, quota, blocked site data — the page still works */ }
+  }, 200)
+}
+
+function restore () {
+  try {
+    const a = localStorage.getItem('voice-lab.a')
+    const b = localStorage.getItem('voice-lab.b')
+    const snaps = localStorage.getItem('voice-lab.snapshots')
+    if (a) state.sets.A = { ...defaultValues(), ...JSON.parse(a) }
+    if (b) state.sets.B = { ...defaultValues(), ...JSON.parse(b) }
+    if (snaps) state.snapshots = JSON.parse(snaps)
+  } catch { /* fall back to defaults, silently and correctly */ }
+}
+
+/* ── Save and export ─────────────────────────────────────────────────────────
+   The lab re-reads the file before every Save and refuses to save over a revision it did not last
+   see (011 section 7). Without that, a hand-edit made while this page was open is destroyed by the
+   next Save with nothing said about it. */
+
+async function save () {
+  let current
+  try {
+    current = await api('/settings')
+    serverIsUp()
+  } catch (err) { serverIsDown(err); return }
+  if (current.json && current.json.parseError) {
+    earcon('control.refused')
+    const why = `The settings file at ${current.json.path} could not be parsed, so the lab will not ` +
+      `overwrite it: ${current.json.parseError}. Fix it by hand, or move it aside.`
+    showSpeakBanner('The lab did not save.', why)
+    setStatus(why)
+    speakConfirmation('The lab did not save. Your settings file has a syntax error.', { force: true })
+    return
+  }
+  const onDisk = current.json && Number.isInteger(current.json.revision) ? current.json.revision : 0
+  const decision = saveDecision(state.settingsRevision, onDisk)
+  if (!decision.ok) {
+    earcon('control.refused')
+    showSpeakBanner('The lab did not save.', decision.reason)
+    setStatus(decision.reason)
+    speakConfirmation('The lab did not save. The settings file changed underneath it.', { force: true })
+    return
+  }
+  const file = toSettingsFile(values(), {
+    revision: decision.nextRevision,
+    provenance: {
+      tunedWith: state.provider ?? 'os-synth',
+      platform: state.platform ?? 'unknown',
+      voiceListHash: state.voiceListHash,
+      tunedAt: new Date().toISOString()
+    }
+  })
+  let res
+  try {
+    res = await api('/settings', file)
+  } catch (err) { serverIsDown(err); return }
+  if (res.status === 409) {
+    earcon('control.refused')
+    const why = (res.json && res.json.why) ||
+      'The settings file changed while the lab was saving. Nothing was overwritten.'
+    showSpeakBanner('The lab did not save.', why)
+    speakConfirmation(why, { force: true })
+    return
+  }
+  if (!res.ok) {
+    earcon('control.error')
+    showSpeakBanner('The lab could not write the settings file.', res.text.slice(0, 300))
+    return
+  }
+  state.settingsRevision = decision.nextRevision
+  clearSpeakBanner()
+  const line = `Saved. Revision ${numberWords(decision.nextRevision)}. The plugin will pick it up on the next reply it speaks.`
+  setStatus(line)
+  speakConfirmation(line, { force: true })
+}
+
+function exportCopy () {
+  const file = toSettingsFile(values(), {
+    revision: state.settingsRevision,
+    writtenBy: `voice-lab/${LAB_VERSION} (export)`,
+    provenance: {
+      tunedWith: state.provider ?? 'os-synth',
+      platform: state.platform ?? 'unknown',
+      voiceListHash: state.voiceListHash,
+      tunedAt: new Date().toISOString()
+    }
+  })
+  // The viewer's sandbox may refuse a page-initiated download, so the text is also put on screen
+  // and copied to the clipboard. A button that silently does nothing is the failure this project
+  // is named for.
+  const text = serializeJsonc(file)
+  navigator.clipboard?.writeText(text).catch(() => {})
+  const w = window.open('', '_blank')
+  if (w) {
+    w.document.title = 'orca-tts settings'
+    const pre = w.document.createElement('pre')
+    pre.textContent = text
+    w.document.body.append(pre)
+    setStatus('Exported a copy — it is in the new tab and on your clipboard.')
+  } else {
+    showSpeakBanner('Exported a copy to your clipboard.',
+      'The browser would not open a new tab, so the file is on the clipboard instead. ' +
+      'Paste it wherever you keep it.')
+    setStatus('Exported a copy to your clipboard.')
+  }
+  speakConfirmation('Exported a copy.', { force: true })
+}
+
+/* ── Keyboard ────────────────────────────────────────────────────────────────
+   Every binding comes from docs/.discussion/003-panel-and-control-channel.md section 4a. Nothing
+   here is invented, because a key that means two things on two surfaces is the muscle-memory bug
+   two designs already pin with tests. */
+
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return
+  const t = e.target
+  const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')
+  if (typing) return
+  // A focused diff span owns Enter; everything else falls through to the vocabulary.
+  if (e.key === 'Enter' && t && t.classList?.contains('w')) return
+
+  const verb = verbFor(e)
+  if (verb === null) return
+  e.preventDefault()
+  switch (verb) {
+    case 'play-pause': playFixture(); break
+    case 'stop': stop(); break
+    case 'replay': replay(); break
+    case 'mute': toggleMute(); break
+    case 'describe': describeFocused(); break
+    case 'close': closeOverlays(); break
+    case 'prev-control': moveFocus(-1); break
+    case 'next-control': moveFocus(1); break
+    case 'step-down': stepFocused(-1); break
+    case 'step-up': stepFocused(1); break
+    case 'next-panel': nextPanel(); break
+    case 'more': if (!state.morePanels.has(state.openPanel)) toggleMore(state.openPanel); break
+    case 'less': if (state.morePanels.has(state.openPanel)) toggleMore(state.openPanel); break
+    case 'compare': void compare({ trials: 1 }); break
+    case 'keep-first': chooseCompare(1); break
+    case 'keep-second': chooseCompare(2); break
+    case 'explain': openLadder(); break
+    case 'snapshot': snapshot(); break
+    case 'restore': restoreSnapshot(); break
+  }
+})
+
+function moveFocus (delta) {
+  state.focusIndex += delta
+  const list = visibleControls()
+  if (state.focusIndex < 0) { state.focusIndex = 0 }
+  if (state.focusIndex >= list.length) { state.focusIndex = list.length - 1 }
+  focusRow(true)
+}
+
+function stepFocused (direction) {
+  const c = focused()
+  if (!c) return
+  if (c.kind === 'template' || c.kind === 'map') {
+    speakConfirmation(`${c.label} is text. Click it to edit.`)
+    return
+  }
+  if (c.kind === 'voice') {
+    if (state.voices.length === 0) { speakConfirmation('No voices are available on this machine.'); return }
+    const i = state.voices.findIndex((v) => v.index === values()[c.id])
+    const next = Math.min(state.voices.length - 1, Math.max(0, (i < 0 ? 0 : i) + direction))
+    setControl(c, state.voices[next].index)
+    return
+  }
+  setControl(c, stepValue(c, values()[c.id], direction))
+}
+
+function describeFocused () {
+  const c = focused()
+  if (!c) return
+  const line = `${c.label}. ${c.help} Currently ${speakValue(c, values()[c.id])}.`
+  $('attribution').textContent = line
+  speakConfirmation(line, { force: true })
+}
+
+function nextPanel () {
+  const i = PANELS.findIndex((p) => p.id === state.openPanel)
+  const panel = PANELS[(i + 1) % PANELS.length]
+  state.openPanel = panel.id
+  state.focusIndex = 0
+  renderControls()
+  focusRow(false)
+  const n = CONTROLS.filter((c) => c.panel === panel.id).length
+  speakConfirmation(`${panel.title}, ${numberWords(n)} controls.`)
+}
+
+function toggleMute () {
+  state.speakOnChange = !state.speakOnChange
+  const btn = $('btn-mute')
+  btn.setAttribute('aria-pressed', String(!state.speakOnChange))
+  btn.innerHTML = `<span class="kbd">m</span> Speak-on-change: ${state.speakOnChange ? 'on' : 'off'}`
+  // The confirmation that it is off has to be audible, or "did that work" is unanswerable.
+  speakConfirmation(state.speakOnChange ? 'Speak-on-change, on.' : 'Speak-on-change, off.', { force: true })
+}
+
+function closeOverlays () {
+  // Focus never moves as a side effect: the control that was focused is still focused.
+  $('ladder').hidden = true
+  $('help').hidden = true
+  markFocus()
+}
+
+function snapshot () {
+  const name = `snapshot ${numberWords(state.snapshots.length + 1)}`
+  state.snapshots.push({ name, values: { ...values() } })
+  persist()
+  speakConfirmation(`Kept, as ${name}.`, { force: true })
+}
+
+function restoreSnapshot () {
+  if (state.snapshots.length === 0) { speakConfirmation('There are no snapshots yet.'); return }
+  const snap = state.snapshots[state.snapshots.length - 1]
+  state.sets[state.active] = { ...defaultValues(), ...snap.values }
+  persist()
+  renderControls()
+  renormalize()
+  speakConfirmation(`Loaded ${snap.name}.`, { force: true })
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────────
+   Every button is the same verb as its key. Nothing on this page is reachable by mouse only. */
+$('btn-play').addEventListener('click', playFixture)
+$('btn-stop').addEventListener('click', stop)
+$('btn-replay').addEventListener('click', replay)
+$('btn-compare').addEventListener('click', () => void compare({ trials: 1 }))
+$('btn-blind3').addEventListener('click', () => void compare({ trials: 3 }))
+$('btn-explain').addEventListener('click', openLadder)
+$('btn-mute').addEventListener('click', toggleMute)
+$('ladder-close').addEventListener('click', closeOverlays)
+$('help-close').addEventListener('click', closeOverlays)
+$('btn-save').addEventListener('click', () => void save())
+$('btn-export').addEventListener('click', exportCopy)
+$('btn-swap').addEventListener('click', () => {
+  state.active = state.active === 'A' ? 'B' : 'A'
+  $('ab-set').textContent = state.active
+  renderControls()
+  renormalize()
+  speakConfirmation(`Set ${state.active}.`, { force: true })
+})
+$('btn-copy-ab').addEventListener('click', () => {
+  const other = state.active === 'A' ? 'B' : 'A'
+  state.sets[other] = { ...values() }
+  persist()
+  speakConfirmation(`Copied to set ${other}.`, { force: true })
+})
+$('fixture').addEventListener('change', (e) => { void loadFixture(e.target.value) })
+
+async function loadFixture (name) {
+  try {
+    const res = await fetch('/fixtures/' + encodeURIComponent(name))
+    if (!res.ok) { setStatus(`The server has no fixture called ${name}.`); return }
+    state.fixture = { name, text: await res.text() }
+    serverIsUp()
+  } catch (err) { serverIsDown(err); return }
+  // A new fixture means new bytes: the old cache entries are keyed by their own chunk text, so
+  // they are not WRONG, only unreachable. Dropping them keeps the memory bounded honestly.
+  buffers.clear()
+  state.chunkKeysFor = new Map()
+  state.lastPlayed = null
+  await renormalize()
+}
+
+/* ── Start ───────────────────────────────────────────────────────────────────
+   Nothing here plays a sound. Loading the page is not a press. */
+
+async function start () {
+  restore()
+  renderControls()
+
+  let names = []
+  try {
+    const f = await api('/fixtures')
+    serverIsUp()
+    names = (f.json && f.json.fixtures) || []
+  } catch (err) { serverIsDown(err); return }
+
+  const sel = $('fixture')
+  for (const name of names) {
+    const opt = document.createElement('option')
+    opt.value = name
+    opt.textContent = name
+    sel.append(opt)
+  }
+  const first = names.includes('paths.md') ? 'paths.md' : names[0]
+  if (first) { sel.value = first; await loadFixture(first) }
+
+  try {
+    const v = await api('/voices')
+    if (v.ok && v.json) {
+      // The list is the ONLY source of a voice: never free text. `say` accepts an unknown name,
+      // exits 0, writes a full-length WAV and silently substitutes the default (P18's shape).
+      state.voices = (v.json.voices ?? []).map((entry, index) => ({
+        index, name: typeof entry === 'string' ? entry : (entry.name ?? entry.id ?? String(index))
+      }))
+      state.platform = v.json.platform ?? null
+      state.provider = v.json.provider ?? null
+      // The list itself is the checksum 011 and 004 both want in provenance.
+      state.voiceListHash = state.voices.length
+        ? 'fnv:' + hash(state.voices.map((x) => x.name).join('\n'))
+        : null
+    }
+  } catch { /* voices are optional; the fixture still normalizes */ }
+
+  try {
+    const s = await api('/settings')
+    if (s.ok && s.json && s.json.parseError) {
+      showSpeakBanner('Your settings file could not be read.',
+        `${s.json.path}: ${s.json.parseError}. The lab has loaded its defaults and will refuse to ` +
+        'save over a file it cannot read.')
+      state.settingsRevision = null
+    } else if (s.ok && s.json && s.json.file) {
+      const parsed = fromSettingsFile(s.json.file)
+      state.settingsRevision = parsed.revision
+      state.sets.A = parsed.values
+      state.sets.B = { ...parsed.values }
+      if (parsed.rejected.length || parsed.unknown.length) {
+        showSpeakBanner('Some settings did not load.',
+          `${parsed.rejected.length} value${parsed.rejected.length === 1 ? '' : 's'} fell back to the default` +
+          `${parsed.unknown.length ? `, and ${parsed.unknown.length} name${parsed.unknown.length === 1 ? ' is' : 's are'} not in this schema` : ''}: ` +
+          [...parsed.rejected.map((r) => `${r.id} (${r.why})`), ...parsed.unknown].join('; '))
+      }
+    }
+  } catch { /* no settings file yet is the normal first run */ }
+
+  const helpRows = BINDINGS.map((b) => `<div><span class="kbd">${b.display}</span> ${b.does}</div>`).join('')
+  $('help-body').innerHTML = helpRows +
+    '<p>Focus a changed word in the spoken pane and press <span class="kbd">Enter</span> to jump to the control that governs it.</p>'
+
+  renderControls()
+  await renormalize()
+  focusRow(false)
+  setStatus('Ready. Nothing has played yet — this page makes no sound until you press something.')
+}
+
+void start()
+</script>

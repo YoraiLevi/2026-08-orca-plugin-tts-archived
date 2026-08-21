@@ -26,6 +26,27 @@ import {
   type DecodedReply, type TranscriptFormat
 } from './decoders.js'
 
+/**
+ * Why there is no transcript to follow. 006 site 5: six causes — an unreadable projects root, an
+ * unreadable project directory, a file that vanished between `readdir` and `stat`, and "no .jsonl
+ * anywhere" — collapsed into one silent `return`, so the listener pressed the hotkey, heard
+ * "Huddle mode on", and then nothing, ever. The plugin was indistinguishable from a plugin that
+ * was never installed (TT1).
+ */
+export type NoTranscriptReason =
+  | 'no-root'          // ~/.claude/projects does not exist: no agent has ever run here
+  | 'root-unreadable'  // it exists and we cannot read it: permissions, a non-default HOME
+  | 'no-transcripts'   // the root is readable and holds no .jsonl at all
+
+/** The sentence each reason gets. Named separately so a test asserts wording, not a boolean. */
+export const NO_TRANSCRIPT_SENTENCE: Record<NoTranscriptReason, string> = {
+  'no-root': 'Huddle found no agent transcripts on this machine yet, so there is nothing to read.',
+  'root-unreadable':
+    'Huddle cannot read the folder agent transcripts live in, so replies will not be spoken. ' +
+    'This is usually a permissions problem.',
+  'no-transcripts': 'Huddle found no agent transcript for this worktree yet, so there is nothing to read.'
+}
+
 /** Minimal port, so huddle can be tested without a synthesizer. */
 export interface SpeechPort {
   speak(text: string, mode?: 'replace' | 'queue', label?: string): void
@@ -40,6 +61,16 @@ export interface HuddleStore {
 export const HUDDLE_STATE_KEY = 'huddle.enabled'
 export const HUDDLE_SPOKEN_KEY = 'huddle.spokenIds'
 export const HUDDLE_HIGH_WATER_KEY = 'huddle.highWater'
+/**
+ * The session we are following, persisted.
+ *
+ * 006 C4, the highest-value cascade in the document: ORCA reaps an idle worker at five minutes and
+ * `#locked` was worker memory, so on re-fork the next `agent.status.changed` re-picked "the most
+ * recently modified transcript" — which after five idle minutes is very likely a DIFFERENT session
+ * than the one the listener was following. That is P22 fault 1, reconstituted by the mechanism
+ * none of P22's fixes account for.
+ */
+export const HUDDLE_FOLLOWING_KEY = 'huddle.following'
 /** Bounded so plugin storage (256 KB per value) can never be blown by a long session. */
 export const MAX_REMEMBERED_IDS = 300
 /**
@@ -73,7 +104,6 @@ export class HuddleController {
   #enabled = false
   #spoken = new Set<string>()
   #lastReply: string | null = null
-  #warnedAmbiguous = false
   #locked: string | null = null      // the ONE session we are following
   #watcher: FSWatcher | null = null
   #watching: string | null = null
@@ -100,6 +130,20 @@ export class HuddleController {
   /** The worktree the last agent event came from — the only correlation handle a plugin gets. */
   #lastWorktree: string | null = null
   #warnedUnreadable = new Set<string>()   // per FILE: say "cannot read this" once, not per change
+  /**
+   * The last "nothing to follow" reason announced. Latched per REASON, not forever: a permissions
+   * problem that is fixed and then recurs must be able to speak again, and a reason that changes
+   * (root-unreadable -> no-transcripts) is new information. Cleared the moment a file is found.
+   */
+  #announcedNoTranscript: NoTranscriptReason | null = null
+  /** Files whose watch failure has been announced, so a churning file cannot flood the audio. */
+  #warnedWatch = new Set<string>()
+  /**
+   * The ambiguous pair we last warned about. Was a single boolean that latched TRUE for the
+   * worker's lifetime (006 site 13 / TT5): the first ambiguity produced one notification and every
+   * ambiguity after it produced nothing at all, forever.
+   */
+  #warnedAmbiguousPair: string | null = null
 
   constructor(deps: HuddleDeps) { this.#deps = deps }
 
@@ -115,7 +159,25 @@ export class HuddleController {
         if (typeof n === 'number' && Number.isFinite(n) && n >= 0) this.#highWater.set(file, n)
       }
     }
+    // C4: `#locked` was worker memory, so the five-minute reap dropped it and the next agent event
+    // re-picked "whatever was touched last" — P22 fault 1, reconstituted by the one mechanism none
+    // of P22's fixes account for. Restoring it means a re-forked worker resumes the session the
+    // listener chose instead of silently changing it under them.
+    const following = await this.#deps.store?.get(HUDDLE_FOLLOWING_KEY)
+    if (typeof following === 'string' && following.length > 0) this.#locked = following
     return this.#enabled
+  }
+
+  /**
+   * The session being followed, as a sentence, for re-announcement after a worker reap.
+   *
+   * C4's other half: the listener is not told that the worker restarted, so if the lock had
+   * silently changed they would have had no way to know whose words they were hearing — the S1
+   * failure this whole document ranks first. Returns null when there is nothing to re-announce.
+   */
+  restoredAnnouncement(): string | null {
+    if (!this.#enabled || this.#locked === null) return null
+    return `Still following ${sessionLabel(this.#locked)}.`
   }
 
   toggle(): boolean {
@@ -125,6 +187,7 @@ export class HuddleController {
       this.#primed.clear()          // re-prime every session on enable; never dump a backlog
       this.#reprime = true
       this.#locked = null
+      void this.#persistFollowing()
     } else {
       this.#stopWatching()
       void this.#deps.speech.stop()
@@ -164,6 +227,8 @@ export class HuddleController {
    */
   switchTo(file: string): void {
     this.#locked = file
+    void this.#persistFollowing()
+    this.#warnedWatch.delete(file)   // an explicit re-follow re-arms the watch report
     this.#stopWatching()
     this.#deps.notify(`Now reading from ${sessionLabel(file)}.`)
     void this.#ensureWatching(this.#lastWorktree)
@@ -188,6 +253,7 @@ export class HuddleController {
   /** Stop following any session; huddle stays on but silent until you pick one. */
   unlock(): void {
     this.#locked = null
+    void this.#persistFollowing()
     this.#stopWatching()
   }
 
@@ -196,11 +262,28 @@ export class HuddleController {
   async #ensureWatching(worktreePath: string | null): Promise<void> {
     // Once we are following a session we STAY on it. Previously every event re-picked the
     // most-recently-modified transcript, so a busy unrelated session stole the audio mid-reply.
-    const file = this.#locked ?? await this.#newestTranscript(worktreePath)
-    if (file === null) return
+    let file = this.#locked
+    if (file === null) {
+      const found = await this.#findNewest(worktreePath)
+      file = found.file
+      if (file === null) {
+        // TT1 / site 1 / site 5. This used to be a bare `return`: the listener pressed the hotkey,
+        // heard "Huddle mode on", and then nothing, ever — indistinguishable from a plugin that
+        // was never installed. Announced ONCE PER REASON, not once per event: `agent.status.changed`
+        // fires constantly and a tool that narrates its own polling is unusable.
+        const reason = found.reason ?? 'no-transcripts'
+        if (this.#announcedNoTranscript !== reason) {
+          this.#announcedNoTranscript = reason
+          this.#deps.notify(NO_TRANSCRIPT_SENTENCE[reason])
+        }
+        return
+      }
+    }
+    this.#announcedNoTranscript = null
     if (this.#locked === null) {
       this.#locked = file
       this.#deps.log(`read-aloud: following ${file}`)
+      void this.#persistFollowing()
     }
 
     if (this.#watching !== file) {
@@ -223,10 +306,18 @@ export class HuddleController {
         await this.#persistSpoken()
       }
       try {
-        this.#watcher = watch(file, () => { this.#onChange(file) })
+        const w = watch(file, () => { this.#onChange(file) })
+        // Site 7: `fs.watch` error events were NOT SUBSCRIBED AT ALL. A rename-replace write or an
+        // inode change silently ends the watch, and one session then goes permanently quiet while
+        // every other session works (TT13, and 006 section 19 rank 7). An unsubscribed 'error' on
+        // an EventEmitter is also a process-level throw waiting to happen.
+        w.on('error', (err) => { this.#watchFailed(file, err) })
+        this.#watcher = w
         this.#deps.log(`read-aloud: watching ${file}`)
       } catch (err) {
-        this.#deps.log(`read-aloud: could not watch transcript: ${String(err)}`)
+        // Site 6: log-only. Too many watchers, or the file vanished — either way the listener is
+        // about to get silence they have no way to explain.
+        this.#watchFailed(file, err)
       }
     }
 
@@ -289,6 +380,24 @@ export class HuddleController {
     }
   }
 
+  /**
+   * One sentence per file, not per event: a file that fails to watch usually keeps failing, and a
+   * hundred identical reports would flood the only channel the listener has.
+   */
+  #watchFailed(file: string, err: unknown): void {
+    this.#deps.log(`read-aloud: could not watch transcript ${file}: ${String(err)}`)
+    if (this.#warnedWatch.has(file)) return
+    this.#warnedWatch.add(file)
+    this.#deps.notify(
+      'Huddle lost track of the agent transcript, so new replies may not be spoken. ' +
+      'Use follow to pick the session up again.'
+    )
+  }
+
+  async #persistFollowing(): Promise<void> {
+    await this.#deps.store?.set(HUDDLE_FOLLOWING_KEY, this.#locked)
+  }
+
   async #persistSpoken(): Promise<void> {
     const ids = [...this.#spoken].slice(-MAX_REMEMBERED_IDS)
     this.#spoken = new Set(ids)
@@ -309,9 +418,30 @@ export class HuddleController {
   }
 
   async #newestTranscript(worktreePath: string | null): Promise<string | null> {
+    return (await this.#findNewest(worktreePath)).file
+  }
+
+  /**
+   * Find the newest transcript, and say WHY when there is none.
+   *
+   * Site 5: this returned a bare `null` for six different causes, and `#ensureWatching` returned on
+   * it with no log and no notify. Distinguishing them is what makes TT1 announceable at all — "no
+   * agent has ever run here" and "we are not allowed to read your home directory" need completely
+   * different sentences, and the listener can act on the second one.
+   */
+  async #findNewest(
+    worktreePath: string | null
+  ): Promise<{ file: string | null; reason: NoTranscriptReason | null }> {
     const root = this.#projectsRoot()
     let dirs: string[]
-    try { dirs = await readdir(root) } catch { return null }
+    try {
+      dirs = await readdir(root)
+    } catch (err) {
+      // ENOENT is not a fault: no agent has ever run on this machine. Anything else is.
+      const code = (err as NodeJS.ErrnoException).code
+      this.#deps.log(`read-aloud: cannot read ${root}: ${String(code ?? err)}`)
+      return { file: null, reason: code === 'ENOENT' ? 'no-root' : 'root-unreadable' }
+    }
 
     const slug = worktreePath === null ? null : worktreePath.replace(/[/\\:]/g, '-')
     const matched = slug === null
@@ -320,28 +450,42 @@ export class HuddleController {
     const search = matched.length > 0 ? matched : dirs
 
     const files: Array<{ path: string; mtime: number }> = []
+    let skipped = 0
     for (const d of search) {
       let entries: string[]
-      try { entries = await readdir(join(root, d)) } catch { continue }
+      // Sites 2 and 3: a directory or a file we cannot stat is skipped. That stays — one
+      // unreadable directory among fifty is not worth a sentence — but it is now COUNTED, so
+      // "there are no transcripts" and "we could not look at any of them" are not the same answer.
+      try { entries = await readdir(join(root, d)) } catch { skipped++; continue }
       for (const e of entries) {
         if (!e.endsWith('.jsonl')) continue
         const p = join(root, d, e)
-        try { files.push({ path: p, mtime: (await stat(p)).mtimeMs }) } catch { continue }
+        try { files.push({ path: p, mtime: (await stat(p)).mtimeMs }) } catch { skipped++; continue }
       }
     }
-    if (files.length === 0) return null
+    if (files.length === 0) {
+      return { file: null, reason: skipped > 0 ? 'root-unreadable' : 'no-transcripts' }
+    }
     files.sort((a, b) => b.mtime - a.mtime)
 
     const [first, second] = files
-    if (first !== undefined && second !== undefined && first.mtime - second.mtime < 2000 &&
-        !this.#warnedAmbiguous) {
-      this.#warnedAmbiguous = true
-      this.#deps.notify(
-        'two agents are active in this worktree, so huddle cannot tell which one replied. ' +
-        'Speaking the most recent.'
-      )
+    if (first !== undefined && second !== undefined && first.mtime - second.mtime < 2000) {
+      // Site 13 / TT5: `#warnedAmbiguous` latched true for the worker's LIFETIME, so the first
+      // ambiguity produced one report and every ambiguity after it produced nothing at all. Keyed
+      // on the pair instead: a new pair of agents is new information and is said again, while the
+      // same pair churning through a hundred file events still says it once.
+      const pair = `${first.path}\u0000${second.path}`
+      if (this.#warnedAmbiguousPair !== pair) {
+        this.#warnedAmbiguousPair = pair
+        this.#deps.notify(
+          'two agents are active in this worktree, so huddle cannot tell which one replied. ' +
+          'Speaking the most recent.'
+        )
+      }
+    } else {
+      this.#warnedAmbiguousPair = null   // unambiguous again: re-arm
     }
-    return first?.path ?? null
+    return { file: first?.path ?? null, reason: null }
   }
 
   async #readReplies(file: string): Promise<DecodedReply[]> {

@@ -23,6 +23,24 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null
 
 /**
+ * A dedup id for a record that carries none of its own.
+ *
+ * This used to be `${Date.now()}-${parts.length}`, which is a NEW id on every read of the same
+ * line — so dedup could never match it and the same paragraph was read aloud again, and again,
+ * every time the transcript file was touched (006 TT4 / site 15, P20's failure through a side
+ * door P20's fix does not close). Content-derived, so re-reading an unchanged file produces an
+ * identical id set. FNV-1a: no dependency, and collisions only matter within one transcript.
+ */
+function stableId(text: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return `nouuid-${h.toString(16)}-${text.length}`
+}
+
+/**
  * Extract only speakable assistant prose from one Claude-format JSONL line.
  * Returns null for user turns, tool traffic, meta records, and thinking-only turns.
  */
@@ -52,8 +70,7 @@ export function decodeClaudeLine(line: string): DecodedReply | null {
 
   const text = parts.join('\n').trim()
   if (text.length === 0) return null
-  const id = typeof rec['uuid'] === 'string' ? rec['uuid'] : `${Date.now()}-${parts.length}`
-  return { id, text }
+  return { id: typeof rec['uuid'] === 'string' ? rec['uuid'] : stableId(text), text }
 }
 
 /** Codex/omp/grok share a simpler envelope; same filtering discipline. */
@@ -66,8 +83,8 @@ export function decodeGenericLine(line: string): DecodedReply | null {
   if (rec['thinking'] === true || rec['reasoning'] === true) return null
   const content = rec['content'] ?? rec['text']
   if (typeof content !== 'string' || content.trim().length === 0) return null
-  const id = typeof rec['id'] === 'string' ? rec['id'] : `${Date.now()}`
-  return { id, text: content.trim() }
+  const text = content.trim()
+  return { id: typeof rec['id'] === 'string' ? rec['id'] : stableId(text), text }
 }
 
 export function decoderFor(agent: AgentKind): (line: string) => DecodedReply | null {

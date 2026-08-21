@@ -208,8 +208,23 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   })
 
   // Survive the idle worker reap: without this, huddle mode silently turns itself off.
+  //
+  // C4, the FMA's highest-value cascade: ORCA reaps an idle worker at five minutes, and `#locked`
+  // was worker memory. On re-fork the next agent event re-picked "the most recently modified
+  // transcript" — after five idle minutes, very likely a DIFFERENT session. The lock is now
+  // persisted, and the session is RE-ANNOUNCED on activation, because the listener has no way of
+  // knowing a worker restarted and provenance is the one thing they cannot obtain any other way.
   void huddle.restore().then((on) => {
     host.log(`read-aloud: huddle mode restored to ${on ? 'on' : 'off'}`)
+    const again = huddle.restoredAnnouncement()
+    // 'next', not 'now': nothing is being read yet at activation, and if something is, it is more
+    // important than a status line about the thing that is reading it.
+    if (again !== null) announce(again, 'next')
+  }).catch((err: unknown) => {
+    // Site 25: this chain had no `.catch` at all, so a storage rejection turned huddle off and
+    // said nothing. TT14 — the listener's mode silently reverting is exactly the class of failure
+    // they cannot debug.
+    announce(`Huddle mode could not be restored: ${String(err)}. Press the huddle key to turn it on.`)
   })
 
   host.registerCommand('read-aloud.toggle-huddle', () => {

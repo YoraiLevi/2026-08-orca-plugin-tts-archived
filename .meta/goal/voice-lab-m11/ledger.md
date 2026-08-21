@@ -83,3 +83,27 @@ audit trail that explains the whole session after the fact.
   probes are committed and runnable in one command. R1 says the three ship together, so
   this verdict is one third of an answer.
 - audited_before: no. tested_after: yes — reproduced independently by the architect.
+
+### J12 `server` — done
+- did: `scripts/voice-lab.mjs`, `pnpm voice-lab`. `/normalize` returning 15 stage
+  intermediates, `/speak` returning base64 WAV chunks, `/stop`, fixtures, settings inbox.
+- evidence, **the architect ran C2's oracle rather than reading the report**: started the
+  server, POSTed every fixture to `/normalize`, and compared `spoken` byte-for-byte with
+  `normalize()` called directly from the library — the expected value comes from the
+  library, never from the server's own output.
+  ```
+  PASS architecture.md stages=15   PASS code-heavy.md stages=15
+  PASS hostile.md      stages=15   PASS paths.md      stages=15
+  PASS short.md        stages=15   PASS tables.md     stages=15
+  pass 6 fail 0
+  ```
+  Output lengths match the independent `normalize()` run recorded under J10 exactly
+  (3391 / 1568 / 1983 / 1897 / 595 / 1918) — two separate paths, one answer.
+- **The dist trap is closed, and it announces itself.** Startup prints:
+  `normalizer .../packages/core/src/normalizer/index.ts (source, not dist — checked
+  against 7 probes)`. That is a check that could have failed, not a comment claiming
+  it cannot.
+- bound to 127.0.0.1 only. Starting the server made no sound.
+- audited_before: no. tested_after: yes, by the architect, against an external oracle.
+- **C2 is NOT yet tickable**: it requires the page as well, and J13 is still running.
+  The server half is verified; the criterion waits.
