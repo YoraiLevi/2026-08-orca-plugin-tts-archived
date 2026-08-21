@@ -448,3 +448,43 @@ describe('006 rank 4 — a pressed control always answers in the audio stream', 
       .toMatch(/no agent reply to read yet/i)
   })
 })
+
+/**
+ * The wire, not the unit. Nothing asserted that `activate()` actually PASSES `resolveLabel` to the
+ * speech service — every provenance test in round 7 injects its own, so the host could stop wiring
+ * it and all of them would stay green while provenance silently stopped being checked. That is
+ * P26's shape on the wire round 7 just added, and P26's rule is the fix: drive the OUTERMOST
+ * object, assert what the innermost consumer received.
+ */
+describe('006 rank 3 — provenance is wired end to end, not only unit-tested', () => {
+  it('a session whose transcript is gone is named when its queued reply is spoken', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-prov-'))
+    const worktree = join(root, 'wt')
+    const project = worktree.replace(/[/\\:]/g, '-')
+    const file = await writeTranscript(root, project, 'sess1', ['already heard, primed away'])
+    const h = await boot(root)
+    await h.run('read-aloud.toggle-huddle')
+    h.agentDone(worktree)
+    await settle(20)                  // prime + watch established
+    h.provider.synthesized.length = 0
+    h.provider.delayMs = 200          // hold the queue open, or there is nothing pending to check
+
+    await appendReplies(file, 'sess1', [
+      'alpha reply one here', 'bravo reply two here', 'charlie reply three here',
+      'delta reply four here'
+    ])
+    await settle(70)                  // past the 250 ms debounce: four replies are now queued
+    expect(h.spoken(), 'nothing was queued, so this test proves nothing').toContain('alpha reply')
+    expect(h.spoken(), 'the queue drained already — there was no pending reply to re-check')
+      .not.toContain('delta reply')
+
+    // The session ends while its second reply is still waiting to be spoken. That is C1's
+    // sequence, and until this round nothing in the system could notice it happened.
+    await (await import('node:fs/promises')).rm(file)
+    await settle(300)
+
+    expect(h.spoken(), 'the queued reply must still reach the listener').toContain('delta reply')
+    expect(h.spoken(), 'activate() never wired resolveLabel, so provenance is never re-checked')
+      .toMatch(/has since ended/)
+  })
+})

@@ -170,13 +170,13 @@ What is left, ranked by cost to this listener — an honest list, not a failure.
 | **10** | whether the Linux floor is speaking | small — treat `spd-say --wait`'s exit as the playback signal and set a synthetic playing flag | The C6 half (skip producing two voices) is closed. What remains is `isSpeaking` reading false throughout on the `spd-say` rung, so every guard in `main.ts` sees an idle system. Needs a Linux runner to verify by effect, and verifying it on macOS would be exactly the "check that could not have failed" this audit was written about. |
 | **11** | whether a Stop landed (design 003) | small — one worker-emitted earcon at the instant of barge-in | Blocked on the control TUI existing (design 003, C7). Four indicators in series and none an effect check; the fix is specified and has nowhere to live yet. |
 | **12** | whether the Voice Lab and the plugin run the same code | already instrumented, not yet asserted in the plugin | `bb27b34` made the lab print its resolved module path against 7 probes. The plugin side has no equivalent, and `packages/*/dist/` is tracked and stale. |
-| — | **the new one, found while closing rank 3** | small | Nothing asserts that `resolveLabel` is *wired*. If the host stopped passing it, provenance would silently stop being checked and every test in this round would still pass, because they inject their own. That is P26's shape on the wire this round just added, and the guard is one end-to-end assertion through `activate()`. |
+| — | ~~the new one, found while closing rank 3~~ **CLOSED** | small | Nothing asserted that `resolveLabel` was *wired*: every provenance test injects its own, so the host could stop passing it and all of them would stay green while provenance silently stopped being checked — P26's shape on the wire this round just added. Closed by an end-to-end test through `activate()`: huddle follows a real transcript, four replies are queued behind a slow provider, the transcript is **deleted mid-drain**, and the assertion is that the still-queued reply is spoken *and* named. Verified by mutation on the wire itself. |
 
 ---
 
 ## 6. Counts
 
-- Suite: **330 passing before, 336 passing after**, 18 files. No test plays audio or opens an audio
+- Suite: **330 passing before, 337 passing after**, 18 files. No test plays audio or opens an audio
   device (P31): the providers under test are fakes that record strings, `sh -c 'exit N'`, or
   `process.execPath -e`.
 - Section 16 sites closed across all rounds: **all 55 are now closed, downstream-covered, or
