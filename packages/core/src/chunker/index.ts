@@ -20,8 +20,6 @@
 // `node --experimental-strip-types`, which will not resolve a `.js` specifier onto a `.ts` file.
 // Vitest's resolver does, which is why the suite stayed green while `pnpm voice-lab` could not
 // boot at all. Verified by effect under both resolvers before changing it.
-import { hasSpeakableGlyph } from '../speakable.ts'
-
 export type BoundaryKind = 'sentence' | 'clause' | 'word' | 'scalar' | 'end'
 
 export interface Chunk {
@@ -57,6 +55,36 @@ type _MissingChunkerKey =
   Exclude<keyof ChunkerOptions, (typeof CHUNKER_OPTION_KEYS)[number]> extends never ? true : never
 const _chunkerKeysAreExhaustive: _MissingChunkerKey = true
 void _chunkerKeysAreExhaustive
+
+/**
+ * "Is there a glyph here a synthesizer can turn into sound?" — a letter or a digit, any script.
+ *
+ * A RESTATED LOCAL COPY, and this repo has now measured twice that it must be. There was briefly a
+ * shared `packages/core/src/speakable.ts` that both this file and the normalizer imported. It
+ * cannot survive here, because the two resolvers this code is loaded by disagree and BOTH of them
+ * ship:
+ *
+ *   `from '../speakable.js'`  -> `tsc -b` is fine; PLAIN NODE cannot resolve it, and plain node is
+ *                                what `pnpm voice-lab` runs (SC-13, SC-14 / 019 R10-06)
+ *   `from '../speakable.ts'`  -> plain node is fine; `tsc -b` refuses it with TS5097 unless
+ *                                `allowImportingTsExtensions` is turned on, which the emitting
+ *                                build cannot have
+ *
+ * Both were tried, in that order, and both were seen to fail. Until this repo settles a specifier
+ * convention that satisfies both — its own Job, 34 files wide — a cross-directory import here is a
+ * choice between a broken typecheck and an unlaunchable Voice Lab.
+ *
+ * So the predicate is stated three times: here, in `normalize()`, and a third time in
+ * `packages/core/src/seams/seam-contracts.test.ts`, which feeds this component's real output to
+ * ITS copy. Two definitions that must agree is a check; one definition imported everywhere is not
+ * (P36). If any of the three drifts, SC-1 or SC-2 goes red and someone has to decide which one is
+ * right — which is exactly what a seam contract is for.
+ */
+const SPEAKABLE_GLYPH = /[\p{L}\p{N}]/u
+
+function hasSpeakableGlyph(text: string): boolean {
+  return SPEAKABLE_GLYPH.test(text)
+}
 
 /** Terminal punctuation that may end a sentence, once closing quotes/brackets are skipped. */
 const SENTENCE_END = new Set(['.', '!', '?'])
