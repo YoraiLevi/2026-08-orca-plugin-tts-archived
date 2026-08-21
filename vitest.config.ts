@@ -9,7 +9,7 @@ export default defineConfig({
     }
   },
   test: {
-    include: ['packages/*/src/**/*.test.ts'],
+    include: ['packages/*/src/**/*.test.ts', 'scripts/**/*.test.mjs', 'voice-lab/**/*.test.mjs'],
     // Cross-platform: no OS-specific reporters, no snapshot path assumptions.
     environment: 'node',
     // M1 gate: an empty suite must exit 0. From M2 on, real tests carry the gate.
