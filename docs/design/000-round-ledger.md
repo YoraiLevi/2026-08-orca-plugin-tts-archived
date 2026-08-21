@@ -51,6 +51,7 @@ The bar makes the counter measure convergence rather than enthusiasm.
 | 8 | Adversarial review of `PLAN.md`, `TASKS.md`, the constitution's budget table, `006` and `packages/core/src/**` — run, not read | 1 | **26** | **no** | see `017-review-round8.md`. 22 of 26 came from executing the code, 2 from a peer's implementation work re-verified here; **0** from reading a document |
 | 9 | **Build**, not review: `006` section 22 — seam contracts, one row per adjacent pair, each seen red | 1 | **7** | **no** | see `018-review-round9.md`. 10 rows, 3 seams asked-and-empty, 6 rows OPEN. Every row proved red; the mutation log is `018` section 4 |
 | 10 | Close section 22.5's own list; extend section 22 to the seams **into ORCA** | 1 | **7** | **no** | see `019-review-round10.md`. Seam 10 closed; the decoder gets rows; a 32,525-record census of the real transcript format, never taken before. **Recommends continuing past 10** — see below |
+| 11 | The last two inventories: the transcript **tailer** and the **adapter/manifest** — the seams whose far side is not our code | 1 | **2** | **no** | see `020-review-round11.md`. **The seam inventory is complete: five for five, every one yielding on its first look.** Thinnest round yet, bar fully met |
 
 ## Parking lot
 
@@ -269,3 +270,48 @@ rounds, not an open-ended extension.
 
 **Stated so it is not soft: the recommendation is to continue, and the reason is coverage, not
 enthusiasm.**
+
+## Close of round 11 — the survey is complete, and the decision is the author's
+
+Round 11 opened the two inventories that had never been opened, by the same rule.
+
+**2 items clear the bar** — the thinnest round in the protocol, and the bar was fully met: both rows
+feed one component's real output to the next, and both were seen red.
+
+| Item | Clause |
+|---|---|
+| **R11-01** — an atomic rename-replace kills the watch: `fs.watch` emits `rename`, **never `error`**, and the tailer discards `eventType` in its argument list. One session goes permanently quiet while every other works. `006` TT13 records this as closed; it is closed against the wrong channel | 3, 5 |
+| **R11-02** — the manifest exists **twice**, the checks are split across the copies (unit tests read source, CI reads dist), and **`read-aloud.self-test`** — the instrument built for section 19's **rank-one** undetectable, *"that the plugin is mute"* — is declared in source and **absent from the shipped manifest** at `HEAD` | 3, 5 |
+
+**Excluded and named:** the completion of the inventory is the round's **conclusion**, not an item —
+it changes no decision and adds no failure mode, and counting a round's own summary is the shape the
+bar exists to exclude. Section 4's four negative results are results, not items.
+
+**Dry counter: 0 of 3.** Round 11 was not dry. **In eleven rounds the counter has never started.**
+
+### The argument for continuing has expired, and this ledger says so
+
+| Round | Items | Method |
+|---|---|---|
+| 8 | 26 | running the pipeline over real and hostile input, first time ever |
+| 9 | 7 | seam instruments for the audio path |
+| 10 | 7 | seam instruments for the decoder and the build-time contract |
+| 11 | **2** | seam instruments for the tailer and the adapter |
+
+Round 10's reason for continuing was *"two of five inventories have never been opened."* **That is no
+longer true.** The endpoint stated in advance — *"open the tailer and the adapter by the same rule,
+two more rounds, not an open-ended extension"* — **is met**, and the seam method has been applied to
+every adjacent pair in the system.
+
+**Five inventories, five yields on first look**, including the one where most questions came back
+empty. That fact still argues the system is not clean. But **there is no longer a named ungathered
+class**, and round 8's argument was right *because* it named one. Manufacturing a new one to keep the
+process alive is exactly the enthusiasm this bar exists to exclude, and this record will not do it.
+
+**Recommendation for rounds 12 and 13: no new inventory, no new method.** Re-run the existing bar
+over the whole system and see what a round with nothing left to open produces.
+
+- **Dry twice** → the counter reaches 2 of 3 honestly, on a surveyed system, and round 14 can close
+  the protocol on the author's own terms.
+- **Still yielding** → that is the strongest possible evidence for continuing, and unlike every
+  previous round it would be **evidence rather than an argument**.
