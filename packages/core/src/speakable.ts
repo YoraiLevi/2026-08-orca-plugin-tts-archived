@@ -23,6 +23,12 @@
  * punctuation" — an allow-list of things that carry sound, rather than a deny-list of things that
  * do not, because a deny-list silently admits every glyph nobody thought of.
  *
+ * NOT EXPORTED FROM `packages/core/src/index.ts`, on purpose. This is an internal helper, and the
+ * barrel is loaded by plain node (`pnpm voice-lab`), whose resolver does not map a `.js` specifier
+ * onto a `.ts` file — SC-14 / 019 R10-06. `Chunker` imports it directly as `'../speakable.ts'`,
+ * which does resolve under both resolvers. Adding a row to a barrel that already cannot load under
+ * the resolver that ships would have made a pre-existing outage harder to read, not easier.
+ *
  * NOTE FOR THE SEAM TESTS. `packages/core/src/seams/seam-contracts.test.ts` deliberately does NOT
  * import this. It restates the predicate as its own independent claim, because a seam test that
  * imported the guard it checks would compare that guard against itself and could not fail (P36).
