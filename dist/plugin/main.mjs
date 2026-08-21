@@ -1,3 +1,6 @@
+// packages/plugin/src/main.ts
+import { existsSync } from "node:fs";
+
 // packages/providers/src/os-synth/index.ts
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -21,6 +24,23 @@ var OsSynthUnavailableError = class extends Error {
   constructor(platform, tried) {
     super(`No OS speech synthesizer found on ${platform}. Tried: ${tried.join(", ")}`);
     this.name = "OsSynthUnavailableError";
+  }
+};
+var OsSynthEmptyOutputError = class extends Error {
+  constructor(cmd, why) {
+    super(why === "empty" ? `${cmd} exited successfully but wrote no audio (is the disk full?)` : `${cmd} exited successfully but its audio file could not be read`);
+    this.name = "OsSynthEmptyOutputError";
+  }
+};
+var OsSynthExitError = class extends Error {
+  code;
+  stderr;
+  constructor(cmd, code, stderr) {
+    const said = stderr.trim();
+    super(said.length > 0 ? `${cmd} exited ${String(code)}: ${said}` : `${cmd} exited ${String(code)} without writing audio and said nothing about why`);
+    this.name = "OsSynthExitError";
+    this.code = code;
+    this.stderr = said;
   }
 };
 var OsSynthTimeoutError = class extends Error {
@@ -57,6 +77,20 @@ function linuxCommand(backend, rawText, outFile, opts) {
   args.push("--", text);
   return { cmd: backend, args };
 }
+function darwinCommand(text, outFile, opts) {
+  const args = ["-o", outFile, "--data-format=LEI16@22050"];
+  if (opts.voice !== void 0) args.push("-v", opts.voice);
+  if (opts.rate !== void 0) args.push("-r", String(Math.round(opts.rate * 175)));
+  args.push("--", text);
+  return { cmd: "say", args };
+}
+function win32Command(text, outFile, opts) {
+  const esc = (s) => s.replace(/'/g, "''");
+  const rate = opts.rate === void 0 ? 0 : Math.max(-10, Math.min(10, Math.round((opts.rate - 1) * 10)));
+  const voice = opts.voice === void 0 ? "" : `$s.SelectVoice('${esc(opts.voice)}'); `;
+  const ps = "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " + voice + `$s.Rate = ${rate}; $s.SetOutputToWaveFile('${esc(outFile)}'); $s.Speak('${esc(text)}'); $s.Dispose()`;
+  return { cmd: "powershell", args: ["-NoProfile", "-NonInteractive", "-STA", "-Command", ps] };
+}
 var OsSynthProvider = class {
   id = "os-synth";
   displayName = "System voice";
@@ -70,11 +104,20 @@ var OsSynthProvider = class {
   #linuxBackend = void 0;
   #announcedFloor = false;
   #unavailableReason = null;
+  /**
+   * Resolves once the last `spd-say --cancel` has actually exited. 006 C6 + site 39: the cancel was
+   * fire-and-forget with BOTH its 'error' event and its surrounding catch swallowed, so barge-in on
+   * the Linux floor could fail with no trace — and the next utterance was handed to the same daemon
+   * before the cancel arrived, producing two overlapping voices.
+   */
+  #cancelInFlight = null;
+  #lastCancelFailure = null;
   constructor(opts = {}) {
     this.#platform = opts.platform ?? process.platform;
     this.#timeoutMs = opts.timeoutMs ?? DEFAULT_SPAWN_TIMEOUT_MS;
     this.#notify = opts.notify ?? (() => {
     });
+    if (opts.linuxBackend !== void 0) this.#linuxBackend = opts.linuxBackend;
   }
   get isWarm() {
     return this.#warm;
@@ -90,24 +133,75 @@ var OsSynthProvider = class {
   get linuxBackend() {
     return this.#linuxBackend ?? null;
   }
+  /**
+   * Confirm the synthesizer actually answers, and THROW when it does not.
+   *
+   * This used to be `await this.listVoices()`, which catches everything and returns `[]` without
+   * throwing — so on macOS and Windows a broken `say` or a broken PowerShell set `#warm = true`,
+   * the registry reported `rung: 'preferred'` with no reason, and the plugin logged "engine ready"
+   * while being permanently mute. The real cause was written to `unavailableReason`, whose own doc
+   * comment says it exists "so the reason reaches a notification instead of dying in a catch
+   * block", and NO CALLER READ IT (006 sites 41 and 54, and the first of the FMA's three to fix
+   * first). P25 and P18 fused: a probe that cannot fail, feeding a diagnostic nobody reads.
+   *
+   * `listVoices()` keeps its forgiving contract — it answers a settings UI's question, and "[]"
+   * is a survivable answer there. `prepare()` answers "can this machine speak at all", and the
+   * only honest answers to that are yes and a named no.
+   */
   async prepare() {
     if (this.#warm) return;
-    if (this.#platform === "linux") await this.#resolveLinuxBackend();
-    else await this.listVoices();
+    if (this.#platform === "linux") {
+      await this.#resolveLinuxBackend();
+      this.#warm = true;
+      return;
+    }
+    const voices = await this.listVoices();
+    if (voices.length === 0) {
+      const why = this.#unavailableReason ?? `${this.#platform === "darwin" ? "say" : "powershell"} ran but listed no voices`;
+      this.#unavailableReason = why;
+      const err = new OsSynthUnavailableError(this.#platform, [this.#platform === "darwin" ? "say" : "powershell"]);
+      err.message = `${err.message} \u2014 ${why}`;
+      this.#notify(`Read Aloud: ${err.message}`);
+      throw err;
+    }
+    this.#unavailableReason = null;
     this.#warm = true;
+  }
+  /** Why the last daemon cancel failed, if it did. `null` when barge-in reached the daemon. */
+  get lastCancelFailure() {
+    return this.#lastCancelFailure;
   }
   cancel() {
     this.#cancelled = true;
     const c = this.#child;
     this.#child = null;
     if (c !== null && c.exitCode === null) c.kill("SIGKILL");
-    if (this.#linuxBackend === "spd-say") {
+    if (this.#linuxBackend !== "spd-say") return;
+    this.#cancelInFlight = new Promise((resolve) => {
+      let child;
       try {
-        spawn("spd-say", ["--cancel"], { stdio: "ignore" }).on("error", () => {
-        });
-      } catch {
+        child = spawn("spd-say", ["--cancel"], { stdio: "ignore" });
+      } catch (err) {
+        this.#noteCancelFailure(`spd-say --cancel could not be spawned: ${String(err)}`);
+        resolve();
+        return;
       }
-    }
+      const done = (why) => {
+        this.#noteCancelFailure(why);
+        resolve();
+      };
+      child.on("error", (err) => {
+        done(`spd-say --cancel could not be started: ${String(err)}`);
+      });
+      child.on("close", (code) => {
+        done(code === 0 ? null : `spd-say --cancel exited ${String(code)}; the daemon may still be speaking`);
+      });
+    });
+    return this.#cancelInFlight;
+  }
+  #noteCancelFailure(why) {
+    this.#lastCancelFailure = why;
+    if (why !== null) this.#notify(`Read Aloud: stop may not have worked \u2014 ${why}`);
   }
   /**
    * Detect once, cache, and FAIL LOUDLY. Returns the winning backend or throws
@@ -173,15 +267,11 @@ var OsSynthProvider = class {
     const dir = await mkdtemp(join(tmpdir(), "orca-tts-"));
     const wav = join(dir, "out.wav");
     try {
-      try {
-        await this.#synthesizeToFile(text, wav, opts);
-      } catch (err) {
-        if (err instanceof OsSynthTimeoutError) return;
-        throw err;
-      }
+      await this.#synthesizeToFile(text, wav, opts);
       if (this.#cancelled || opts.signal?.aborted === true) return;
       const data = await readFile(wav).catch(() => null);
-      if (data === null || data.length === 0) return;
+      if (data === null) throw new OsSynthEmptyOutputError(this.#command(text, wav, opts).cmd, "unreadable");
+      if (data.length === 0) throw new OsSynthEmptyOutputError(this.#command(text, wav, opts).cmd, "empty");
       yield { data: new Uint8Array(data), format: "wav", sampleRate: CAPABILITIES.sampleRate, channels: 1 };
     } finally {
       await rm(dir, { recursive: true, force: true }).catch(() => void 0);
@@ -190,20 +280,10 @@ var OsSynthProvider = class {
   #command(rawText, outFile, opts) {
     const text = neutralizeInBandCommands(rawText);
     switch (this.#platform) {
-      case "darwin": {
-        const args = ["-o", outFile, "--data-format=LEI16@22050"];
-        if (opts.voice !== void 0) args.push("-v", opts.voice);
-        if (opts.rate !== void 0) args.push("-r", String(Math.round(opts.rate * 175)));
-        args.push(text);
-        return { cmd: "say", args };
-      }
-      case "win32": {
-        const esc = (s) => s.replace(/'/g, "''");
-        const rate = opts.rate === void 0 ? 0 : Math.max(-10, Math.min(10, Math.round((opts.rate - 1) * 10)));
-        const voice = opts.voice === void 0 ? "" : `$s.SelectVoice('${esc(opts.voice)}'); `;
-        const ps = "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; " + voice + `$s.Rate = ${rate}; $s.SetOutputToWaveFile('${esc(outFile)}'); $s.Speak('${esc(text)}'); $s.Dispose()`;
-        return { cmd: "powershell", args: ["-NoProfile", "-NonInteractive", "-STA", "-Command", ps] };
-      }
+      case "darwin":
+        return darwinCommand(text, outFile, opts);
+      case "win32":
+        return win32Command(text, outFile, opts);
       case "linux": {
         return linuxCommand(this.#linuxBackend ?? "espeak-ng", text, outFile, opts);
       }
@@ -214,13 +294,17 @@ var OsSynthProvider = class {
     await new Promise((resolve, reject) => {
       let child;
       try {
-        child = spawn(cmd, args, { stdio: "ignore" });
+        child = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
       } catch (err) {
         reject(new OsSynthUnavailableError(this.#platform, [cmd]));
         void err;
         return;
       }
       this.#child = child;
+      let stderr = "";
+      child.stderr?.on("data", (d2) => {
+        if (stderr.length < 4096) stderr += d2.toString("utf8");
+      });
       const timer = setTimeout(() => {
         if (child.exitCode === null) child.kill("SIGKILL");
         reject(new OsSynthTimeoutError(cmd, this.#timeoutMs));
@@ -230,9 +314,13 @@ var OsSynthProvider = class {
         fn();
       };
       child.on("error", () => settle(() => reject(new OsSynthUnavailableError(this.#platform, [cmd]))));
-      child.on("close", () => settle(() => {
+      child.on("close", (code) => settle(() => {
         this.#child = null;
-        resolve();
+        if (code === null || code === 0 || this.#cancelled || opts.signal?.aborted === true) {
+          resolve();
+          return;
+        }
+        reject(new OsSynthExitError(cmd, code, stderr));
       }));
       opts.signal?.addEventListener("abort", () => this.cancel(), { once: true });
     });
@@ -243,12 +331,12 @@ var OsSynthProvider = class {
    * emit PCM, and it exists only because on a stock Ubuntu desktop the alternative is silence.
    */
   async #speakDirect(text, opts) {
-    try {
-      await this.#synthesizeToFile(text, "", opts);
-    } catch (err) {
-      if (err instanceof OsSynthTimeoutError) return;
-      throw err;
+    if (this.#cancelInFlight !== null) {
+      await this.#cancelInFlight;
+      this.#cancelInFlight = null;
+      if (this.#cancelled) return;
     }
+    await this.#synthesizeToFile(text, "", opts);
   }
   #capture(cmd, args) {
     return new Promise((resolve, reject) => {
@@ -268,8 +356,8 @@ var OsSynthProvider = class {
         clearTimeout(timer);
         fn();
       };
-      child.stdout?.on("data", (d) => {
-        out += d.toString("utf8");
+      child.stdout?.on("data", (d2) => {
+        out += d2.toString("utf8");
       });
       child.on("error", () => settle(() => reject(new OsSynthUnavailableError(this.#platform, [cmd]))));
       child.on("close", (code) => settle(() => {
@@ -285,6 +373,7 @@ var ProviderRegistry = class {
   #providers = /* @__PURE__ */ new Map();
   #preferredId = null;
   #lastFailure = null;
+  #lastFailureDetail = null;
   register(p, opts = {}) {
     this.#providers.set(p.id, p);
     if (opts.preferred === true) this.#preferredId = p.id;
@@ -298,6 +387,14 @@ var ProviderRegistry = class {
    */
   get lastFailure() {
     return this.#lastFailure;
+  }
+  /**
+   * The named form of the same failure. Read this, not `lastFailure`, when the caller has to
+   * DECIDE something — "nothing was registered" is a bug in our own wiring and "prepare threw" is
+   * a fact about the user's machine, and they were previously the same `null`.
+   */
+  get lastFailureDetail() {
+    return this.#lastFailureDetail;
   }
   list() {
     return [...this.#providers.values()];
@@ -313,7 +410,11 @@ var ProviderRegistry = class {
       ...this.list().filter((p) => p.capabilities.offline).map((p) => p.id)
     ].filter((x) => typeof x === "string");
     this.#lastFailure = null;
+    this.#lastFailureDetail = null;
     const seen = /* @__PURE__ */ new Set();
+    const unknown = [];
+    const tried = [];
+    const failures = [];
     let rung = "preferred";
     for (const id of tryOrder) {
       if (seen.has(id)) continue;
@@ -321,53 +422,90 @@ var ProviderRegistry = class {
       const p = this.#providers.get(id);
       if (p === void 0) {
         rung = "fallback";
+        unknown.push(id);
         continue;
       }
       try {
         await p.prepare();
       } catch (err) {
         rung = "fallback";
-        this.#lastFailure = err instanceof Error ? err.message : String(err);
+        tried.push(id);
+        const why = err instanceof Error ? err.message : String(err);
+        failures.push(`${id}: ${why}`);
+        this.#lastFailure = why;
         continue;
       }
       const reason = rung === "preferred" ? void 0 : `${requestedId ?? this.#preferredId ?? "preferred engine"} was unavailable; using ${p.displayName}`;
       return { provider: p, status: reason === void 0 ? { providerId: p.id, rung } : { providerId: p.id, rung, reason } };
     }
+    this.#lastFailureDetail = this.#describeFailure(tried, unknown, failures);
+    this.#lastFailure = this.#lastFailureDetail.reason;
     return null;
+  }
+  #describeFailure(tried, unknown, failures) {
+    if (this.#providers.size === 0) {
+      return {
+        kind: "none-registered",
+        reason: "no speech engine is registered \u2014 the plugin did not finish wiring itself up",
+        tried,
+        unknown
+      };
+    }
+    if (tried.length === 0) {
+      return {
+        kind: "unknown-id",
+        reason: unknown.length === 0 ? "no speech engine could be selected" : `no speech engine named ${unknown.join(", ")} is installed in this build`,
+        tried,
+        unknown
+      };
+    }
+    return { kind: "prepare-failed", reason: failures.join("; "), tried, unknown };
   }
 };
 
 // packages/plugin/src/adapter/index.ts
-function makeHost(orca) {
+function makeHost(orca, hooks = {}) {
   let registered = 0;
+  let logFailures = 0;
   const log = (m) => {
     try {
       orca.log(m);
     } catch {
+      logFailures++;
     }
   };
   return {
     log,
+    logFailures: () => logFailures,
     registeredCommands: () => registered,
-    notify(title, body) {
+    notify(title, body, opts = {}) {
       const params = { title: title.slice(0, 120) };
       if (body !== void 0) params["body"] = body.slice(0, 1e3);
-      void Promise.resolve(orca.host.call("notifications.show", params)).catch(() => {
-        log(`notification suppressed: ${title}`);
+      const message = body ?? title;
+      const undelivered = (why) => {
+        log(`notification not delivered (${why}): ${message}`);
+        if (opts.alreadySpoken !== true) hooks.onUndelivered?.(message);
+      };
+      void Promise.resolve(orca.host.call("notifications.show", params)).then((r) => {
+        if (r?.delivered === false) undelivered("reported undelivered");
+      }).catch((err) => {
+        undelivered(String(err));
       });
     },
     async storageGet(key) {
       try {
         const r = await orca.host.call("storage.get", { key });
         return r?.value;
-      } catch {
+      } catch (err) {
+        hooks.onStorageFailure?.({ op: "get", key, reason: String(err) });
         return void 0;
       }
     },
     async storageSet(key, value) {
       try {
         await orca.host.call("storage.set", { key, value });
-      } catch {
+      } catch (err) {
+        hooks.onStorageFailure?.({ op: "set", key, reason: String(err) });
       }
     },
     onEvent(name, handler) {
@@ -375,6 +513,7 @@ function makeHost(orca) {
         orca.events.on(name, handler);
       } catch (err) {
         log(`could not subscribe to ${name}: ${String(err)}`);
+        hooks.onUndelivered?.(`Huddle could not subscribe to ${name}, so agent replies will not be spoken.`);
       }
     },
     registerCommand(id, handler) {
@@ -385,6 +524,7 @@ function makeHost(orca) {
             return { ok: true };
           } catch (err) {
             log(`command ${id} failed: ${String(err)}`);
+            hooks.onCommandFailed?.(id, String(err));
             return { ok: false, error: String(err) };
           }
         });
@@ -417,9 +557,12 @@ function worktreePathFrom(worktreeId) {
 // packages/plugin/src/clipboard.ts
 import { spawn as spawn2 } from "node:child_process";
 var ClipboardUnavailableError = class extends Error {
-  constructor(platform, tried) {
-    super(`Could not read the clipboard on ${platform}. Tried: ${tried.join(", ")}`);
+  /** Per-helper reason, in ladder order. */
+  reasons;
+  constructor(platform, tried, reasons = []) {
+    super(reasons.length > 0 ? `Could not read the clipboard on ${platform}. ${reasons.join("; ")}.` : `Could not read the clipboard on ${platform}. Tried: ${tried.join(", ")}`);
     this.name = "ClipboardUnavailableError";
+    this.reasons = reasons;
   }
 };
 var CANDIDATES = {
@@ -437,7 +580,7 @@ function capture(cmd, args, timeoutMs) {
     try {
       child = spawn2(cmd, [...args], { stdio: ["ignore", "pipe", "ignore"] });
     } catch {
-      reject(new Error(cmd));
+      reject(new Error(`${cmd} could not be started`));
       return;
     }
     let out = "";
@@ -449,12 +592,18 @@ function capture(cmd, args, timeoutMs) {
       clearTimeout(timer);
       fn();
     };
-    child.stdout?.on("data", (d) => {
-      out += d.toString("utf8");
+    child.stdout?.on("data", (d2) => {
+      out += d2.toString("utf8");
     });
-    child.on("error", () => settle(() => reject(new Error(cmd))));
-    child.on("close", (code) => settle(() => code === 0 ? resolve(out) : reject(new Error(cmd))));
+    child.on("error", (err) => settle(() => reject(new Error(
+      err.code === "ENOENT" ? `${cmd} is not installed` : `${cmd} could not be started`
+    ))));
+    child.on("close", (code) => settle(() => code === 0 ? resolve(out) : reject(new Error(`${cmd} exited with code ${String(code)}`))));
   });
+}
+function capText(raw, maxChars) {
+  if (raw.length <= maxChars) return { text: raw, truncated: false };
+  return { text: raw.slice(0, maxChars), truncated: true };
 }
 var DEFAULT_MAX_CHARS = 2e4;
 var DEFAULT_CLIPBOARD_TIMEOUT_MS = 2e4;
@@ -462,19 +611,22 @@ async function readClipboard(opts = {}) {
   const platform = opts.platform ?? process.platform;
   const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS;
-  const candidates = CANDIDATES[platform] ?? [];
+  const candidates = opts.helpers ?? CANDIDATES[platform] ?? [];
   const tried = [];
+  const reasons = [];
   for (const c of candidates) {
     tried.push(c.cmd);
     try {
-      const raw = await capture(c.cmd, c.args, timeoutMs);
-      if (raw.length <= maxChars) return { text: raw, truncated: false };
-      return { text: raw.slice(0, maxChars), truncated: true };
-    } catch {
+      return capText(await capture(c.cmd, c.args, timeoutMs), maxChars);
+    } catch (err) {
+      reasons.push(err instanceof Error ? err.message : String(err));
       continue;
     }
   }
-  throw new ClipboardUnavailableError(platform, tried);
+  if (candidates.length === 0) {
+    reasons.push(`no clipboard helper is known for ${platform}`);
+  }
+  throw new ClipboardUnavailableError(platform, tried, reasons);
 }
 
 // packages/core/src/normalizer/index.ts
@@ -538,14 +690,38 @@ var KEY_GLYPHS = {
   "\u2191": "up",
   "\u2193": "down",
   "\u2190": "left",
-  "\u2192": "right"
+  "\u2192": "right",
+  /**
+   * 006 site 50: `stripEmoji` deleted emoji, dingbats AND CHECK MARKS with no announcement, so
+   * "\u2705 done" and "\u274C done" reached the listener as the same word — the verdict removed and
+   * only the subject left. These carry MEANING in an agent reply; a party popper does not, and
+   * still does not get one. Spoken as words, not announced as omissions: "yes" is the content, and
+   * "an emoji was omitted" would be narration.
+   */
+  "\u2713": "yes",
+  "\u2714": "yes",
+  "\u2705": "yes",
+  "\u2717": "no",
+  "\u2718": "no",
+  "\u274C": "no",
+  "\u274E": "no",
+  "\u26A0": "warning",
+  "\u2757": "important",
+  "\u2755": "important"
 };
 var CODE_PLACEHOLDER = " . Here, a code block is omitted. ";
+var UNCLOSED_CODE_PLACEHOLDER = " . Here, a code block is omitted, and the reply ends inside it, so anything after it was not read. ";
+var SPEAKABLE_GLYPH = /[\p{L}\p{N}]/u;
+function hasSpeakableGlyph(text) {
+  return SPEAKABLE_GLYPH.test(text);
+}
 function normalize(md, opts = {}) {
   const codeBlocks = opts.codeBlocks ?? "announce";
   const pathStyle = opts.pathStyle ?? "spoken";
   const doNumbers = opts.expandNumbers ?? true;
+  const doUnits = opts.expandUnits ?? true;
   let s = stripFencedCode(md, codeBlocks);
+  s = stripHtmlComments(s);
   s = stripInlineCode(s);
   s = expandMarkdownLinks(s);
   s = stripUrls(s);
@@ -556,13 +732,11 @@ function normalize(md, opts = {}) {
   s = stripMarkdownMarkers(s);
   s = speakKeyGlyphs(s);
   s = stripEmoji(s);
-  if (doNumbers) {
-    s = expandUnits(s);
-    s = expandNumbers(s);
-  }
+  if (doUnits) s = expandUnits(s);
+  if (doNumbers) s = expandNumbers(s);
   s = collapseWhitespace(s);
   s = tidyPunctuation(s);
-  return s.length <= 1 ? "" : s;
+  return hasSpeakableGlyph(s) ? s : "";
 }
 function isFence(line) {
   const t = line.trimStart();
@@ -589,8 +763,34 @@ function stripFencedCode(src, policy) {
     }
     if (!inFence) out.push(line);
   }
-  void announced;
+  if (inFence && announced) {
+    const at = out.lastIndexOf(CODE_PLACEHOLDER);
+    if (at !== -1) out[at] = UNCLOSED_CODE_PLACEHOLDER;
+  } else if (inFence && policy !== "announce") {
+    out.push(UNCLOSED_CODE_PLACEHOLDER);
+  }
   return out.join("\n");
+}
+function stripHtmlComments(src) {
+  let out = "";
+  let i = 0;
+  while (i < src.length) {
+    const open = src.indexOf("<!--", i);
+    if (open === -1) {
+      out += src.slice(i);
+      break;
+    }
+    out += src.slice(i, open);
+    const close = src.indexOf("-->", open + 4);
+    if (close === -1) {
+      out += src.slice(open + 4);
+      break;
+    }
+    const newlines = src.slice(open, close + 3).split("\n").length - 1;
+    out += newlines > 0 ? "\n".repeat(newlines) : " ";
+    i = close + 3;
+  }
+  return out;
 }
 function stripInlineCode(src) {
   let out = "";
@@ -621,7 +821,9 @@ function expandMarkdownLinks(src) {
       if (close !== -1) {
         const end = src.indexOf(")", close + 2);
         if (end !== -1) {
-          out += src.slice(i + 1, close);
+          const label = src.slice(i + 1, close);
+          const url = src.slice(close + 2, end);
+          out += label + linkSuffix(label, url);
           i = end + 1;
           continue;
         }
@@ -631,6 +833,12 @@ function expandMarkdownLinks(src) {
     i++;
   }
   return out;
+}
+function linkSuffix(label, url) {
+  const host = (url.replace(/^https?:\/\//, "").split("/")[0] ?? "").replace(/^www\./, "");
+  if (host.length === 0 || !host.includes(".")) return "";
+  if (label.toLowerCase().includes(host.toLowerCase())) return "";
+  return `, ${linkPhrase(url)},`;
 }
 function linkPhrase(url) {
   const afterScheme = url.replace(/^https?:\/\//, "");
@@ -906,6 +1114,16 @@ function spokenTime(h, m) {
 function isDigit(c) {
   return c !== void 0 && c >= "0" && c <= "9";
 }
+var LETTER = new RegExp("\\p{L}", "u");
+function isLetter(c) {
+  return c !== void 0 && LETTER.test(c);
+}
+function isMinusSign(src, pos) {
+  if (src[pos] !== "-") return false;
+  const before = src[pos - 1];
+  if (before === void 0) return true;
+  return before === " " || before === "\n" || before === "	" || before === "(" || before === "[";
+}
 function expandNumbers(src) {
   let out = "";
   let i = 0;
@@ -915,9 +1133,18 @@ function expandNumbers(src) {
       i++;
       continue;
     }
+    if (out.endsWith("-") && isMinusSign(src, i - 1)) {
+      out = out.slice(0, -1) + "minus ";
+    }
     let j = i;
     while (isDigit(src[j])) j++;
-    const digits = src.slice(i, j);
+    if (j - i <= 3) {
+      let k = j;
+      while (src[k] === "," && isDigit(src[k + 1]) && isDigit(src[k + 2]) && isDigit(src[k + 3]) && !isDigit(src[k + 4])) k += 4;
+      j = k;
+    }
+    const raw = src.slice(i, j);
+    const digits = raw.split(",").join("");
     if (src[j] === ":" && isDigit(src[j + 1])) {
       let k = j + 1;
       while (isDigit(src[k])) k++;
@@ -938,13 +1165,23 @@ function expandNumbers(src) {
       continue;
     }
     if (src[i - 1] === "#") {
-      out += digits;
+      out += raw;
+      i = j;
+      continue;
+    }
+    if (isLetter(src[i - 1])) {
+      out += raw;
+      i = j;
+      continue;
+    }
+    if (digits.length > 1 && digits.startsWith("0")) {
+      out += [...digits].map((d2) => ONES[Number(d2)]).join(" ");
       i = j;
       continue;
     }
     const value = Number(digits);
     if (value >= 1e6 || digits.length > 6) {
-      out += digits;
+      out += raw;
       i = j;
       continue;
     }
@@ -1024,6 +1261,10 @@ function collapseWhitespace(src) {
 }
 
 // packages/core/src/chunker/index.ts
+var SPEAKABLE_GLYPH2 = /[\p{L}\p{N}]/u;
+function hasSpeakableGlyph2(text) {
+  return SPEAKABLE_GLYPH2.test(text);
+}
 var SENTENCE_END = /* @__PURE__ */ new Set([".", "!", "?"]);
 var CLAUSE_END = /* @__PURE__ */ new Set([",", ";", ":", "\u2014", "\u2013"]);
 var CLOSERS = /* @__PURE__ */ new Set([")", "]", "}", '"', "'", "\u201D", "\u2019"]);
@@ -1136,7 +1377,7 @@ var Chunker = class {
         const after = this.#skipClosers(i + 1);
         if (this.#isSentenceEnd(i, after)) {
           const cut = this.#absorbSpaces(after);
-          if (cut <= buf.length && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits) {
+          if (cut <= buf.length && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits && this.#carriesSpeech(cut)) {
             if (firstSentence === -1) firstSentence = cut;
             lastSentence = cut;
             if (wantEarliestSentence && this.#complete(cut, final)) break;
@@ -1144,10 +1385,14 @@ var Chunker = class {
         }
       } else if (CLAUSE_END.has(ch)) {
         const cut = this.#absorbSpaces(i + 1);
-        if (this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits) lastClause = cut;
+        if (this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits && this.#carriesSpeech(cut)) {
+          lastClause = cut;
+        }
       } else if (SPACE.has(ch)) {
         const cut = this.#absorbSpaces(i);
-        if (cut > 0 && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits) lastWord = cut;
+        if (cut > 0 && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits && this.#carriesSpeech(cut)) {
+          lastWord = cut;
+        }
       }
     }
     if (!final) {
@@ -1174,6 +1419,37 @@ var Chunker = class {
   #complete(cut, final) {
     if (final) return true;
     return cut < this.#buffer.length;
+  }
+  /**
+   * SC-2 (006 section 22, finding R8-08). May the prefix `buf[0..cut)` be emitted as a chunk of
+   * its own, or would it be an utterance with nothing in it to say?
+   *
+   * `#isSentenceEnd` returns true unconditionally for '!' and '?' — "'!' and '?' are never
+   * abbreviations", which is true as written and wrong as a SENTENCE rule: '.' gets six context
+   * tests and '!' got none. So `#!/usr/bin/env node` yielded a first chunk of `"#!"` and
+   * `![alt](url)` yielded `"!"`. Each costs a full synthesis round trip and returns near-silence
+   * (p50 747 ms of provider time for 97 ms of noise, `017` R8-09), and each lands on chunk 0 — the
+   * one chunk `isolateFirstSentence` exists to make fast.
+   *
+   * Stated as a property of the CHUNK rather than of the punctuation mark, because that is the
+   * form the downstream provider actually needs: it does not care which glyph ended the sentence,
+   * it cares whether there is a word in the utterance. A boundary that would mint a speechless
+   * chunk is simply not a boundary, so the fragment travels with the text that follows it —
+   * `"#!/usr/bin/env node Run it."` becomes one chunk instead of two, and the invariant
+   * `chunks.join('') === input` is untouched (it is a refusal to cut, never a rewrite).
+   *
+   * Safe for streaming: this reads a PREFIX of the buffer, and a prefix never changes as more text
+   * arrives — so streaming still agrees with batch (SC-5, T035).
+   *
+   * NOT applied to the `scalar` fallback below. That path fires only when a single token overruns
+   * `maxUnits` with no boundary anywhere, and it exists to guarantee forward progress; refusing it
+   * would hang the chunker on a long enough run of punctuation. A 200-character wall of '!' is
+   * still speech-free and still reaches the provider — recorded here as the residue rather than
+   * fixed, because the provider's own empty-output guard is the right place for it and
+   * `OsSynthEmptyOutputError` (006 site 43) already names that outcome.
+   */
+  #carriesSpeech(cut) {
+    return hasSpeakableGlyph2(this.#buffer.slice(0, cut));
   }
   #skipClosers(from) {
     let i = from;
@@ -1235,7 +1511,7 @@ var PlaybackQueue = class {
   async bargeIn() {
     this.#generation++;
     this.#pending = [];
-    this.#deps.cancelSynthesis();
+    await this.#deps.cancelSynthesis();
     await this.#deps.sink.stop();
   }
   async #drain() {
@@ -1254,9 +1530,956 @@ var PlaybackQueue = class {
   }
 };
 
+// packages/core/src/settings/schema.ts
+var d = (x) => x;
+var SETTINGS_SCHEMA = {
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  // normalize — NormalizeOptions. 23 fields, 5 wired. Read at speech-service.ts's normalize().
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  "normalize.codeBlocks": d({
+    id: "normalize.codeBlocks",
+    owner: "normalize",
+    panel: "A",
+    label: "How a code block is handled",
+    help: "Whether an omitted code block is announced or dropped in silence.",
+    kind: "enum",
+    values: ["announce", "drop"],
+    default: "announce",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: "NormalizeOptions.codeBlocks",
+    since: 2
+  }),
+  "normalize.codeBlockDetail": d({
+    id: "normalize.codeBlockDetail",
+    owner: "normalize",
+    panel: "A",
+    label: "What a code block tells you",
+    help: "Whether the language and the line count are named in the announcement.",
+    kind: "multi",
+    values: ["language", "lineCount"],
+    default: [],
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.inlineCode": d({
+    id: "normalize.inlineCode",
+    owner: "normalize",
+    panel: "A",
+    label: "How inline code is said",
+    help: "Backticked code inside a sentence: stripped to its text, read verbatim, or announced.",
+    kind: "enum",
+    values: ["strip", "verbatim", "announce"],
+    default: "strip",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.urls": d({
+    id: "normalize.urls",
+    owner: "normalize",
+    panel: "A",
+    label: "How a link is said",
+    help: "What you hear where a URL was. A link that vanishes with no signal is the loss this control exists for.",
+    kind: "enum",
+    values: ["host-phrase", "host-and-path", "label-only", "drop-silent"],
+    default: "host-phrase",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.emoji": d({
+    id: "normalize.emoji",
+    owner: "normalize",
+    panel: "A",
+    label: "How an emoji is handled",
+    help: "Emoji vanish with no signal today, while code blocks and links get one. Same loss, opposite treatment.",
+    kind: "enum",
+    values: ["silent", "announce-count", "name"],
+    default: "silent",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.headingCue": d({
+    id: "normalize.headingCue",
+    owner: "normalize",
+    panel: "B",
+    label: "How a heading is marked",
+    help: "All six heading levels collapse to nothing today.",
+    kind: "enum",
+    values: ["none", "level-word", "prefix-word", "pause-only"],
+    default: "none",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.headingPauseMs": d({
+    id: "normalize.headingPauseMs",
+    owner: "normalize",
+    panel: "B",
+    label: "How long a heading pauses",
+    help: 'Milliseconds, never "comma versus full stop" \u2014 a number survives the arrival of SSML; a punctuation mark does not.',
+    kind: "int",
+    range: { min: 0, max: 1500, step: 50 },
+    unit: "ms",
+    default: 0,
+    provisional: true,
+    // 011 section 3.2 "unassigned": blocked behind the single provider-seam change C-05, so a
+    // change here cannot land mid-session even once a consumer exists.
+    effect: "session",
+    enginePersonal: true,
+    wire: null,
+    since: 2
+  }),
+  "normalize.orderedLists": d({
+    id: "normalize.orderedLists",
+    owner: "normalize",
+    panel: "B",
+    label: "How a numbered list is said",
+    help: "A numbered item can keep its numeral, become an ordinal word, or lose its number.",
+    kind: "enum",
+    values: ["numeral", "word", "drop"],
+    default: "numeral",
+    provisional: false,
+    rationale: 'Settled, not taste: dropping the ordinal (v1 behaviour) makes a numbered procedure indistinguishable from a bullet list. 002 spec row 10, "shipped, not provisional".',
+    effect: "utterance",
+    enginePersonal: false,
+    wire: "NormalizeOptions.orderedLists",
+    since: 2
+  }),
+  "normalize.bulletMarker": d({
+    id: "normalize.bulletMarker",
+    owner: "normalize",
+    panel: "B",
+    label: "How a bullet is said",
+    help: 'Whether a bullet marker is dropped or spoken as "item".',
+    kind: "enum",
+    values: ["drop", "say-item"],
+    default: "drop",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.tableHeaderRepeat": d({
+    id: "normalize.tableHeaderRepeat",
+    owner: "normalize",
+    panel: "B",
+    label: "How often a table header repeats",
+    help: 'Table rows were "too quick, not obvious what I am hearing" until every value carried its header.',
+    kind: "enum",
+    values: ["every-cell", "row-start", "first-row-only", "never"],
+    default: "every-cell",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.tableFirstCellHeader": d({
+    id: "normalize.tableFirstCellHeader",
+    owner: "normalize",
+    panel: "B",
+    label: "Whether the first cell is a header",
+    help: "Treat the leading cell of each row as that row's name rather than a bare value.",
+    kind: "bool",
+    default: false,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.pathStyle": d({
+    id: "normalize.pathStyle",
+    owner: "normalize",
+    panel: "C",
+    label: "How a path is said",
+    help: 'Paths "made no sense whatsoever" read raw. This is the shape of the repair.',
+    kind: "enum",
+    values: ["spoken", "terse", "verbatim"],
+    default: "spoken",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: "NormalizeOptions.pathStyle",
+    since: 2
+  }),
+  "normalize.extensionStyle": d({
+    id: "normalize.extensionStyle",
+    owner: "normalize",
+    panel: "C",
+    label: "Where the file kind goes",
+    help: 'The file kind was "garbled noise" in front of the name, and wanted to come last.',
+    kind: "enum",
+    values: ["word-last", "word-first", "raw-last", "omit"],
+    default: "word-last",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: "NormalizeOptions.extensionStyle",
+    since: 2
+  }),
+  "normalize.pathDepthPolicy": d({
+    id: "normalize.pathDepthPolicy",
+    owner: "normalize",
+    panel: "C",
+    label: "How much of the folder",
+    help: "Four folders of flat word list, and by the third you have lost the first. This is Q41's option space; which one is the default is yours.",
+    kind: "enum",
+    values: ["full", "last-n", "first-n", "filename-only", "filename-then-location", "elide-middle"],
+    default: "full",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.pathDepthN": d({
+    id: "normalize.pathDepthN",
+    owner: "normalize",
+    panel: "C",
+    label: "How many folders",
+    help: "How many folders the policy above keeps.",
+    kind: "int",
+    range: { min: 1, max: 8, step: 1 },
+    unit: "folders",
+    default: 2,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.extensionWords": d({
+    id: "normalize.extensionWords",
+    owner: "normalize",
+    panel: "C",
+    label: "What each file kind is called",
+    help: "The suffix-to-word table. An unknown suffix is spelled out.",
+    kind: "map",
+    default: {},
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.identStyle": d({
+    id: "normalize.identStyle",
+    owner: "normalize",
+    panel: "C",
+    label: "How an identifier is said",
+    help: "Underscore flush underscore buffer is spoken raw today. This is Q39's option space; the default is yours.",
+    kind: "enum",
+    values: ["verbatim", "underscore-pause", "split-words", "split-and-announce", "spell-leading-underscore"],
+    default: "verbatim",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.identParens": d({
+    id: "normalize.identParens",
+    owner: "normalize",
+    panel: "C",
+    label: "How a call's brackets are said",
+    help: "What happens to the parentheses after a function name.",
+    kind: "enum",
+    values: ["keep", "drop", "say-call"],
+    default: "keep",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.expandIntegers": d({
+    id: "normalize.expandIntegers",
+    owner: "normalize",
+    panel: "D",
+    label: "Whether numbers become words",
+    help: 'Whether a numeral becomes words. Units are a separate switch \u2014 turning this off leaves "52 milliseconds".',
+    kind: "bool",
+    default: true,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    // FR-017 used to read: "this and `normalize.expandUnits` are two controls over ONE field
+    // today. This id owns the wire; the other is `wire: null`." That WAS the SC-8 defect (006
+    // NM12): this control declares stage 14 and also governed stage 13. J26 split the normalizer
+    // flag, so each id now owns its own wire and its own stage.
+    wire: "NormalizeOptions.expandNumbers",
+    since: 2
+  }),
+  "normalize.expandUnits": d({
+    id: "normalize.expandUnits",
+    owner: "normalize",
+    panel: "D",
+    label: "Whether units become words",
+    help: '"52 ms was odd to hear" \u2014 units are expanded before the number.',
+    kind: "bool",
+    default: true,
+    // Wired by J26 closing SC-8. Before that this was `wire: null` and the field was governed by
+    // `normalize.expandIntegers` — a control claiming a stage it did not own.
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: "NormalizeOptions.expandUnits",
+    since: 2
+  }),
+  "normalize.unitWords": d({
+    id: "normalize.unitWords",
+    owner: "normalize",
+    panel: "D",
+    label: "What each unit is called",
+    help: "The symbol-to-word table for units.",
+    kind: "map",
+    default: {},
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "normalize.decimals": d({
+    id: "normalize.decimals",
+    owner: "normalize",
+    panel: "D",
+    label: "How a decimal is said",
+    help: "Hand three point one four to the engine, or say it in words.",
+    kind: "enum",
+    values: ["engine", "words"],
+    default: "engine",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: true,
+    wire: null,
+    since: 2
+  }),
+  "normalize.sentencePauseMs": d({
+    id: "normalize.sentencePauseMs",
+    owner: "normalize",
+    panel: "E",
+    label: "How long a sentence pauses",
+    help: "Milliseconds between sentences. In milliseconds so the number survives when SSML lands.",
+    kind: "int",
+    range: { min: 0, max: 800, step: 25 },
+    unit: "ms",
+    default: 0,
+    provisional: true,
+    effect: "session",
+    enginePersonal: true,
+    wire: null,
+    since: 2
+  }),
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  // chunk — ChunkerOptions. 2 fields, both wired. `countUnits` is a FUNCTION and not settable.
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  "chunk.maxUnits": d({
+    id: "chunk.maxUnits",
+    owner: "chunk",
+    panel: "E",
+    label: "How long a chunk",
+    help: "How much text is synthesized at once. Judged today against a floor that changes.",
+    kind: "int",
+    range: { min: 40, max: 600, step: 20 },
+    unit: "characters",
+    default: 200,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: "ChunkerOptions.maxUnits",
+    since: 2
+  }),
+  "chunk.isolateFirstSentence": d({
+    id: "chunk.isolateFirstSentence",
+    owner: "chunk",
+    panel: "E",
+    label: "Whether the first sentence goes alone",
+    help: "Send sentence one on its own so the first audio arrives sooner.",
+    kind: "bool",
+    default: true,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: "ChunkerOptions.isolateFirstSentence",
+    since: 2
+  }),
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  // synthesize — SynthesizeOptions. 6 fields, 2 wired. `signal` is runtime, not settable.
+  // Read ONCE PER UTTERANCE, never per chunk (011 section 2.3): a voice change between chunk
+  // three and chunk four is a sentence that changes speaker mid-word.
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  "synthesize.voiceIndex": d({
+    id: "synthesize.voiceIndex",
+    owner: "synthesize",
+    panel: "E",
+    label: "Which voice",
+    help: "Filled in from the machine's own voice list. Never free text: an unknown name exits zero and silently substitutes the default.",
+    kind: "voice",
+    default: null,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: true,
+    // P28: an INDEX into the host's runtime voice list is persisted, never a name — the three
+    // platforms' voice namespaces have zero overlap. The consumer's property is still
+    // `SynthesizeOptions.voice: string`, so resolving index -> name is the loader's job (T121).
+    wire: "SynthesizeOptions.voice",
+    since: 2
+  }),
+  "synthesize.rate": d({
+    id: "synthesize.rate",
+    owner: "synthesize",
+    panel: "E",
+    label: "How fast",
+    help: "Speaking rate, as a multiple of the voice's own.",
+    kind: "float",
+    range: { min: 0.5, max: 2, step: 0.05 },
+    unit: "times",
+    default: 1,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: true,
+    wire: "SynthesizeOptions.rate",
+    since: 2
+  }),
+  "synthesize.pitch": d({
+    id: "synthesize.pitch",
+    owner: "synthesize",
+    panel: "E",
+    label: "How high",
+    help: "No field exists yet \u2014 this control renders and the schema carries it, so the gap stays countable.",
+    kind: "int",
+    range: { min: -50, max: 50, step: 5 },
+    unit: "steps",
+    default: 0,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: true,
+    wire: null,
+    since: 2
+  }),
+  "synthesize.volume": d({
+    id: "synthesize.volume",
+    owner: "synthesize",
+    panel: "E",
+    label: "How loud",
+    help: "No field exists yet \u2014 designed, not wired.",
+    kind: "int",
+    range: { min: 0, max: 100, step: 5 },
+    unit: "percent",
+    default: 100,
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: true,
+    wire: null,
+    since: 2
+  }),
+  "synthesize.pauseBackend": d({
+    id: "synthesize.pauseBackend",
+    owner: "synthesize",
+    panel: "E",
+    label: "How a pause is written",
+    help: "Punctuation is the only one implemented; the others are here so the cost of SSML can be heard before it is paid.",
+    kind: "enum",
+    values: ["punctuation", "ssml", "in-band"],
+    default: "punctuation",
+    provisional: true,
+    effect: "session",
+    enginePersonal: true,
+    wire: null,
+    since: 2
+  }),
+  "synthesize.interruptGranularity": d({
+    id: "synthesize.interruptGranularity",
+    owner: "synthesize",
+    panel: "F",
+    label: "How a stop lands",
+    help: "Cut now, finish the word first, or pause and keep the position.",
+    kind: "enum",
+    values: ["immediate", "at-word", "pause-keeps-position"],
+    default: "immediate",
+    provisional: true,
+    effect: "session",
+    enginePersonal: true,
+    wire: null,
+    since: 2
+  }),
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  // queue — SpeechService's queue. 011 section 3.2a: `queue.maxQueued` IS OWNED HERE and its
+  // number exists in this file and nowhere else.
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  "queue.maxQueued": d({
+    id: "queue.maxQueued",
+    owner: "queue",
+    panel: "F",
+    label: "How many replies wait",
+    help: "Twenty queued replies is roughly three minutes of unrequested speech. Eight is what you have been living with.",
+    kind: "int",
+    range: { min: 1, max: 20, step: 1 },
+    unit: "replies",
+    default: 8,
+    provisional: false,
+    rationale: "What the listener has been living with; twenty queued replies is ~3 minutes of unrequested speech (009 section 2, C3). Settled, not taste.",
+    effect: "immediate",
+    enginePersonal: false,
+    // `wire: null` TODAY, and this disagrees with 011 section 3.2a's descriptor, which writes
+    // `wire: 'SpeechServiceDeps.maxQueued'`. The settings value does not reach the consumer yet:
+    // `main.ts` still passes a literal 8. 011 section 3.2's own count ("9 wired = 5 normalize +
+    // 2 chunk + 2 synthesize"), 002 spec FR-012 and row 36 (class D), and the lab inventory all
+    // say null. T122 is the task that makes it non-null; claiming the wire before then would be
+    // exactly the P26 defect this field is documented against. See the report.
+    wire: null,
+    since: 2
+  }),
+  "queue.overflowPolicy": d({
+    id: "queue.overflowPolicy",
+    owner: "queue",
+    panel: "F",
+    label: "Which reply is dropped when full",
+    help: "Dropping the oldest silently was the third fault behind the session that hijacked your audio.",
+    kind: "enum",
+    values: ["drop-oldest", "drop-newest"],
+    default: "drop-oldest",
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "queue.announceMode": d({
+    id: "queue.announceMode",
+    owner: "queue",
+    panel: "F",
+    label: "Whether an announcement interrupts",
+    help: "Replace cuts off a reply in progress; queue waits for it.",
+    kind: "enum",
+    values: ["replace", "queue"],
+    default: "replace",
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  // announce — the WORDING. 9 fields, none wired.
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  "announce.codeBlockPhrase": d({
+    id: "announce.codeBlockPhrase",
+    owner: "announce",
+    panel: "A",
+    label: "What a code block is called",
+    help: "The sentence spoken in place of a code block. {lang} and {lines} are filled in.",
+    kind: "template",
+    default: " . Here, a code block is omitted. ",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "announce.urlPhrase": d({
+    id: "announce.urlPhrase",
+    owner: "announce",
+    panel: "A",
+    label: "What a link is called",
+    help: "The phrase spoken for a link. {host} and {path} are filled in.",
+    kind: "template",
+    default: "a link to {host}",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "announce.tableLeadIn": d({
+    id: "announce.tableLeadIn",
+    owner: "announce",
+    panel: "B",
+    label: "What a table is called",
+    help: "The lead-in sentence spoken before a table.",
+    kind: "template",
+    default: "Table.",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "announce.pathNamePhrase": d({
+    id: "announce.pathNamePhrase",
+    owner: "announce",
+    panel: "C",
+    label: "What a file is called",
+    help: "The phrase that introduces a file name. {name} is filled in.",
+    kind: "template",
+    default: "file named {name}",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "announce.pathFolderPhrase": d({
+    id: "announce.pathFolderPhrase",
+    owner: "announce",
+    panel: "C",
+    label: "What a folder is called",
+    help: "The phrase that introduces the folders. {folders} is filled in.",
+    kind: "template",
+    default: "in folder {folders}",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "announce.sessionLabel": d({
+    id: "announce.sessionLabel",
+    owner: "announce",
+    panel: "F",
+    label: "How a session is named",
+    help: "Hex is not on this list, and that is deliberate: two designs call eight hex characters a non-answer to who is speaking.",
+    kind: "enum",
+    values: ["call-sign", "call-sign-plus-name", "registry-name", "branch", "displayName"],
+    default: "call-sign",
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "announce.switchPhrase": d({
+    id: "announce.switchPhrase",
+    owner: "announce",
+    panel: "F",
+    label: "What a session switch says",
+    help: "Spoken when the audio moves to another session. {label} is filled in.",
+    kind: "template",
+    default: "Now reading from {label}.",
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "announce.statusTemplate": d({
+    id: "announce.statusTemplate",
+    owner: "announce",
+    panel: "F",
+    label: "What status says",
+    help: "The wording and order of the spoken status report.",
+    kind: "template",
+    default: "{state}. {queued} waiting. Following {label}.",
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "announce.reportChannel": d({
+    id: "announce.reportChannel",
+    owner: "announce",
+    panel: "F",
+    label: "How settings problems are reported",
+    help: "Whether a settings problem is spoken as soon as it is found, spoken only when you are already using audio, or kept for when you ask.",
+    kind: "enum",
+    values: ["always-spoken", "when-audio-in-use", "on-request-only"],
+    default: "when-audio-in-use",
+    // TASTE. 011 Q68 — nobody has heard all three. `when-audio-in-use` is in the code as the
+    // REVERSIBLE MIDDLE, not as an answer: a failure must reach a channel the listener has (P30)
+    // and an unrequested interruption is itself a harm (P22/P30), and only a listener can settle
+    // which of those wins on a machine we have not met.
+    provisional: true,
+    effect: "session",
+    enginePersonal: false,
+    wire: "SettingsReport.channel",
+    since: 2
+  }),
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  // session · input · apply · lab
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  "session.huddleReplyCap": d({
+    id: "session.huddleReplyCap",
+    owner: "session",
+    panel: "F",
+    label: "How much of a reply is read",
+    help: "No cap exists at all today, and the reply queue counts replies, so one forty-thousand-character reply is thirty-three minutes and nothing can drop it.",
+    kind: "int",
+    range: { min: 2e3, max: 5e4, step: 1e3 },
+    unit: "characters",
+    default: 8e3,
+    // B-05: the EXISTENCE of a cap is correctness; the NUMBER is taste.
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "input.clipboardCap": d({
+    id: "input.clipboardCap",
+    owner: "input",
+    panel: "F",
+    label: "How much clipboard is read",
+    help: "Above this, the clipboard read is truncated and the truncation is announced.",
+    kind: "int",
+    range: { min: 2e3, max: 5e4, step: 1e3 },
+    unit: "characters",
+    default: 2e4,
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "apply.toQueued": d({
+    id: "apply.toQueued",
+    owner: "apply",
+    panel: "F",
+    label: "Whether a change reaches replies already waiting",
+    help: "A settings change never interrupts what is playing. This decides whether it also reaches the replies already queued behind it.",
+    kind: "bool",
+    default: false,
+    // TASTE. 011 Q62 — genuinely undecidable from a desk. A listener who has just heard a path
+    // mangled wants the fix to reach the four queued replies; a listener mid-way through a long
+    // answer wants consistency. `false` because it is the conservative, reversible one.
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  "lab.simulateChunkGapMs": d({
+    id: "lab.simulateChunkGapMs",
+    owner: "lab",
+    panel: "E",
+    label: "The gap between chunks",
+    help: "The lab has no gap; the shipped plugin has about nine hundred and fifty milliseconds of one. Hear either world.",
+    kind: "int",
+    range: { min: 0, max: 1500, step: 50 },
+    unit: "ms",
+    default: 0,
+    provisional: true,
+    // 'lab-only': THE PLUGIN MUST NEVER READ THIS, and `schema.test.ts` asserts owner and effect
+    // agree so a lab-only field cannot quietly acquire a plugin consumer.
+    effect: "lab-only",
+    enginePersonal: false,
+    wire: null,
+    since: 2
+  }),
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  // RESERVED — `since: 3`, 011 section 4.2a. These are ids a LATER milestone registered against a
+  // schema this build has not bumped to. They are counted in the `future` bucket, rendered by the
+  // lab as disabled rows, written into the starter file as commented-out lines, and excluded from
+  // the reachability assertion (they have no consumer yet, by definition). The mechanism exists so
+  // that M16 and M17 ADD AN ID rather than invent a constant in their own prose (P26).
+  // ─────────────────────────────────────────────────────────────────────────────────────────
+  "session.followMax": d({
+    id: "session.followMax",
+    owner: "session",
+    panel: "F",
+    label: "How many sessions are followed",
+    help: "How many agent sessions the audio follows at once, or all of them.",
+    kind: "enum",
+    values: [1, 2, 3, 4, 5, 6, 7, "all"],
+    default: 1,
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "session.registryPollMs": d({
+    id: "session.registryPollMs",
+    owner: "session",
+    panel: "F",
+    label: "How often the session registry is re-read",
+    help: "Milliseconds between re-reads of the session registry.",
+    kind: "int",
+    range: { min: 1e3, max: 6e4, step: 500 },
+    unit: "ms",
+    default: 1e3,
+    provisional: true,
+    effect: "session",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "session.unregisteredWindowMs": d({
+    id: "session.unregisteredWindowMs",
+    owner: "session",
+    panel: "F",
+    label: "How long an unregistered session stays interesting",
+    help: "How long a session that never registered is still treated as live.",
+    kind: "int",
+    range: { min: 6e4, max: 36e5, step: 6e4 },
+    unit: "ms",
+    default: 6e5,
+    provisional: true,
+    effect: "session",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "session.showUnregistered": d({
+    id: "session.showUnregistered",
+    owner: "session",
+    panel: "F",
+    label: "Whether unregistered sessions are offered",
+    help: "Whether sessions that never registered appear in the follow list at all.",
+    kind: "bool",
+    default: false,
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "queue.perSessionFairness": d({
+    id: "queue.perSessionFairness",
+    owner: "queue",
+    panel: "F",
+    label: "Share the queue between followed sessions",
+    help: "When more than one session is followed, cap each one at its share of the queue instead of letting the fastest agent fill it.",
+    kind: "bool",
+    default: false,
+    // TASTE. Fairness trades "the agent you are listening to keeps its place" against "the fastest
+    // agent cannot monopolise the queue", and which is correct is learned by hearing a two-agent
+    // fan-out (P23). Ships off because off is today's behaviour and therefore the reversible one.
+    // The per-session cap is DERIVED FROM `queue.maxQueued`, never replacing it — one id, one
+    // meaning (011 section 4.2). The arithmetic belongs to 012.
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "input.talkWindowMs": d({
+    id: "input.talkWindowMs",
+    owner: "input",
+    panel: "F",
+    label: "How long the talk window stays open",
+    help: "How long the plugin keeps listening after the talk gesture.",
+    kind: "int",
+    range: { min: 1e3, max: 12e4, step: 1e3 },
+    unit: "ms",
+    default: 15e3,
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "input.talkGesture": d({
+    id: "input.talkGesture",
+    owner: "input",
+    panel: "F",
+    label: "What opens the talk window",
+    help: "Which gesture opens the talk window.",
+    kind: "enum",
+    values: ["hold", "toggle", "double-tap"],
+    default: "hold",
+    provisional: true,
+    effect: "session",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "input.resumePolicy": d({
+    id: "input.resumePolicy",
+    owner: "input",
+    panel: "F",
+    label: "What happens to speech when the talk window closes",
+    help: "Whether speech resumes where it stopped, starts the reply again, or stays stopped.",
+    kind: "enum",
+    values: ["resume", "restart", "stay-stopped"],
+    default: "resume",
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "input.recognizerCommand": d({
+    id: "input.recognizerCommand",
+    owner: "input",
+    panel: "F",
+    label: "Which recognizer command is run",
+    help: "The command that turns your speech into text. A path on this machine.",
+    kind: "string",
+    default: "",
+    // A command path does not transfer between machines — 011 section 4.2a, same shape as P28.
+    provisional: true,
+    effect: "session",
+    enginePersonal: true,
+    wire: null,
+    since: 3
+  }),
+  "input.talkWindowIdleMs": d({
+    id: "input.talkWindowIdleMs",
+    owner: "input",
+    panel: "F",
+    label: "How long the talk window waits when nothing is followed",
+    help: "The window's clock when there is no session to close it on evidence.",
+    kind: "int",
+    range: { min: 1e3, max: 12e4, step: 1e3 },
+    unit: "ms",
+    default: 15e3,
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  }),
+  "input.paneFallbackWatch": d({
+    id: "input.paneFallbackWatch",
+    owner: "input",
+    panel: "F",
+    label: "Whether an empty follow set watches the pane's own transcript",
+    help: "With nothing followed, may the talk window read the control pane's own working-directory transcript, read-only, for the window's duration.",
+    kind: "bool",
+    default: false,
+    provisional: true,
+    effect: "immediate",
+    enginePersonal: false,
+    wire: null,
+    since: 3
+  })
+};
+
 // packages/plugin/src/speech-service.ts
 var DEFAULT_MAX_QUEUED = 20;
 var DEFAULT_ANNOUNCE_DELAY_MS = 500;
+var LOSS_SENTENCE = {
+  // 006 site 31, "the most reachable total-silence path in the product": a reply that is only code,
+  // only a diagram, only emoji, only a check mark normalizes to nothing and produced a log line.
+  // For a listener, that is indistinguishable from the agent not having answered.
+  unspeakable: (n) => n === 1 ? "One reply had nothing in it that could be read aloud." : `${n} replies had nothing in them that could be read aloud.`,
+  // 006 site 33: the listener hears sentence one, the rest of the reply is gone, and the NEXT
+  // queued reply starts — so the loss is disguised as the conversation moving on.
+  "synthesis-failed": (n) => n === 1 ? "A reply was cut short: the voice engine failed part way through it." : `${n} replies were cut short: the voice engine failed part way through them.`,
+  // 006 site 53: the chunker computes `boundary: 'scalar'` to mark a mid-word cut and the speech
+  // service read only `.text`. Rare by construction — it needs 200 characters with no sentence,
+  // clause or word boundary in them — which is exactly why it is worth naming when it happens.
+  "cut-mid-word": (n) => n === 1 ? "One very long unbroken run of text was cut mid-word to be read." : `${n} very long unbroken runs of text were cut mid-word to be read.`
+};
 var SpeechService = class {
   #deps;
   #playback;
@@ -1267,13 +2490,16 @@ var SpeechService = class {
   #current = null;
   #droppedPendingAnnounce = 0;
   #dropTimer = null;
+  #losses = /* @__PURE__ */ new Map();
+  #lossTimer = null;
+  #reportingFailure = false;
+  /** Sessions whose provenance change has already been spoken. Bounded by `stop()`. */
+  #reattributed = /* @__PURE__ */ new Set();
   constructor(deps) {
     this.#deps = deps;
     this.#playback = new PlaybackQueue({
       sink: deps.sink,
-      cancelSynthesis: () => {
-        deps.provider.cancel();
-      }
+      cancelSynthesis: () => deps.provider.cancel()
     });
   }
   get isSpeaking() {
@@ -1303,23 +2529,60 @@ var SpeechService = class {
     if (text.trim().length === 0) return;
     if (urgency === "now") {
       this.#skip = true;
-      void this.#playback.bargeIn();
+      this.#observe(this.#playback.bargeIn(), "stop the current sentence");
     }
     let at = 0;
     while (this.#pending[at]?.announcement === true) at++;
     this.#pending.splice(at, 0, { text, announcement: true });
     this.#cancelled = false;
-    void this.#drain();
+    this.#observe(this.#drain(), "read that text");
+  }
+  /**
+   * Synthesize a fresh phrase end to end and report what actually happened, aloud.
+   *
+   * The listener-facing half of 006 section 19 rank 1. Every other diagnostic in this system
+   * ("engine ready", "N commands registered", `isPlaying`) reports healthy on a mute plugin; this
+   * one cannot, because it reports numbers that came from this invocation.
+   *
+   * Deliberately `'now'`: the listener asked for it this second, and a self-test that queued behind
+   * a backlog would answer a question they had already given up on.
+   */
+  async selfTest(phrase = "Read aloud self test. One two three.") {
+    const before = this.#deps.sink.bytesPlayed;
+    let chunks = 0;
+    let bytes = 0;
+    let error = null;
+    try {
+      const spokenText = normalize(phrase, this.#deps.normalizeOptions ?? {});
+      const chunker = new Chunker({});
+      for (const chunk of [...chunker.addText(spokenText), ...chunker.finish()]) {
+        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
+          chunks++;
+          bytes += audio.data.length;
+          await this.#deps.sink.enqueue(audio);
+        }
+      }
+    } catch (err) {
+      error = String(err);
+    }
+    const after = this.#deps.sink.bytesPlayed;
+    const bytesPlayed = typeof before === "number" && typeof after === "number" ? after - before : null;
+    const spoken = error !== null ? `Self test failed. The voice engine reported: ${error}.` : bytes === 0 ? "Self test failed. The voice engine produced no audio at all." : bytesPlayed === 0 ? `Self test: the engine produced ${bytes} bytes, but nothing reached the audio device.` : `Self test passed. ${chunks} chunk${chunks === 1 ? "" : "s"}, ${bytes} bytes of fresh audio.`;
+    this.announce(spoken, "now");
+    return { chunks, bytes, bytesPlayed, error, spoken };
   }
   /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */
-  speak(text, mode = "replace", label) {
+  speak(text, mode = "replace", label, sessionId) {
     if (mode === "replace") {
       const discarded = this.#pending.filter((p) => p.announcement !== true).length;
       this.#pending = this.#pending.filter((p) => p.announcement === true);
-      void this.#playback.bargeIn();
+      this.#observe(this.#playback.bargeIn(), "stop the current sentence");
       if (discarded > 0) this.#noteDropped(discarded);
     }
-    this.#pending.push(label === void 0 ? { text } : { text, label });
+    const entry = { text };
+    if (label !== void 0) entry.label = label;
+    if (sessionId !== void 0) entry.sessionId = sessionId;
+    this.#pending.push(entry);
     const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED;
     const replies = this.#pending.filter((p) => p.announcement !== true);
     if (replies.length > max) {
@@ -1331,6 +2594,45 @@ var SpeechService = class {
     }
     this.#cancelled = false;
     void this.#drain();
+  }
+  /**
+   * Record a loss and speak it, coalesced, in the audio stream.
+   *
+   * Urgency is always `'next'`, deliberately. Every one of these describes something that has
+   * ALREADY happened — a reply that could not be read, an engine that died mid-sentence, a run cut
+   * mid-word. Interrupting the sentence the listener is currently following to tell them about a
+   * sentence they already lost is a second loss, not a fix for the first (P30).
+   */
+  /**
+   * Sites 29 and 30: two `void somePromise()` calls with no handler. `#drain` in particular can
+   * reject from `normalize()` or the `Chunker` (NM11), and an unhandled rejection is, to this
+   * listener, indistinguishable from the agent never having answered.
+   *
+   * Reported through `announce`, not through `log`: the log is not a channel they have. Guarded
+   * against recursion — if announcing the failure fails too, it stops there rather than looping.
+   */
+  #observe(p, what) {
+    void p.catch((err) => {
+      this.#deps.log?.(`could not ${what}: ${String(err)}`);
+      if (this.#reportingFailure) return;
+      this.#reportingFailure = true;
+      try {
+        this.announce(`Speech failed: could not ${what}.`, "next");
+      } finally {
+        this.#reportingFailure = false;
+      }
+    });
+  }
+  #noteLoss(kind, count = 1) {
+    this.#losses.set(kind, (this.#losses.get(kind) ?? 0) + count);
+    if (this.#lossTimer !== null) return;
+    this.#lossTimer = setTimeout(() => {
+      this.#lossTimer = null;
+      const entries = [...this.#losses.entries()];
+      this.#losses.clear();
+      for (const [k, n] of entries) if (n > 0) this.announce(LOSS_SENTENCE[k](n), "next");
+    }, this.#deps.announceDelayMs ?? DEFAULT_ANNOUNCE_DELAY_MS);
+    this.#lossTimer.unref?.();
   }
   /**
    * Coalesce a burst of drops into one spoken sentence naming the TOTAL.
@@ -1367,6 +2669,12 @@ var SpeechService = class {
       clearTimeout(this.#dropTimer);
       this.#dropTimer = null;
     }
+    if (this.#lossTimer !== null) {
+      clearTimeout(this.#lossTimer);
+      this.#lossTimer = null;
+    }
+    this.#losses.clear();
+    this.#reattributed.clear();
     this.#droppedPendingAnnounce = 0;
     await this.#playback.bargeIn();
   }
@@ -1377,15 +2685,56 @@ var SpeechService = class {
       for (; ; ) {
         const next = this.#pending.shift();
         if (next === void 0) break;
-        this.#current = next.label ?? null;
+        const attribution = next.announcement === true ? null : this.#reattribute(next);
+        this.#current = attribution?.label ?? next.label ?? null;
         this.#skip = false;
-        await this.#speakOne(next.text);
+        const outcome = await this.#speakOne(
+          attribution === null ? next.text : attribution.prefix + next.text
+        );
         this.#current = null;
+        if (next.announcement !== true) {
+          if (outcome === "empty") this.#noteLoss("unspeakable");
+          else if (outcome === "synthesis-failed") this.#noteLoss("synthesis-failed");
+        }
         if (this.#cancelled) break;
       }
     } finally {
       this.#draining = false;
     }
+  }
+  /**
+   * Ask, at the moment of speaking, whose words these actually are — and say so when the answer
+   * has changed since they were queued.
+   *
+   * 006 section 19 rank 3 / cascade C1. The queue carried a display string with no way to check
+   * it. Now it carries a session id, and this re-resolves it against the live system.
+   *
+   * **The judgement, stated, because it departs from the FMA's own prescription.** C1 says
+   * *"refuse to speak an entry whose identity generation is stale."* Refusing deletes an agent
+   * reply the listener was waiting for, to prevent a label being wrong — which today, with one
+   * voice for every session, is the smaller of the two harms by a wide margin. So we CORRECT the
+   * attribution instead: the reply is spoken, preceded by the session it really came from. The
+   * refusal becomes the right answer the moment M15 makes the VOICE carry identity, and at that
+   * point it is one conditional on this same, now-existing, field. The instrument is what was
+   * missing; the policy is cheap once the instrument exists.
+   *
+   * Spoken ONCE per session per change, not once per reply: five queued replies from a session
+   * that has ended get one provenance sentence, not five. Narrating provenance on every utterance
+   * is the harm on the other side of this one.
+   */
+  #reattribute(entry) {
+    const id = entry.sessionId;
+    const was = entry.label;
+    if (id === void 0 || was === void 0 || this.#deps.resolveLabel === void 0) return null;
+    const now = this.#deps.resolveLabel(id);
+    if (now === was) {
+      this.#reattributed.delete(id);
+      return null;
+    }
+    if (this.#reattributed.has(id)) return { label: now ?? was, prefix: "" };
+    this.#reattributed.add(id);
+    this.#deps.log?.(`attribution changed for ${id}: queued as "${was}", now ${now ?? "gone"}`);
+    return now === null ? { label: was, prefix: `From ${was}, which has since ended. ` } : { label: now, prefix: `From ${now}. ` };
   }
   /**
    * Voice and rate are the two settings every user asks for first, and until this existed no
@@ -1400,11 +2749,16 @@ var SpeechService = class {
     if (this.#deps.rate !== void 0) opts.rate = this.#deps.rate;
     return opts;
   }
+  /**
+   * Returns WHY it stopped, rather than a bare `return`. Site 32: cancelled, skipped and superseded
+   * all arrived at one indistinguishable early return, so the caller could not tell a loss the
+   * listener should hear about from a control the listener just pressed.
+   */
   async #speakOne(text) {
     const spoken = normalize(text, this.#deps.normalizeOptions ?? {});
     if (spoken.length === 0) {
       this.#deps.log?.("nothing speakable in that text");
-      return;
+      return "empty";
     }
     const chunkerOpts = {};
     if (this.#deps.maxUnits !== void 0) chunkerOpts.maxUnits = this.#deps.maxUnits;
@@ -1413,18 +2767,22 @@ var SpeechService = class {
     }
     const chunker = new Chunker(chunkerOpts);
     const chunks = [...chunker.addText(spoken), ...chunker.finish()];
+    if (chunks.some((c) => c.boundary === "scalar")) this.#noteLoss("cut-mid-word");
     const generation = this.#playback.begin();
     for (const chunk of chunks) {
-      if (this.#cancelled || this.#skip || generation !== this.#playback.generation) return;
+      if (this.#cancelled) return "cancelled";
+      if (this.#skip) return "skipped";
+      if (generation !== this.#playback.generation) return "superseded";
       try {
         for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
-          if (!this.#playback.push(generation, audio)) return;
+          if (!this.#playback.push(generation, audio)) return "superseded";
         }
       } catch (err) {
         this.#deps.log?.(`synthesis failed: ${String(err)}`);
-        return;
+        return "synthesis-failed";
       }
     }
+    return "spoken";
   }
 };
 
@@ -1450,25 +2808,70 @@ var PLAYERS = {
     { cmd: "ffplay", args: (f) => ["-nodisp", "-autoexit", "-loglevel", "quiet", f] }
   ]
 };
+var FORMAT_EXTENSION = {
+  wav: "wav",
+  "pcm-s16le": "pcm",
+  mp3: "mp3",
+  opus: "opus",
+  ogg: "ogg",
+  flac: "flac",
+  aiff: "aiff",
+  m4a: "m4a"
+};
+var VERIFIED_PLAYABLE_FORMATS = /* @__PURE__ */ new Set(["wav"]);
 var SubprocessSink = class {
   #platform;
   #log;
+  #onFailure;
+  #players;
   #child = null;
   #playing = false;
+  #stopping = false;
+  #bytesPlayed = 0;
+  #lastExit = null;
+  #lastTried = [];
   constructor(opts = {}) {
     this.#platform = opts.platform ?? process.platform;
     this.#log = opts.log ?? (() => {
     });
+    this.#onFailure = opts.onFailure ?? (() => {
+    });
+    this.#players = opts.players ?? null;
   }
   get isPlaying() {
     return this.#playing;
   }
+  /**
+   * Bytes this sink has actually handed to a player that then exited 0. The self-test reads it,
+   * because a byte count that MOVED is the only evidence that the audio path is alive; every other
+   * indicator in this system reports healthy while mute (006 section 19 rank 1).
+   */
+  get bytesPlayed() {
+    return this.#bytesPlayed;
+  }
+  /** Exit code of the last player invocation. `null` if it was killed by barge-in or never ran. */
+  get lastExitCode() {
+    return this.#lastExit;
+  }
   async enqueue(chunk) {
     const dir = await mkdtemp2(join2(tmpdir2(), "orca-tts-play-"));
-    const file = join2(dir, `chunk.${chunk.format === "wav" ? "wav" : "bin"}`);
+    const ext = FORMAT_EXTENSION[chunk.format] ?? sanitiseExtension(chunk.format);
+    const file = join2(dir, `chunk.${ext}`);
     await writeFile(file, chunk.data);
     try {
-      await this.#play(file);
+      const played = await this.#play(file);
+      if (!played) return;
+      if (VERIFIED_PLAYABLE_FORMATS.has(chunk.format)) {
+        this.#bytesPlayed += chunk.data.length;
+        return;
+      }
+      const failure = {
+        kind: "unverified-format",
+        reason: `the audio format '${chunk.format}' has never been verified on ${this.#platform}, so the player reporting success is not evidence you heard it`,
+        tried: this.#lastTried
+      };
+      this.#log(`read-aloud: ${failure.reason}`);
+      this.#onFailure(failure);
     } finally {
       await rm2(dir, { recursive: true, force: true }).catch(() => void 0);
     }
@@ -1476,37 +2879,58 @@ var SubprocessSink = class {
   async stop() {
     const c = this.#child;
     this.#child = null;
+    this.#stopping = true;
     this.#playing = false;
     if (c !== null && c.exitCode === null) c.kill("SIGKILL");
   }
   async #play(file) {
-    const players = PLAYERS[this.#platform] ?? [];
+    const players = this.#players ?? PLAYERS[this.#platform] ?? [];
+    const tried = [];
+    this.#lastTried = tried;
+    let lastReason = "";
+    this.#stopping = false;
     for (const p of players) {
-      const ok = await new Promise((resolve) => {
+      tried.push(p.cmd);
+      const outcome = await new Promise((resolve) => {
         let child;
         try {
           child = spawn3(p.cmd, p.args(file), { stdio: "ignore" });
         } catch {
-          resolve(false);
+          resolve({ ok: false, why: `${p.cmd} could not be spawned` });
           return;
         }
         this.#child = child;
         this.#playing = true;
         child.on("error", () => {
           this.#playing = false;
-          resolve(false);
+          resolve({ ok: false, why: `${p.cmd} could not be started` });
         });
-        child.on("close", () => {
+        child.on("close", (code) => {
           this.#playing = false;
           this.#child = null;
-          resolve(true);
+          this.#lastExit = code;
+          resolve(code === 0 ? { ok: true, why: "" } : { ok: false, why: `${p.cmd} exited ${String(code)}` });
         });
       });
-      if (ok) return;
+      if (outcome.ok) return true;
+      if (this.#stopping) return false;
+      lastReason = outcome.why;
+      this.#log(`read-aloud: ${outcome.why}`);
     }
-    this.#log(`read-aloud: no audio player found on ${this.#platform}`);
+    const failure = players.length === 0 ? {
+      kind: "no-player",
+      reason: `no audio player is installed on ${this.#platform}`,
+      tried
+    } : { kind: "player-failed", reason: lastReason, tried };
+    this.#log(`read-aloud: ${failure.reason}`);
+    this.#onFailure(failure);
+    return false;
   }
 };
+function sanitiseExtension(format) {
+  const cleaned = format.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return cleaned.length === 0 ? "unknown" : cleaned.slice(0, 24);
+}
 
 // packages/plugin/src/huddle/index.ts
 import { readFile as readFile2, readdir, stat } from "node:fs/promises";
@@ -1527,6 +2951,14 @@ var UNSUPPORTED_AGENTS = [
   "cline"
 ];
 var isRecord = (v) => typeof v === "object" && v !== null;
+function stableId(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return `nouuid-${h.toString(16)}-${text.length}`;
+}
 function decodeClaudeLine(line) {
   let rec;
   try {
@@ -1551,8 +2983,7 @@ function decodeClaudeLine(line) {
   }
   const text = parts.join("\n").trim();
   if (text.length === 0) return null;
-  const id = typeof rec["uuid"] === "string" ? rec["uuid"] : `${Date.now()}-${parts.length}`;
-  return { id, text };
+  return { id: typeof rec["uuid"] === "string" ? rec["uuid"] : stableId(text), text };
 }
 function decodeGenericLine(line) {
   let rec;
@@ -1567,11 +2998,29 @@ function decodeGenericLine(line) {
   if (rec["thinking"] === true || rec["reasoning"] === true) return null;
   const content = rec["content"] ?? rec["text"];
   if (typeof content !== "string" || content.trim().length === 0) return null;
-  const id = typeof rec["id"] === "string" ? rec["id"] : `${Date.now()}`;
-  return { id, text: content.trim() };
+  const text = content.trim();
+  return { id: typeof rec["id"] === "string" ? rec["id"] : stableId(text), text };
 }
 function decoderFor(agent) {
   return agent === "claude" || agent === "openclaude" ? decodeClaudeLine : decodeGenericLine;
+}
+function isCompactBoundary(line) {
+  let rec;
+  try {
+    rec = JSON.parse(line);
+  } catch {
+    return false;
+  }
+  if (!isRecord(rec)) return false;
+  return rec["type"] === "system" && rec["subtype"] === "compact_boundary";
+}
+function countCompactBoundaries(raw) {
+  let n = 0;
+  for (const line of raw.split("\n")) {
+    if (line.trim().length === 0) continue;
+    if (isCompactBoundary(line)) n++;
+  }
+  return n;
 }
 function detectTranscriptFormat(raw, maxLines = 200) {
   let sawGeneric = false;
@@ -1602,13 +3051,20 @@ function unreadableTranscriptMessage(file) {
 }
 
 // packages/plugin/src/huddle/index.ts
+var NO_TRANSCRIPT_SENTENCE = {
+  "no-root": "Huddle found no agent transcripts on this machine yet, so there is nothing to read.",
+  "root-unreadable": "Huddle cannot read the folder agent transcripts live in, so replies will not be spoken. This is usually a permissions problem.",
+  "no-transcripts": "Huddle found no agent transcript for this worktree yet, so there is nothing to read."
+};
 var HUDDLE_STATE_KEY = "huddle.enabled";
 var HUDDLE_SPOKEN_KEY = "huddle.spokenIds";
 var HUDDLE_HIGH_WATER_KEY = "huddle.highWater";
+var HUDDLE_FOLLOWING_KEY = "huddle.following";
 var MAX_REMEMBERED_IDS = 300;
 var MAX_TRACKED_FILES = 50;
 var WATCH_WINDOW_MS = 2e4;
 var DEBOUNCE_MS = 250;
+var MAX_TRUNCATED_RETRIES = 6;
 function sessionLabel(file) {
   const parts = file.split(/[/\\]/);
   const name = (parts[parts.length - 1] ?? "").replace(/\.jsonl$/, "");
@@ -1620,7 +3076,6 @@ var HuddleController = class {
   #enabled = false;
   #spoken = /* @__PURE__ */ new Set();
   #lastReply = null;
-  #warnedAmbiguous = false;
   #locked = null;
   // the ONE session we are following
   #watcher = null;
@@ -1650,6 +3105,29 @@ var HuddleController = class {
   #lastWorktree = null;
   #warnedUnreadable = /* @__PURE__ */ new Set();
   // per FILE: say "cannot read this" once, not per change
+  /**
+   * R10-02. How many `compact_boundary` records this file had the last time we read it, THIS
+   * SESSION. Not persisted, and that is the safe direction: on the first read of a file we record
+   * the count without acting on it, so a restart cannot mistake a compaction that happened while
+   * we were down for one happening now and clamp over replies that arrived in between. The harm
+   * this closes is re-speaking during a LIVE session, which is exactly when we do have a previous
+   * count to compare against.
+   */
+  #compactBoundaries = /* @__PURE__ */ new Map();
+  /**
+   * The last "nothing to follow" reason announced. Latched per REASON, not forever: a permissions
+   * problem that is fixed and then recurs must be able to speak again, and a reason that changes
+   * (root-unreadable -> no-transcripts) is new information. Cleared the moment a file is found.
+   */
+  #announcedNoTranscript = null;
+  /** Files whose watch failure has been announced, so a churning file cannot flood the audio. */
+  #warnedWatch = /* @__PURE__ */ new Set();
+  /**
+   * The ambiguous pair we last warned about. Was a single boolean that latched TRUE for the
+   * worker's lifetime (006 site 13 / TT5): the first ambiguity produced one notification and every
+   * ambiguity after it produced nothing at all, forever.
+   */
+  #warnedAmbiguousPair = null;
   constructor(deps) {
     this.#deps = deps;
   }
@@ -1666,18 +3144,32 @@ var HuddleController = class {
         if (typeof n === "number" && Number.isFinite(n) && n >= 0) this.#highWater.set(file, n);
       }
     }
+    const following = await this.#deps.store?.get(HUDDLE_FOLLOWING_KEY);
+    if (typeof following === "string" && following.length > 0) this.#locked = following;
     return this.#enabled;
+  }
+  /**
+   * The session being followed, as a sentence, for re-announcement after a worker reap.
+   *
+   * C4's other half: the listener is not told that the worker restarted, so if the lock had
+   * silently changed they would have had no way to know whose words they were hearing — the S1
+   * failure this whole document ranks first. Returns null when there is nothing to re-announce.
+   */
+  restoredAnnouncement() {
+    if (!this.#enabled || this.#locked === null) return null;
+    return `Still following ${sessionLabel(this.#locked)}.`;
   }
   toggle() {
     this.#enabled = !this.#enabled;
-    void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled);
+    this.#observe(this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled), "save the huddle setting");
     if (this.#enabled) {
       this.#primed.clear();
       this.#reprime = true;
       this.#locked = null;
+      void this.#persistFollowing();
     } else {
       this.#stopWatching();
-      void this.#deps.speech.stop();
+      this.#observe(this.#deps.speech.stop(), "stop speaking");
     }
     return this.#enabled;
   }
@@ -1692,7 +3184,7 @@ var HuddleController = class {
   onAgentStatus(status, worktreePath) {
     if (worktreePath !== null) this.#lastWorktree = worktreePath;
     if (!this.#enabled) return;
-    void this.#ensureWatching(worktreePath);
+    this.#observe(this.#ensureWatching(worktreePath), "start watching for replies");
   }
   dispose() {
     this.#stopWatching();
@@ -1710,6 +3202,8 @@ var HuddleController = class {
    */
   switchTo(file) {
     this.#locked = file;
+    void this.#persistFollowing();
+    this.#warnedWatch.delete(file);
     this.#stopWatching();
     this.#deps.notify(`Now reading from ${sessionLabel(file)}.`);
     void this.#ensureWatching(this.#lastWorktree);
@@ -1732,17 +3226,31 @@ var HuddleController = class {
   /** Stop following any session; huddle stays on but silent until you pick one. */
   unlock() {
     this.#locked = null;
+    void this.#persistFollowing();
     this.#stopWatching();
   }
   get following() {
     return this.#locked;
   }
   async #ensureWatching(worktreePath) {
-    const file = this.#locked ?? await this.#newestTranscript(worktreePath);
-    if (file === null) return;
+    let file = this.#locked;
+    if (file === null) {
+      const found = await this.#findNewest(worktreePath);
+      file = found.file;
+      if (file === null) {
+        const reason = found.reason ?? "no-transcripts";
+        if (this.#announcedNoTranscript !== reason) {
+          this.#announcedNoTranscript = reason;
+          this.#deps.notify(NO_TRANSCRIPT_SENTENCE[reason]);
+        }
+        return;
+      }
+    }
+    this.#announcedNoTranscript = null;
     if (this.#locked === null) {
       this.#locked = file;
       this.#deps.log(`read-aloud: following ${file}`);
+      void this.#persistFollowing();
     }
     if (this.#watching !== file) {
       this.#stopWatching();
@@ -1757,12 +3265,16 @@ var HuddleController = class {
         await this.#persistSpoken();
       }
       try {
-        this.#watcher = watch(file, () => {
+        const w = watch(file, () => {
           this.#onChange(file);
         });
+        w.on("error", (err) => {
+          this.#watchFailed(file, err);
+        });
+        this.#watcher = w;
         this.#deps.log(`read-aloud: watching ${file}`);
       } catch (err) {
-        this.#deps.log(`read-aloud: could not watch transcript: ${String(err)}`);
+        this.#watchFailed(file, err);
       }
     }
     if (this.#stopTimer !== null) clearTimeout(this.#stopTimer);
@@ -1774,12 +3286,25 @@ var HuddleController = class {
   #onChange(file) {
     if (this.#debounce !== null) clearTimeout(this.#debounce);
     this.#debounce = setTimeout(() => {
-      void this.#speakNew(file);
+      this.#observe(this.#speakNew(file), "read new replies");
     }, DEBOUNCE_MS);
   }
   async #speakNew(file) {
     if (!this.#enabled) return;
-    const { replies, format } = await this.#read(file);
+    const { replies, format, truncated, boundaries } = await this.#read(file);
+    if (truncated) {
+      const spent = this.#truncatedRetries.get(file) ?? 0;
+      if (spent < MAX_TRUNCATED_RETRIES) {
+        this.#truncatedRetries.set(file, spent + 1);
+        this.#deps.log(`read-aloud: transcript ends mid-line, re-read ${spent + 1}`);
+        setTimeout(() => {
+          this.#observe(this.#speakNew(file), "read new replies");
+        }, DEBOUNCE_MS).unref?.();
+        return;
+      }
+      this.#deps.log("read-aloud: transcript last line is unreadable; treating it as absent");
+    }
+    this.#truncatedRetries.delete(file);
     if (format === "unknown") {
       if (!this.#warnedUnreadable.has(file)) {
         this.#warnedUnreadable.add(file);
@@ -1788,6 +3313,14 @@ var HuddleController = class {
       return;
     }
     const mark = this.#highWater.get(file) ?? 0;
+    const seenBoundaries = this.#compactBoundaries.get(file);
+    this.#compactBoundaries.set(file, boundaries);
+    if (seenBoundaries !== void 0 && boundaries > seenBoundaries) {
+      this.#setHighWater(file, replies.length);
+      this.#deps.log(`read-aloud: transcript compacted (${boundaries} boundaries), re-anchoring at ${replies.length}`);
+      await this.#persistSpoken();
+      return;
+    }
     if (replies.length < mark) {
       this.#setHighWater(file, replies.length);
       this.#deps.log(`read-aloud: transcript shrank, re-anchoring at ${replies.length}`);
@@ -1803,7 +3336,7 @@ var HuddleController = class {
     for (const r of fresh) {
       this.#spoken.add(r.id);
       this.#lastReply = r.text;
-      this.#deps.speech.speak(r.text, "queue", sessionLabel(file));
+      this.#deps.speech.speak(r.text, "queue", sessionLabel(file), file);
     }
     this.#deps.log(`read-aloud: spoke ${fresh.length} new repl${fresh.length === 1 ? "y" : "ies"}`);
     await this.#persistSpoken();
@@ -1817,6 +3350,21 @@ var HuddleController = class {
       if (oldest.done === true) break;
       this.#highWater.delete(oldest.value);
     }
+  }
+  /**
+   * One sentence per file, not per event: a file that fails to watch usually keeps failing, and a
+   * hundred identical reports would flood the only channel the listener has.
+   */
+  #watchFailed(file, err) {
+    this.#deps.log(`read-aloud: could not watch transcript ${file}: ${String(err)}`);
+    if (this.#warnedWatch.has(file)) return;
+    this.#warnedWatch.add(file);
+    this.#deps.notify(
+      "Huddle lost track of the agent transcript, so new replies may not be spoken. Use follow to pick the session up again."
+    );
+  }
+  async #persistFollowing() {
+    await this.#deps.store?.set(HUDDLE_FOLLOWING_KEY, this.#locked);
   }
   async #persistSpoken() {
     const ids = [...this.#spoken].slice(-MAX_REMEMBERED_IDS);
@@ -1837,52 +3385,94 @@ var HuddleController = class {
       this.#debounce = null;
     }
   }
+  /**
+   * The one place a fire-and-forget promise is allowed, because it is not fire-and-forget any more.
+   *
+   * Sites 9-12 were four `void somePromise()` calls with no `.catch`. Each one is a whole subsystem
+   * — persistence, playback, tailing, decoding — failing into an unhandled rejection, which for
+   * this listener is exactly the same experience as the plugin not existing.
+   */
+  #observe(p, what) {
+    void Promise.resolve(p).catch((err) => {
+      this.#deps.log(`read-aloud: could not ${what}: ${String(err)}`);
+      this.#deps.notify(`Huddle could not ${what}, so replies may stop being spoken.`);
+    });
+  }
   #projectsRoot() {
     return this.#deps.projectsDir ?? join3(homedir(), ".claude", "projects");
   }
   async #newestTranscript(worktreePath) {
+    return (await this.#findNewest(worktreePath)).file;
+  }
+  /**
+   * Find the newest transcript, and say WHY when there is none.
+   *
+   * Site 5: this returned a bare `null` for six different causes, and `#ensureWatching` returned on
+   * it with no log and no notify. Distinguishing them is what makes TT1 announceable at all — "no
+   * agent has ever run here" and "we are not allowed to read your home directory" need completely
+   * different sentences, and the listener can act on the second one.
+   */
+  async #findNewest(worktreePath) {
     const root = this.#projectsRoot();
     let dirs;
     try {
       dirs = await readdir(root);
-    } catch {
-      return null;
+    } catch (err) {
+      const code = err.code;
+      this.#deps.log(`read-aloud: cannot read ${root}: ${String(code ?? err)}`);
+      return { file: null, reason: code === "ENOENT" ? "no-root" : "root-unreadable" };
     }
     const slug = worktreePath === null ? null : worktreePath.replace(/[/\\:]/g, "-");
-    const matched = slug === null ? [] : dirs.filter((d) => d === slug || d.endsWith(slug) || slug.endsWith(d));
+    const matched = slug === null ? [] : dirs.filter((d2) => d2 === slug || d2.endsWith(slug) || slug.endsWith(d2));
     const search = matched.length > 0 ? matched : dirs;
     const files = [];
-    for (const d of search) {
+    let skipped = 0;
+    for (const d2 of search) {
       let entries;
       try {
-        entries = await readdir(join3(root, d));
+        entries = await readdir(join3(root, d2));
       } catch {
+        skipped++;
         continue;
       }
       for (const e of entries) {
         if (!e.endsWith(".jsonl")) continue;
-        const p = join3(root, d, e);
+        const p = join3(root, d2, e);
         try {
           files.push({ path: p, mtime: (await stat(p)).mtimeMs });
         } catch {
+          skipped++;
           continue;
         }
       }
     }
-    if (files.length === 0) return null;
+    if (files.length === 0) {
+      return { file: null, reason: skipped > 0 ? "root-unreadable" : "no-transcripts" };
+    }
     files.sort((a, b) => b.mtime - a.mtime);
     const [first, second] = files;
-    if (first !== void 0 && second !== void 0 && first.mtime - second.mtime < 2e3 && !this.#warnedAmbiguous) {
-      this.#warnedAmbiguous = true;
-      this.#deps.notify(
-        "two agents are active in this worktree, so huddle cannot tell which one replied. Speaking the most recent."
-      );
+    if (first !== void 0 && second !== void 0 && first.mtime - second.mtime < 2e3) {
+      const pair = `${first.path}\0${second.path}`;
+      if (this.#warnedAmbiguousPair !== pair) {
+        this.#warnedAmbiguousPair = pair;
+        this.#deps.notify(
+          "two agents are active in this worktree, so huddle cannot tell which one replied. Speaking the most recent."
+        );
+      }
+    } else {
+      this.#warnedAmbiguousPair = null;
     }
-    return first?.path ?? null;
+    return { file: first?.path ?? null, reason: null };
   }
   async #readReplies(file) {
     return (await this.#read(file)).replies;
   }
+  /**
+   * Re-reads spent on a file whose last line was mid-write. Bounded, because a genuinely corrupt
+   * final line must not spin forever — after this many attempts the line really is unreadable and
+   * is treated as absent, which is what it now is.
+   */
+  #truncatedRetries = /* @__PURE__ */ new Map();
   /**
    * Read a transcript with the decoder its own records call for.
    *
@@ -1895,11 +3485,15 @@ var HuddleController = class {
     let raw;
     try {
       raw = await readFile2(file, "utf8");
-    } catch {
-      return { replies: [], format: "unknown" };
+    } catch (err) {
+      this.#deps.log(`read-aloud: cannot read ${file}: ${String(err)}`);
+      return { replies: [], format: "unknown", truncated: false, boundaries: 0 };
     }
+    let lastNonEmpty = "";
+    for (const line of raw.split("\n")) if (line.trim().length > 0) lastNonEmpty = line;
+    const truncated = lastNonEmpty.length > 0 && !this.#isCompleteJson(lastNonEmpty);
     const format = detectTranscriptFormat(raw);
-    if (format === "unknown") return { replies: [], format };
+    if (format === "unknown") return { replies: [], format, truncated, boundaries: 0 };
     const decode = decoderFor(format === "claude" ? "claude" : "codex");
     const replies = [];
     for (const line of raw.split("\n")) {
@@ -1907,25 +3501,70 @@ var HuddleController = class {
       const decoded = decode(line);
       if (decoded !== null) replies.push(decoded);
     }
-    return { replies, format };
+    return { replies, format, truncated, boundaries: countCompactBoundaries(raw) };
+  }
+  #isCompleteJson(line) {
+    try {
+      JSON.parse(line);
+      return true;
+    } catch {
+      return false;
+    }
   }
 };
 
 // packages/plugin/src/main.ts
-var EXPECTED_COMMANDS = 8;
+var EXPECTED_COMMANDS = 9;
 function activate(orca, options = {}) {
-  const host = makeHost(orca);
+  let announce = () => {
+  };
+  const host = makeHost(orca, {
+    // 006 section 19 rank 2: `{ delivered }` was computed by ORCA and discarded here, so a muted
+    // tray, focus assist or a revoked permission silenced every announcement in this plugin while
+    // it reported success. Anything that was NOT already spoken now falls back to speech.
+    onUndelivered: (m) => {
+      announce(m);
+    },
+    // Site 19/20: `undefined` was indistinguishable from "the key is not set". Storage failing is
+    // why huddle comes back off after a reap, and why a re-forked worker replays a backlog.
+    onStorageFailure: (f) => {
+      host.log(`read-aloud: storage.${f.op}(${f.key}) failed: ${f.reason}`);
+      if (f.op === "get") {
+        announce("Huddle could not read its saved settings, so it started from defaults.");
+      }
+    },
+    // Site 22, and section 19 rank 4 — "whether a control fired". A dead chord and a handler that
+    // threw are the same absence of sound. 'now', because the listener pressed a key THIS second
+    // and is waiting to find out whether anything happened.
+    onCommandFailed: (id, reason) => {
+      announce(`That control did not work: ${id.replace("read-aloud.", "")}. ${reason}`, "now");
+    }
+  });
   host.log("read-aloud: activating");
   const registry = new ProviderRegistry();
-  const sink = options.sink ?? new SubprocessSink({ log: host.log });
+  const sink = options.sink ?? new SubprocessSink({
+    log: host.log,
+    onFailure: (f) => {
+      if (f.kind === "no-player") {
+        announce(`${f.reason}. Speech is being produced but nothing can play it.`);
+      } else if (f.kind === "unverified-format") {
+        announce(`That may not have been played: ${f.reason}.`);
+      } else {
+        announce(`Audio playback failed: ${f.reason}.`);
+      }
+    }
+  });
   let speech = null;
   let engineError = null;
   const deferredAnnouncements = [];
-  const announce = (message, urgency = "next") => {
+  const MAX_DEFERRED = 20;
+  let deferredDropped = 0;
+  announce = (message, urgency = "next") => {
     host.log(`read-aloud: ${message}`);
-    host.notify("Read Aloud", message);
+    host.notify("Read Aloud", message, { alreadySpoken: true });
     if (speech !== null) speech.announce(message, urgency);
-    else deferredAnnouncements.push(message);
+    else if (deferredAnnouncements.length < MAX_DEFERRED) deferredAnnouncements.push(message);
+    else deferredDropped++;
   };
   registry.register(
     options.provider ?? new OsSynthProvider({ notify: (m) => {
@@ -1935,7 +3574,8 @@ function activate(orca, options = {}) {
   );
   void registry.resolve().then((resolved) => {
     if (resolved === null) {
-      const why = registry.lastFailure ?? "no speech engine is available on this system";
+      const detail = registry.lastFailureDetail;
+      const why = detail === null ? registry.lastFailure ?? "no speech engine is available on this system" : `no speech engine is available on this system (${detail.kind}) \u2014 ${detail.reason}`;
       engineError = why;
       host.log(`read-aloud: ${why}`);
       host.notify("Read Aloud", why);
@@ -1949,12 +3589,25 @@ function activate(orca, options = {}) {
       ...options.announceDelayMs === void 0 ? {} : { announceDelayMs: options.announceDelayMs },
       // Supplement only. The spoken sentence naming the count comes from SpeechService itself, so
       // it cannot be lost by a notification channel that is muted, denied, or simply not looked at.
+      /**
+       * 006 section 19 rank 3 — "whose words are being spoken". Answered by asking the
+       * filesystem, not by re-reading the string we built: a session whose transcript is gone
+       * has ended, and C1's dead-agent-in-a-live-voice depends on nobody ever checking.
+       */
+      resolveLabel: (id) => existsSync(id) ? sessionLabel(id) : null,
       onDropped: (n2) => {
         host.notify("Read Aloud", `Skipped ${n2} older repl${n2 === 1 ? "y" : "ies"} to keep up`);
       }
     });
     host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`);
     for (const m of deferredAnnouncements.splice(0)) speech.announce(m, "next");
+    if (deferredDropped > 0) {
+      speech.announce(
+        `${deferredDropped} earlier message${deferredDropped === 1 ? "" : "s"} could not be kept while the voice was starting up.`,
+        "next"
+      );
+      deferredDropped = 0;
+    }
     if (resolved.status.reason !== void 0) announce(resolved.status.reason);
   }).catch((err) => {
     engineError = String(err);
@@ -1977,14 +3630,21 @@ function activate(orca, options = {}) {
       try {
         const { text, truncated } = await readClipboard();
         if (text.trim().length === 0) {
-          host.notify("Read Aloud", "the clipboard is empty");
+          announce("The clipboard is empty.", "now");
           return;
         }
-        if (truncated) host.notify("Read Aloud", "clipboard was long; reading the first part");
         s.speak(text);
+        if (truncated) announce("That clipboard was long, so you heard the first part of it.", "next");
       } catch (err) {
-        host.notify("Read Aloud", err instanceof ClipboardUnavailableError ? err.message : "could not read the clipboard");
+        announce(err instanceof ClipboardUnavailableError ? err.message : `Could not read the clipboard: ${String(err)}`, "now");
       }
+    });
+  });
+  host.registerCommand("read-aloud.self-test", async () => {
+    await withSpeech(async (s) => {
+      const r = await s.selfTest();
+      host.notify("Read Aloud", r.spoken);
+      host.log(`read-aloud: self-test chunks=${r.chunks} bytes=${r.bytes} played=${String(r.bytesPlayed)}`);
     });
   });
   host.registerCommand("read-aloud.stop", async () => {
@@ -1995,8 +3655,8 @@ function activate(orca, options = {}) {
   const huddle = new HuddleController({
     speech: {
       // 'queue' is the whole point for huddle: replies must not cut each other off.
-      speak: (t, mode, label) => {
-        speech?.speak(t, mode ?? "queue", label);
+      speak: (t, mode, label, sessionId) => {
+        speech?.speak(t, mode ?? "queue", label, sessionId);
       },
       stop: async () => {
         await speech?.stop();
@@ -2014,6 +3674,10 @@ function activate(orca, options = {}) {
   });
   void huddle.restore().then((on) => {
     host.log(`read-aloud: huddle mode restored to ${on ? "on" : "off"}`);
+    const again = huddle.restoredAnnouncement();
+    if (again !== null) announce(again, "next");
+  }).catch((err) => {
+    announce(`Huddle mode could not be restored: ${String(err)}. Press the huddle key to turn it on.`);
   });
   host.registerCommand("read-aloud.toggle-huddle", () => {
     const on = huddle.toggle();
@@ -2053,15 +3717,24 @@ function activate(orca, options = {}) {
     await withSpeech(async (s) => {
       const text = await huddle.lastReply();
       if (text === null) {
-        host.notify("Read Aloud", "no agent reply to read yet");
+        announce("There is no agent reply to read yet.", "now");
         return;
       }
       s.speak(text);
     });
   });
+  let malformedEvents = 0;
+  let announcedMalformed = false;
   host.onEvent("agent.status.changed", (payload) => {
     const status = asAgentStatus(payload);
-    if (status === null) return;
+    if (status === null) {
+      malformedEvents++;
+      if (malformedEvents >= 3 && !announcedMalformed) {
+        announcedMalformed = true;
+        announce("Huddle is not recognising this version of Orca\u2019s agent events, so replies may not be spoken.");
+      }
+      return;
+    }
     huddle.onAgentStatus(status, worktreePathFrom(status.worktreeId));
   });
   const n = host.registeredCommands();
