@@ -469,6 +469,10 @@ describe('006 sites 45/46 — total engine failure reports a named cause', () =>
  */
 describe('006 section 19 rank 1 — the listener can ask whether the voice actually works', () => {
   class SilentProvider extends RecordingProvider {
+    // Yielding NOTHING is the condition under test: a provider that reports success and produces
+    // no audio is the mute-plugin state 006 rank 1 exists to detect. Adding a yield here would
+    // delete the defect this test is looking for, so the rule is suppressed rather than satisfied.
+    // eslint-disable-next-line require-yield
     override async *generate(text: string): AsyncIterable<AudioChunk> {
       this.synthesized.push(text)   // pretends to work, yields nothing — the mute-plugin state
     }

@@ -38,7 +38,6 @@ import { dirname, join } from 'node:path'
 
 import { STAGES, computeStages, stageFns } from './voice-lab.mjs'
 import { CONTROLS } from '../voice-lab/lib/controls.mjs'
-import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { stripTypeScriptTypes } from 'node:module'
 

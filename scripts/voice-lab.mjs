@@ -537,7 +537,8 @@ export async function speak (provider, text, opts = {}, { allowElsewhere = false
 
 /** A `chunk` record minus its record-keeping fields — what the old envelope carried per chunk. */
 function chunkPayload (rec) {
-  const { kind, chunkIndex, ...rest } = rec
+  // Destructured only to OMIT them; `_` marks that for the linter without a disable comment.
+  const { kind: _kind, chunkIndex: _chunkIndex, ...rest } = rec
   return rest
 }
 
