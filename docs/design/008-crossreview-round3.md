@@ -6,6 +6,11 @@
 **Reviewer had no session context and wrote none of the four.** Every finding below was checked
 against source, and the checks are named so they can be re-run.
 
+> **Stage numbers here are pre-J21 and are left as written.** This document is a dated record.
+> On 2026-08-21 `stripHtmlComments` was inserted as stage **2**, making the pipeline **16**
+> stages, so every stage number of 2 or higher below is one lower than the pipeline's today.
+> The live numbering lives in `normalize()`'s call list and in `scripts/voice-lab.mjs` `STAGES`.
+
 **Repo state used for verification.** `orca-plugin-tts` at `8666cc0`, with the four designs as
 committed at `bb74a5f`. ORCA at `87097551f8e98a21c3afa7d457f66d6fd1f94038` — the same commit the
 round-1 research pinned. Four behaviours were verified **by effect**, by running the real

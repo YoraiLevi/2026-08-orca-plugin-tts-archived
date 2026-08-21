@@ -92,7 +92,7 @@ sequenceDiagram
     J-->>T: fs change (debounced)
     T->>T: decode records, DROP thinking blocks
     T->>N: raw markdown text
-    N->>N: 15 transforms in a fixed order:<br/>fences, inline code, links, URLs, headings,<br/>lists, tables, paths, markers, key glyphs,<br/>emoji, units, numbers, whitespace, punctuation<br/>(paths and units+numbers are conditional)
+    N->>N: 16 transforms in a fixed order:<br/>fences, HTML comments, inline code, links, URLs,<br/>headings, lists, tables, paths, markers, key glyphs,<br/>emoji, units, numbers, whitespace, punctuation<br/>(paths and units+numbers are conditional)
     N->>C: speakable plain text
     C->>C: first sentence ALONE (min latency)<br/>then greedy pack to engine limit
     loop per chunk

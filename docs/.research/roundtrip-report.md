@@ -4,6 +4,11 @@
 (`.meta/goal/voice-lab-m11/contract.md`). **Test:**
 `packages/core/src/settings/roundtrip.test.ts` — the only file this job wrote.
 
+> **Stage numbers here are pre-J21 and are left as written.** This document is a dated record.
+> On 2026-08-21 `stripHtmlComments` was inserted as stage **2**, making the pipeline **16**
+> stages, so every stage number of 2 or higher below is one lower than the pipeline's today.
+> The live numbering lives in `normalize()`'s call list and in `scripts/voice-lab.mjs` `STAGES`.
+
 **Suite: 421 tests green before, 549 tests green after** (22 files → 23). +128 tests, all in the
 one new file. `pnpm typecheck` clean. No test opens an audio device, spawns a player, or reaches
 the author's real config (**P31**): the lab server is started on port 0, only `/normalize` is

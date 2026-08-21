@@ -221,15 +221,21 @@ Design:
 **Q23 verdict: progressive disclosure. Written-vs-spoken is the default and only view; the stage
 ladder is one keystroke (`E`, "explain") away and is never on screen unless asked for.**
 
-**Correct the count first.** There are **15** transforms in `normalize()`
-(`packages/core/src/normalizer/index.ts:96-109`), not 12. Three different counts exist in the repo —
-`000-open-questions.md` Q23 says 12, and the in-file banner
-comments are misnumbered (`index.ts:477` labels the number stages "stage 10"; `index.ts:618` labels
-`collapseWhitespace` "stage 11" while sitting below `tidyPunctuation` at `:607`). `docs/architecture.md:95`
-now correctly says 15 — that half of the disagreement is already closed. **Fix these before the lab
-renders a stage ladder**, or the UI will disagree with the source it is displaying.
+**Correct the count first.** There are **16** transforms in `normalize()` — read the call list in
+`packages/core/src/normalizer/index.ts`, never a line range, because line ranges are what went
+stale here last time.
 
-The stage view, when opened, is a vertical ladder of 15 rows. Each row shows only the text that
+> **Amended 2026-08-21 (J21).** When this section was written the count was **15** and three
+> documents disagreed with it (`000-open-questions.md` Q23 said 12), while the in-file banner
+> comments were misnumbered — `index.ts` labelled the number stages "stage 10" and
+> `collapseWhitespace` "stage 11" while it sat *below* `tidyPunctuation`. Both halves are now
+> closed: `stripHtmlComments` was added as stage 2, making the count **16**, and every banner in
+> `index.ts` was renumbered to true CALL order with a header note saying outright that the file's
+> physical order is not its call order. That closes **Q48** below and 006 finding **NM13**.
+> What keeps it closed is not this paragraph — it is `scripts/voice-lab.mjs`, which compiles the
+> ladder from the source bytes and refuses to start the server if the two disagree.
+
+The stage view, when opened, is a vertical ladder of 16 rows. Each row shows only the text that
 **that stage changed**, not the whole document — a stage that changed nothing renders as one dim
 line, "no change". Every row is independently playable, so "why does this line sound wrong" is
 answered by playing the stage before and the stage after.
@@ -238,13 +244,13 @@ answered by playing the stage before and the stage after.
 
 - Character-level is noise for a dyslexic reader: `session_handler.py` → `session handler, python` diffs into a dozen fragments that carry no meaning.
 - Word-level with no attribution tells you *what* changed and leaves you guessing *which control to turn*.
-- **Word-level, each changed span carrying the stage that produced it**, turns a diff into a control: hover or focus a changed span and the page names the stage *and the control that governs it*, with a key to jump straight to that control. Spans from unconfigurable stages say so ("stage 9, `stripMarkdownMarkers` — fixed by design").
+- **Word-level, each changed span carrying the stage that produced it**, turns a diff into a control: hover or focus a changed span and the page names the stage *and the control that governs it*, with a key to jump straight to that control. Spans from unconfigurable stages say so ("stage 10, `stripMarkdownMarkers` — fixed by design").
 
 Every word span in the spoken pane carries `data-start` / `data-end` — its character offsets into
 the spoken string — not merely a diff class. That costs two attributes today and is what makes a
 live word cursor a later *display* change rather than a later rewrite (section 6a).
 
-Attribution is computed server-side by running the 15 stages incrementally and recording each
+Attribution is computed server-side by running the 16 stages incrementally and recording each
 stage's output; `POST /normalize` returns `{spoken, stages: [{n, name, text, controlIds}]}`.
 The page computes the word diff locally. There is no diff library — a longest-common-subsequence
 over whitespace-split tokens is ~40 lines and keeps the page CDN-free.
@@ -290,22 +296,22 @@ get a lead-in (H1) and URLs get a destination (H2), while **emoji vanish with no
 | 1 | `omit.codeBlocks` | select | `announce` · `drop` | `announce` | Common | stage 1 `stripFencedCode` | `core/src/normalizer/index.ts:96,122` | EI |
 | 2 | `omit.codeBlockPhrase` | text (template: `{lang}` `{lines}`) | any string ≤ 120 chars | `" . Here, a code block is omitted. "` | Common | stage 1 | `index.ts:88` | EI |
 | 3 | `omit.codeBlockDetail` | multi-toggle | `language` · `lineCount` | neither | More | stage 1 (fills the template) | `index.ts:122-144` (new capture) | EI |
-| 4 | `omit.inlineCode` | select | `strip` · `verbatim` · `announce` | `strip` | More | stage 2 `stripInlineCode` | `index.ts:148` | EI |
-| 5 | `omit.urls` | select | `host-phrase` · `host-and-path` · `label-only` · `drop-silent` | `host-phrase` | Common | stage 4 `stripUrls` | `index.ts:197` | EI |
-| 6 | `omit.urlPhrase` | text (template: `{host}` `{path}`) | any string ≤ 120 chars | `"a link to {host}"` | More | stage 4 | `index.ts:187-192` | EI |
-| 7 | `omit.emoji` | select | `silent` · `announce-count` · `name` | `silent` | Common | stage 11 `stripEmoji` | `index.ts:467-475` | EI |
+| 4 | `omit.inlineCode` | select | `strip` · `verbatim` · `announce` | `strip` | More | stage 3 `stripInlineCode` | `index.ts:148` | EI |
+| 5 | `omit.urls` | select | `host-phrase` · `host-and-path` · `label-only` · `drop-silent` | `host-phrase` | Common | stage 5 `stripUrls` | `index.ts:197` | EI |
+| 6 | `omit.urlPhrase` | text (template: `{host}` `{path}`) | any string ≤ 120 chars | `"a link to {host}"` | More | stage 5 | `index.ts:187-192` | EI |
+| 7 | `omit.emoji` | select | `silent` · `announce-count` · `name` | `silent` | Common | stage 12 `stripEmoji` | `index.ts:467-475` | EI |
 
 ### Panel B — How structure is spoken
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 8 | `struct.headingCue` | select | `none` · `level-word` ("section", "subsection") · `prefix-word` · `pause-only` | `none` — all six levels collapse | Common | stage 5 `headingsToPauses` | `index.ts:233-242` | EI |
-| 9 | `struct.headingPauseMs` | slider | 0–1500 ms, step 50 — **milliseconds, never "comma vs full stop"** (6a) | 0; a heading becomes a plain sentence and the pause is whatever the engine gives a full stop | More | stage 5 → pause token | `index.ts:233` (the pause point is `endWithStop` at `:240`) | **EP** |
-| 10 | `struct.orderedLists` | select | `numeral` ("1, alpha" → heard as "one, alpha") · `word` ("first, alpha") · `drop` (v1) | **`numeral`** — **not** `drop`; verified by effect, `normalize("1. alpha\n2. beta")` returns `"one, alpha. two, beta."` | Common | stage 6 `listItemsToSentences` | `index.ts:272-282`; the option at `normalizer/index.ts:20,50` | EI |
-| 11 | `struct.bulletMarker` | select | `drop` · `say-item` | `drop` | More | stage 6 | `index.ts:263` (marker detection) · `:278` (drop) | EI |
-| 12 | `struct.tableLeadIn` | text | any string ≤ 60 chars | `"Table."` | More | stage 7 `tablesToRows` | `index.ts:311` | EI |
-| 13 | `struct.tableHeaderRepeat` | select | `every-cell` · `row-start` · `first-row-only` · `never` | `every-cell` | Common | stage 7 | `index.ts:321` | EI |
-| 14 | `struct.tableFirstCellHeader` | toggle | on · off | off — first cell is spoken bare | More | stage 7 | `index.ts:315,323` | EI |
+| 8 | `struct.headingCue` | select | `none` · `level-word` ("section", "subsection") · `prefix-word` · `pause-only` | `none` — all six levels collapse | Common | stage 6 `headingsToPauses` | `index.ts:233-242` | EI |
+| 9 | `struct.headingPauseMs` | slider | 0–1500 ms, step 50 — **milliseconds, never "comma vs full stop"** (6a) | 0; a heading becomes a plain sentence and the pause is whatever the engine gives a full stop | More | stage 6 → pause token | `index.ts:233` (the pause point is `endWithStop` at `:240`) | **EP** |
+| 10 | `struct.orderedLists` | select | `numeral` ("1, alpha" → heard as "one, alpha") · `word` ("first, alpha") · `drop` (v1) | **`numeral`** — **not** `drop`; verified by effect, `normalize("1. alpha\n2. beta")` returns `"one, alpha. two, beta."` | Common | stage 7 `listItemsToSentences` | `index.ts:272-282`; the option at `normalizer/index.ts:20,50` | EI |
+| 11 | `struct.bulletMarker` | select | `drop` · `say-item` | `drop` | More | stage 7 | `index.ts:263` (marker detection) · `:278` (drop) | EI |
+| 12 | `struct.tableLeadIn` | text | any string ≤ 60 chars | `"Table."` | More | stage 8 `tablesToRows` | `index.ts:311` | EI |
+| 13 | `struct.tableHeaderRepeat` | select | `every-cell` · `row-start` · `first-row-only` · `never` | `every-cell` | Common | stage 8 | `index.ts:321` | EI |
+| 14 | `struct.tableFirstCellHeader` | toggle | on · off | off — first cell is spoken bare | More | stage 8 | `index.ts:315,323` | EI |
 
 > **Amended 2026-08-21 (round 3 reconciliation), forced by X-07.** Row 10 was written as *"the one
 > item in this document I would call a comprehension bug"* on the premise that today's behaviour is
@@ -327,28 +333,28 @@ the default — are the listener's, and are deliberately left unset.**
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 15 | `path.style` | select | `spoken` · `terse` · `verbatim` | `spoken` | Common | stage 8 `speakFilePaths` | `index.ts:93,348` | EI |
-| 16 | `path.extensionStyle` | select | `word-last` · `word-first` · `raw-last` · `omit` | `word-last` | Common | stage 8 | `index.ts:103` (read at the call site) `,388-397` | EI |
-| 17 | `path.namePhrase` | text (template `{name}`) | ≤ 60 chars | `"file named {name}"` | More | stage 8 | `index.ts:386-396` (the folder phrase is built at `:381`) | EI |
-| 18 | `path.folderPhrase` | text (template `{folders}`) | ≤ 60 chars | `"in folder {folders}"` | More | stage 8 | `index.ts:386-396` (the folder phrase is built at `:381`) | EI |
-| **19** | **`path.depthPolicy`** — **Q41's option space** | select | `full` · `last-n` · `first-n` · `filename-only` · `filename-then-location` · `elide-middle` ("packages, then two folders, then normalizer") | `full`, unlimited | Common | stage 8 | `index.ts:371-374` | EI |
-| 20 | `path.depthN` | slider | 1–8 | n/a — no limit exists | Common | stage 8 | `index.ts:371-374` | EI |
-| 21 | `path.extensionWords` | key/value editor | 32 rows today; add/remove/edit | fixed table; unknown suffixes fall to `"dot xyz"` (`index.ts:380`) | More | stage 8 | `index.ts:55-62` | EI |
-| **22** | **`ident.style`** — **Q39's option space** | select | `verbatim` · `underscore-pause` (`_flush_buffer` → "flush, buffer") · `split-words` ("flush buffer") · `split-and-announce` ("the function flush buffer") · `spell-leading-underscore` ("underscore flush buffer") | `verbatim` — `_flush_buffer()` is spoken raw | Common | stages 2 + 9 | `index.ts:148,425` | EI |
-| 23 | `ident.parens` | select | `keep` · `drop` · `say-call` ("a call to") | `keep` | More | stages 2 + 9 | `index.ts:425` | EI |
+| 15 | `path.style` | select | `spoken` · `terse` · `verbatim` | `spoken` | Common | stage 9 `speakFilePaths` | `index.ts:93,348` | EI |
+| 16 | `path.extensionStyle` | select | `word-last` · `word-first` · `raw-last` · `omit` | `word-last` | Common | stage 9 | `index.ts:103` (read at the call site) `,388-397` | EI |
+| 17 | `path.namePhrase` | text (template `{name}`) | ≤ 60 chars | `"file named {name}"` | More | stage 9 | `index.ts:386-396` (the folder phrase is built at `:381`) | EI |
+| 18 | `path.folderPhrase` | text (template `{folders}`) | ≤ 60 chars | `"in folder {folders}"` | More | stage 9 | `index.ts:386-396` (the folder phrase is built at `:381`) | EI |
+| **19** | **`path.depthPolicy`** — **Q41's option space** | select | `full` · `last-n` · `first-n` · `filename-only` · `filename-then-location` · `elide-middle` ("packages, then two folders, then normalizer") | `full`, unlimited | Common | stage 9 | `index.ts:371-374` | EI |
+| 20 | `path.depthN` | slider | 1–8 | n/a — no limit exists | Common | stage 9 | `index.ts:371-374` | EI |
+| 21 | `path.extensionWords` | key/value editor | 32 rows today; add/remove/edit | fixed table; unknown suffixes fall to `"dot xyz"` (`index.ts:380`) | More | stage 9 | `index.ts:55-62` | EI |
+| **22** | **`ident.style`** — **Q39's option space** | select | `verbatim` · `underscore-pause` (`_flush_buffer` → "flush, buffer") · `split-words` ("flush buffer") · `split-and-announce` ("the function flush buffer") · `spell-leading-underscore` ("underscore flush buffer") | `verbatim` — `_flush_buffer()` is spoken raw | Common | stages 4 + 10 | `index.ts:148,425` | EI |
+| 23 | `ident.parens` | select | `keep` · `drop` · `say-call` ("a call to") | `keep` | More | stages 4 + 10 | `index.ts:425` | EI |
 
-Row 22 must not fight stage 9. `stripMarkdownMarkers` deliberately preserves dunders and leading
+Row 22 must not fight stage 10. `stripMarkdownMarkers` deliberately preserves dunders and leading
 underscores (`index.ts:425`, the M2 anti-goal gate); `ident.style` is the *only* place that decides
-what an underscore sounds like, and stage 9 keeps them intact so that it can.
+what an underscore sounds like, and stage 10 keeps them intact so that it can.
 
 ### Panel D — Numbers and units
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 24 | `num.expandIntegers` | toggle | on · off | on | Common | stage 13 `expandNumbers` | `index.ts:94,107,518` | EI |
-| 25 | `num.expandUnits` | toggle | on · off | on | Common | stage 12 `expandUnits` | `index.ts:107,561` | EI |
-| 26 | `num.unitWords` | key/value editor | 11 rows today | fixed table | More | stage 12 | `index.ts:65-77` | EI |
-| 27 | `num.decimals` | select | `engine` · `words` | `engine` — `3.14` handed through | More | stage 13 | `index.ts:540-546` | **EP** |
+| 24 | `num.expandIntegers` | toggle | on · off | on | Common | stage 14 `expandNumbers` | `index.ts:94,107,518` | EI |
+| 25 | `num.expandUnits` | toggle | on · off | on | Common | stage 13 `expandUnits` | `index.ts:107,561` | EI |
+| 26 | `num.unitWords` | key/value editor | 11 rows today | fixed table | More | stage 13 | `index.ts:65-77` | EI |
+| 27 | `num.decimals` | select | `engine` · `words` | `engine` — `3.14` handed through | More | stage 14 | `index.ts:540-546` | **EP** |
 
 Rows 24 and 25 are **the fix for H16**: today one flag (`expandNumbers`) gates both behaviours
 (`index.ts:107`), so a listener who wants "fifty two milliseconds" but numeral-shaped counts cannot
@@ -708,7 +714,7 @@ one map in `@orca-tts/core` consumed by both surfaces**:
 | `+` / `-` | reveal / collapse that panel's More tier | **was `M`** |
 | `Tab` | next panel | — |
 | `C` | Compare (A/B, section 3) · `1` `2` keep first / keep second | — |
-| `E` | Explain — open the 15-stage ladder for the current fixture | — |
+| `E` | Explain — open the 16-stage ladder for the current fixture | — |
 | `?` | speak the focused control's one-line description | — |
 | `Esc` | close whatever opened; focus never moves as a side effect | — |
 
@@ -893,4 +899,4 @@ into a conversation.
 | Q45 | E | **Template injection.** Rows 2, 6, 17, 18, 12, 41, 42 are free text that reaches the synthesizer. On macOS, `[[` in user text is interpreted as an embedded speech command (measured, `q-round1-platform.md`); on Windows the text is interpolated into a PowerShell string escaped only for `'` (`os-synth/index.ts:360-370`). What is the escaping contract for phrase templates, and where is it enforced — the lab, the schema, or the provider? |
 | Q46 | D | An `EP` value tuned on macOS lands in a settings file that may be opened on Linux, where `rate` is dropped and no voice name matches. Does the plugin ignore EP fields whose `provenance.platform` differs, warn once aloud, or attempt a mapping? |
 | Q47 | D | Since Q35 leaves no host settings UI, does **Save to plugin** write the file directly (fast, but the lab now mutates the plugin's state from outside), or does the plugin poll/watch it? This also decides whether the lab can be used *while* huddle mode is running. |
-| Q48 | E | The stage count disagrees in three places (Q23 says 12, the source has 15 at `index.ts:96-109`, and the in-file banner comments are misnumbered at `index.ts:477` and `:618`; `architecture.md:95` is already correct at 15). Fix the source comments and the docs before T112 renders a stage ladder. |
+| Q48 | E | ~~The stage count disagrees in three places (Q23 says 12, the source has 15 at `index.ts:96-109`, and the in-file banner comments are misnumbered at `index.ts:477` and `:618`; `architecture.md:95` is already correct at 15). Fix the source comments and the docs before T112 renders a stage ladder.~~ **CLOSED 2026-08-21 (J21).** The count is now **16**, every banner in `index.ts` is renumbered to call order, and Q23, `architecture.md`, `PLAN.md`, this document, `002/spec.md`, `002/plan.md`, `007`, `010` and both Voice Lab control inventories were swept in the same commit. |

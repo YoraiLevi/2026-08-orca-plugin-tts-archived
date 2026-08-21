@@ -30,7 +30,7 @@ applies are Appendix B of the spec.
 **Purpose**: the lab renders the pipeline. The pipeline must describe itself correctly first.
 
 - [ ] **VL-001** Export the pipeline stage list from `packages/core/src/normalizer/`, derived from
-      the calls in `normalize()` (`packages/core/src/normalizer/index.ts:96-109`), each entry
+      the calls in `normalize()` (`packages/core/src/normalizer/index.ts`), each entry
       carrying its ordinal, its function name, and whether it is conditional.
       **Verify**: a test asserts the exported list equals the pipeline. Add a sixteenth stage on a
       scratch branch and confirm the test goes red before removing it.

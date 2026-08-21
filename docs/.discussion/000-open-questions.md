@@ -57,7 +57,7 @@ A question is **resolved** only when the evidence is written next to it. "Probab
 | Q20 | D | Who plays the audio: the **server** (spawn the real provider on this machine) or the **browser** (Web Audio on returned PCM)? Server keeps one code path with the plugin; browser gives instant replay and scrubbing. | open |
 | Q21 | D | A/B: two option sets back to back — does the listener know which is playing while it plays, or is it blind with a reveal after? Blind is the honest test; labelled is the faster one. | open |
 | Q22 | E | Complete list of `NormalizeOptions` fields today, so T124's "every field is reachable" assertion has a target. Currently four: `codeBlocks`, `pathStyle`, `extensionStyle`, `expandNumbers`. | open |
-| Q23 | D | Does the lab show the **15-transform pipeline** intermediates, or only written-vs-spoken? Stage-by-stage explains *why* a line sounds wrong; it also complicates the page. | open |
+| Q23 | D | Does the lab show the **16-transform pipeline** intermediates, or only written-vs-spoken? Stage-by-stage explains *why* a line sounds wrong; it also complicates the page. | open |
 | Q24 | D | Diff granularity in the side-by-side: character, word, or stage-attributed. | open |
 | Q25 | E | Does the lab need the resident service, or is the OS synthesizer enough to settle taste? Bears on whether M11 waits for M9. | open |
 | Q26 | D | Does the lab persist a session — chosen options survive a reload — or is every visit fresh? | open |

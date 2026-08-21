@@ -73,7 +73,7 @@ probe has run**. Phase 2's exit criterion turns both into `[measured-here]` befo
 declared met; if the warm path is not what the reasoning says it is, the gate is met on the cold
 path alone or not at all.
 
-**Scale/Scope**: 46 controls, 6 panels, 15 pipeline stages, 6 fixture families, 3 endpoints, 3
+**Scale/Scope**: 46 controls, 6 panels, 16 pipeline stages, 6 fixture families, 3 endpoints, 3
 provider outcomes, 98 functional requirements.
 
 ---

@@ -102,15 +102,16 @@ describe('the control inventory, counted against 004 section 6', () => {
 
 describe('the stage ladder agrees with the normalizer source', () => {
   // 004 section 4: "There are 15 transforms in normalize(), not 12. Three different counts exist in
+  // the repo." J21 made it SIXTEEN by adding `stripHtmlComments` at stage 2.
   // the repo." Counting them here, from the source, is the only version of this check that can fail.
-  it('lists the same fifteen transforms normalize() actually calls, in order', async () => {
+  it('lists the same sixteen transforms normalize() actually calls, in order', async () => {
     const src = await readFile(join(REPO, 'packages/core/src/normalizer/index.ts'), 'utf8')
     const body = src.slice(src.indexOf('export function normalize'))
     const called = [...body.slice(0, body.indexOf('\n}')).matchAll(/\bs = ([a-zA-Z]+)\(/g)]
       .map((m) => m[1])
     const unique = called.filter((n, i) => called.indexOf(n) === i)
     expect(unique).toEqual(STAGES)
-    expect(STAGES.length).toBe(15)
+    expect(STAGES.length).toBe(16)
   })
 
   it('marks the stages with no control as fixed by design, and no others', () => {
@@ -119,7 +120,7 @@ describe('the stage ladder agrees with the normalizer source', () => {
   })
 
   it('gives every stage that has a control at least one that governs it', () => {
-    for (let n = 1; n <= 15; n++) {
+    for (let n = 1; n <= 16; n++) {
       if (FIXED_BY_DESIGN_STAGES.includes(n)) continue
       expect(controlsForStage(n).length).toBeGreaterThan(0)
     }
@@ -132,7 +133,7 @@ describe('the page and the server agree about which control governs which stage'
   // nothing anywhere goes red. So the two are compared directly.
   it('matches scripts/voice-lab.mjs STAGES controlIds, stage for stage', async () => {
     const { STAGES: SERVER_STAGES } = await import(join(REPO, 'scripts/voice-lab.mjs'))
-    expect(SERVER_STAGES).toHaveLength(15)
+    expect(SERVER_STAGES).toHaveLength(16)
     for (const stage of SERVER_STAGES) {
       expect(STAGES[stage.n - 1], `stage ${stage.n} name`).toBe(stage.name)
       const mine = controlsForStage(stage.n).map((c) => c.id).sort()
@@ -175,7 +176,7 @@ describe('the word diff', () => {
     const stages = [
       { n: 1, name: 'stripFencedCode', text: source },
       { n: 8, name: 'speakFilePaths', text: 'see file named index, typescript, in folder packages core now' },
-      { n: 15, name: 'tidyPunctuation', text: 'see file named index, typescript, in folder packages core now' }
+      { n: 16, name: 'tidyPunctuation', text: 'see file named index, typescript, in folder packages core now' }
     ]
     const { spoken, removed } = attribute(source, stages)
     const byWord = Object.fromEntries(spoken.map((t) => [t.text, t.stage]))
@@ -197,7 +198,7 @@ describe('the word diff', () => {
     const source = 'see index now'
     const { spoken, removed } = attribute(source, [
       { n: 1, name: 'stripFencedCode', text: source },
-      { n: 15, name: 'tidyPunctuation', text: source }
+      { n: 16, name: 'tidyPunctuation', text: source }
     ])
     expect(spoken.every((t) => t.stage === 0)).toBe(true)
     expect(removed).toEqual([])

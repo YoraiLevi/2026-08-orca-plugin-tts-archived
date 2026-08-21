@@ -389,7 +389,7 @@ ORCA"*. FR-020 to FR-027 turn that into something a test asserts.
 - **FR-041**: The stage ladder MUST have exactly one row per stage of the shipped pipeline, in
   pipeline order, and the row count and names MUST be derived from the source, not hard-coded.
   *Verify*: assert the ladder's stage names equal the pipeline's, read from
-  `packages/core/src/normalizer/index.ts:96-109`. Adding a stage without a row fails.
+  `packages/core/src/normalizer/index.ts` (the call list in `normalize()`). Adding a stage without a row fails.
 - **FR-042** *(three row states, not two)*: A row MUST distinguish **changed** (show only what that
   stage changed), **no change** (it ran and altered nothing), and **not run** (a control disabled
   it, naming the control). Two stages in the shipped pipeline are conditional —
@@ -686,9 +686,12 @@ requirements and each one fails the build if absent.
   is asserted on the author's machine because that is where taste is settled.
 - The 46-control inventory is taken from 004 section 6 as amended. **The brief for this spec said
   43; the document says 46** — verified by counting the rows: 7 + 7 + 9 + 4 + 9 + 10.
-- The pipeline has **15** stages, read from `packages/core/src/normalizer/index.ts:96-109`. Two are
-  conditional, so a run exercises 12 to 15 of them. The in-source stage banner comments are
-  misnumbered and must be corrected before a ladder renders against them.
+- The pipeline has **16** stages, read from the call list in `normalize()`
+  (`packages/core/src/normalizer/index.ts`) — never a line range. Two are conditional, so a run
+  exercises 13 to 16 of them. It was 15 when this spec was written; J21 added `stripHtmlComments`
+  at stage 2, so every stage number in the tables below is one higher than the version of this
+  document that shipped with M11. The in-source banner comments, which this spec recorded as
+  misnumbered, were corrected in the same change.
 - `NormalizeOptions` has **five** fields — `codeBlocks`, `pathStyle`, `extensionStyle`,
   `expandNumbers`, `orderedLists` (`packages/core/src/normalizer/index.ts:22-52`) — verified in
   source, not inherited.
@@ -709,7 +712,7 @@ the behaviour, and where this specification had to choose or had to escalate.
 **10 of those 46 rows** reach a typed options object that a consumer reads today (5 normalizer
 fields over 6 rows, 2 chunker, 2 synthesize). `011` section 3.2 counts the same gap from the other
 end and calls the rest `wire: null`. 004 writes every row's "Feeds" column as though the consumer
-existed — *"stage 4 `stripUrls`"* for a four-valued `omit.urls` control that `stripUrls` does not
+existed — *"stage 5 `stripUrls`"* for a four-valued `omit.urls` control that `stripUrls` does not
 take — so a reader plans a lab in which all 46 controls are audible. They are not. Turning 36 of
 them would change nothing the listener can hear, which is precisely PITFALLS **P26**'s shape (*"a
 field that cannot be walked is not a setting, it is a comment"*) and **P18**'s (*a wrong name
@@ -808,22 +811,22 @@ settling any of them.
 | 1 | `omit.codeBlocks` | select | `announce` · `drop` | `announce` | C | `NormalizeOptions.codeBlocks` → stage 1 `stripFencedCode` | **W** | EI |
 | 2 | `omit.codeBlockPhrase` | template (`{lang}`, `{lines}`) | string ≤ 120 chars | `" . Here, a code block is omitted. "` | C | stage 1 | D | EI |
 | 3 | `omit.codeBlockDetail` | multi-toggle | `language` · `lineCount` | neither | M | stage 1 (fills the template) | D | EI |
-| 4 | `omit.inlineCode` | select | `strip` · `verbatim` · `announce` | `strip` | M | stage 2 `stripInlineCode` | D | EI |
-| 5 | `omit.urls` | select | `host-phrase` · `host-and-path` · `label-only` · `drop-silent` | `host-phrase` | C | stage 4 `stripUrls` | D | EI |
-| 6 | `omit.urlPhrase` | template (`{host}`, `{path}`) | string ≤ 120 chars | `"a link to {host}"` | M | stage 4 | D | EI |
-| 7 | `omit.emoji` | select | `silent` · `announce-count` · `name` | `silent` | C | stage 11 `stripEmoji` | D | EI |
+| 4 | `omit.inlineCode` | select | `strip` · `verbatim` · `announce` | `strip` | M | stage 3 `stripInlineCode` | D | EI |
+| 5 | `omit.urls` | select | `host-phrase` · `host-and-path` · `label-only` · `drop-silent` | `host-phrase` | C | stage 5 `stripUrls` | D | EI |
+| 6 | `omit.urlPhrase` | template (`{host}`, `{path}`) | string ≤ 120 chars | `"a link to {host}"` | M | stage 5 | D | EI |
+| 7 | `omit.emoji` | select | `silent` · `announce-count` · `name` | `silent` | C | stage 12 `stripEmoji` | D | EI |
 
 ### Panel B — How structure is spoken (7)
 
 | # | Control | Type | Legal values | Default (provisional) | Tier | Feeds | Class | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 8 | `struct.headingCue` | select | `none` · `level-word` · `prefix-word` · `pause-only` | `none` | C | stage 5 `headingsToPauses` | D | EI |
-| 9 | `struct.headingPauseMs` | slider | 0–1500 ms, step 50 — **milliseconds, never "comma vs full stop"** | `0` | M | stage 5 → pause token | D | **EP** |
-| 10 | `struct.orderedLists` | select | `numeral` · `word` · `drop` | `numeral` — **shipped, not provisional** | C | `NormalizeOptions.orderedLists` → stage 6 | **W** | EI |
-| 11 | `struct.bulletMarker` | select | `drop` · `say-item` | `drop` | M | stage 6 | D | EI |
-| 12 | `struct.tableLeadIn` | text | string ≤ 60 chars | `"Table."` | M | stage 7 `tablesToRows` | D | EI |
-| 13 | `struct.tableHeaderRepeat` | select | `every-cell` · `row-start` · `first-row-only` · `never` | `every-cell` | C | stage 7 | D | EI |
-| 14 | `struct.tableFirstCellHeader` | toggle | on · off | off | M | stage 7 | D | EI |
+| 8 | `struct.headingCue` | select | `none` · `level-word` · `prefix-word` · `pause-only` | `none` | C | stage 6 `headingsToPauses` | D | EI |
+| 9 | `struct.headingPauseMs` | slider | 0–1500 ms, step 50 — **milliseconds, never "comma vs full stop"** | `0` | M | stage 6 → pause token | D | **EP** |
+| 10 | `struct.orderedLists` | select | `numeral` · `word` · `drop` | `numeral` — **shipped, not provisional** | C | `NormalizeOptions.orderedLists` → stage 7 | **W** | EI |
+| 11 | `struct.bulletMarker` | select | `drop` · `say-item` | `drop` | M | stage 7 | D | EI |
+| 12 | `struct.tableLeadIn` | text | string ≤ 60 chars | `"Table."` | M | stage 8 `tablesToRows` | D | EI |
+| 13 | `struct.tableHeaderRepeat` | select | `every-cell` · `row-start` · `first-row-only` · `never` | `every-cell` | C | stage 8 | D | EI |
+| 14 | `struct.tableFirstCellHeader` | toggle | on · off | off | M | stage 8 | D | EI |
 
 ### Panel C — How names, paths and identifiers are spoken (9)
 
@@ -831,27 +834,27 @@ settling any of them.
 
 | # | Control | Type | Legal values | Default (provisional) | Tier | Feeds | Class | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 15 | `path.style` | select | `spoken` · `terse` · `verbatim` | `spoken` | C | `NormalizeOptions.pathStyle` → stage 8 `speakFilePaths` | **W** | EI |
-| 16 | `path.extensionStyle` | select | `word-last` · `word-first` · `raw-last` · `omit` | `word-last` | C | `NormalizeOptions.extensionStyle` → stage 8 | **W** | EI |
-| 17 | `path.namePhrase` | template (`{name}`) | ≤ 60 chars | `"file named {name}"` | M | stage 8 | D | EI |
-| 18 | `path.folderPhrase` | template (`{folders}`) | ≤ 60 chars | `"in folder {folders}"` | M | stage 8 | D | EI |
-| **19** | **`path.depthPolicy`** — Q42's option space | select | `full` · `last-n` · `first-n` · `filename-only` · `filename-then-location` · `elide-middle` | **unset — the listener's** | C | stage 8 | D | EI |
-| 20 | `path.depthN` | slider | 1–8 | **unset — the listener's** | C | stage 8 | D | EI |
-| 21 | `path.extensionWords` | key/value editor | add · remove · edit; 32 rows today, unknown suffixes fall to "dot x y z" | the shipped table | M | stage 8 | D | EI |
-| **22** | **`ident.style`** — Q40's option space | select | `verbatim` · `underscore-pause` · `split-words` · `split-and-announce` · `spell-leading-underscore` | **unset — the listener's**; today's behaviour is `verbatim` | C | stages 2 + 9 | D | EI |
-| 23 | `ident.parens` | select | `keep` · `drop` · `say-call` | `keep` | M | stages 2 + 9 | D | EI |
+| 15 | `path.style` | select | `spoken` · `terse` · `verbatim` | `spoken` | C | `NormalizeOptions.pathStyle` → stage 9 `speakFilePaths` | **W** | EI |
+| 16 | `path.extensionStyle` | select | `word-last` · `word-first` · `raw-last` · `omit` | `word-last` | C | `NormalizeOptions.extensionStyle` → stage 9 | **W** | EI |
+| 17 | `path.namePhrase` | template (`{name}`) | ≤ 60 chars | `"file named {name}"` | M | stage 9 | D | EI |
+| 18 | `path.folderPhrase` | template (`{folders}`) | ≤ 60 chars | `"in folder {folders}"` | M | stage 9 | D | EI |
+| **19** | **`path.depthPolicy`** — Q42's option space | select | `full` · `last-n` · `first-n` · `filename-only` · `filename-then-location` · `elide-middle` | **unset — the listener's** | C | stage 9 | D | EI |
+| 20 | `path.depthN` | slider | 1–8 | **unset — the listener's** | C | stage 9 | D | EI |
+| 21 | `path.extensionWords` | key/value editor | add · remove · edit; 32 rows today, unknown suffixes fall to "dot x y z" | the shipped table | M | stage 9 | D | EI |
+| **22** | **`ident.style`** — Q40's option space | select | `verbatim` · `underscore-pause` · `split-words` · `split-and-announce` · `spell-leading-underscore` | **unset — the listener's**; today's behaviour is `verbatim` | C | stages 4 + 10 | D | EI |
+| 23 | `ident.parens` | select | `keep` · `drop` · `say-call` | `keep` | M | stages 4 + 10 | D | EI |
 
-Row 22 must not fight stage 9: `stripMarkdownMarkers` deliberately preserves dunders and leading
+Row 22 must not fight stage 10: `stripMarkdownMarkers` deliberately preserves dunders and leading
 underscores so that `ident.style` is the only place deciding what an underscore sounds like.
 
 ### Panel D — Numbers and units (4)
 
 | # | Control | Type | Legal values | Default (provisional) | Tier | Feeds | Class | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 24 | `num.expandIntegers` | toggle | on · off | on | C | `NormalizeOptions.expandNumbers` (shared with 25 today — FR-017) → stage 13 | **W** | EI |
-| 25 | `num.expandUnits` | toggle | on · off | on | C | same field as 24 today → stage 12 | **W** | EI |
-| 26 | `num.unitWords` | key/value editor | 11 rows today | the shipped table | M | stage 12 | D | EI |
-| 27 | `num.decimals` | select | `engine` · `words` | `engine` | M | stage 13 | D | **EP** |
+| 24 | `num.expandIntegers` | toggle | on · off | on | C | `NormalizeOptions.expandNumbers` (shared with 25 today — FR-017) → stage 14 | **W** | EI |
+| 25 | `num.expandUnits` | toggle | on · off | on | C | same field as 24 today → stage 13 | **W** | EI |
+| 26 | `num.unitWords` | key/value editor | 11 rows today | the shipped table | M | stage 13 | D | EI |
+| 27 | `num.decimals` | select | `engine` · `words` | `engine` | M | stage 14 | D | **EP** |
 
 Rows 24 and 25 are the fix for one flag gating two behaviours: a listener who wants
 "fifty two milliseconds" but numeral-shaped counts cannot have it today. **The split must land in

@@ -159,7 +159,7 @@ Mechanics that matter:
 
 ### 3.1 `packages/core/` — pure logic, zero dependencies
 
-- `normalizer/` — 15 transforms in a fixed order (2 conditional), options object, one exported `normalize(md, opts): string`. Planned as 11; grew to 15 through M10.
+- `normalizer/` — 16 transforms in a fixed order (2 conditional), options object, one exported `normalize(md, opts): string`. Planned as 11; grew to 15 through M10, and to 16 when J21 added `stripHtmlComments` at stage 2.
 - `chunker/` — `SentenceBoundaryDetector` with `addText(chunk)` / `finish()`, the boundary ladder, the
   abbreviation table, and the first-sentence-alone flag.
 - `queue/` — generation-tagged playback queue; barge-in clears, voice-switch preserves.

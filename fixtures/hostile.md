@@ -9,7 +9,7 @@ Here is the shape of the pipeline, which is the part I want you to look at:
 
 ┌──────────────┐     ┌───────────────┐     ┌──────────────┐
 │  transcript  │ ──▶ │  normalizer   │ ──▶ │  synthesizer │
-│   watcher    │     │  (15 stages)  │     │   (Piper)    │
+│   watcher    │     │  (16 stages)  │     │   (Piper)    │
 └──────────────┘     └───────────────┘     └──────────────┘
        │                                          │
        └────────────── barge-in ──────────────────┘

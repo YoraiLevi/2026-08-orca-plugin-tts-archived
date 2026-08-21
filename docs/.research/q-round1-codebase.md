@@ -6,6 +6,11 @@ hidden-preference audit the M11 design round needs.
 No source file was modified. Every claim carries `path:line`.
 **Date:** 2026-08-21. Working tree at `c8b6fdc`, plus one untracked discussion file.
 
+> **Stage numbers here are pre-J21 and are left as written.** This document is a dated record.
+> On 2026-08-21 `stripHtmlComments` was inserted as stage **2**, making the pipeline **16**
+> stages, so every stage number of 2 or higher below is one lower than the pipeline's today.
+> The live numbering lives in `normalize()`'s call list and in `scripts/voice-lab.mjs` `STAGES`.
+
 ---
 
 ## Q22 — the complete `NormalizeOptions` contract

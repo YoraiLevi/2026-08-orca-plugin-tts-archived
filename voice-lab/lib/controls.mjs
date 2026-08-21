@@ -12,10 +12,10 @@
 // two copies drift.
 
 export const STAGES = [
-  'stripFencedCode', 'stripInlineCode', 'expandMarkdownLinks', 'stripUrls', 'headingsToPauses',
-  'listItemsToSentences', 'tablesToRows', 'speakFilePaths', 'stripMarkdownMarkers',
-  'speakKeyGlyphs', 'stripEmoji', 'expandUnits', 'expandNumbers', 'collapseWhitespace',
-  'tidyPunctuation'
+  'stripFencedCode', 'stripHtmlComments', 'stripInlineCode', 'expandMarkdownLinks', 'stripUrls',
+  'headingsToPauses', 'listItemsToSentences', 'tablesToRows', 'speakFilePaths',
+  'stripMarkdownMarkers', 'speakKeyGlyphs', 'stripEmoji', 'expandUnits', 'expandNumbers',
+  'collapseWhitespace', 'tidyPunctuation'
 ]
 
 // Stages nothing in the control surface governs. 004 section 6 "What is deliberately absent":
@@ -24,12 +24,15 @@ export const STAGES = [
 //
 // 004 disagrees with itself about stage 9, and this list resolves it. Section 4's ladder wireframe
 // uses `stripMarkdownMarkers` as the canonical "fixed by design" example, while rows 22 and 23 of
-// section 6 both name "stages 2 + 9" in their Feeds column — and section 6 goes on to say WHY:
-// "stage 9 keeps [underscores] intact so that [ident.style] can" decide what one sounds like.
-// A stage that two controls feed is not a stage with no control, so 9 is not on this list. The
+// section 6 both name "stages 2 + 9" (now 3 + 10) in their Feeds column — and section 6 goes on to say WHY:
+// "stage 9" (now 10) "keeps [underscores] intact so that [ident.style] can" decide what one sounds like.
+// A stage that two controls feed is not a stage with no control, so 10 is not on this list. The
 // ladder still renders "no change" for it on any fixture it did not touch, which is what the
 // wireframe was actually showing.
-export const FIXED_BY_DESIGN_STAGES = [3, 10, 14, 15]
+export const FIXED_BY_DESIGN_STAGES = [2, 4, 11, 15, 16]
+// J21 added stage 2, `stripHtmlComments`, and it joins this list: no control governs it,
+// because whether an HTML comment is spoken is not taste. The other four are the old
+// 3/10/14/15 renumbered by that insert.
 
 export const PANELS = [
   { id: 'A', key: 'omit', title: 'What gets left out', short: 'WHAT GETS LEFT OUT' },
@@ -56,112 +59,112 @@ export const CONTROLS = [
     label: 'What a code block tells you', help: 'Whether the language and the line count are named in the announcement.',
     kind: 'multi', values: ['language', 'lineCount'], words: { language: 'the language', lineCount: 'the line count' },
     default: [], owner: 'normalize', settingsId: 'normalize.codeBlockDetail', wire: null },
-  { row: 4, id: 'omit.inlineCode', panel: 'A', tier: 'more', tag: 'EI', stages: [2],
+  { row: 4, id: 'omit.inlineCode', panel: 'A', tier: 'more', tag: 'EI', stages: [3],
     label: 'How inline code is said', help: 'Backticked code inside a sentence: stripped to its text, read verbatim, or announced.',
     ...sel(['strip', 'verbatim', 'announce']), words: { strip: 'stripped', verbatim: 'read as written', announce: 'announced' },
     default: 'strip', owner: 'normalize', settingsId: 'normalize.inlineCode', wire: null },
-  { row: 5, id: 'omit.urls', panel: 'A', tier: 'common', tag: 'EI', stages: [4],
+  { row: 5, id: 'omit.urls', panel: 'A', tier: 'common', tag: 'EI', stages: [5],
     label: 'How a link is said', help: 'What you hear where a URL was. A link that vanishes with no signal is the loss this control exists for.',
     ...sel(['host-phrase', 'host-and-path', 'label-only', 'drop-silent']),
     words: { 'host-phrase': 'the host, in a phrase', 'host-and-path': 'the host and the path', 'label-only': 'the link text only', 'drop-silent': 'dropped in silence' },
     default: 'host-phrase', owner: 'normalize', settingsId: 'normalize.urls', wire: null },
-  { row: 6, id: 'omit.urlPhrase', panel: 'A', tier: 'more', tag: 'EI', stages: [4],
+  { row: 6, id: 'omit.urlPhrase', panel: 'A', tier: 'more', tag: 'EI', stages: [5],
     label: 'What a link is called', help: 'The phrase spoken for a link. {host} and {path} are filled in.',
     kind: 'template', maxLength: 120, default: 'a link to {host}',
     owner: 'announce', settingsId: 'announce.urlPhrase', wire: null },
-  { row: 7, id: 'omit.emoji', panel: 'A', tier: 'common', tag: 'EI', stages: [11],
+  { row: 7, id: 'omit.emoji', panel: 'A', tier: 'common', tag: 'EI', stages: [12],
     label: 'How an emoji is handled', help: 'Emoji vanish with no signal today, while code blocks and links get one. Same loss, opposite treatment.',
     ...sel(['silent', 'announce-count', 'name']),
     words: { silent: 'dropped in silence', 'announce-count': 'counted aloud', name: 'named' },
     default: 'silent', owner: 'normalize', settingsId: 'normalize.emoji', wire: null },
 
   // ── Panel B — how structure is spoken ─────────────────────────────────────────────────
-  { row: 8, id: 'struct.headingCue', panel: 'B', tier: 'common', tag: 'EI', stages: [5],
+  { row: 8, id: 'struct.headingCue', panel: 'B', tier: 'common', tag: 'EI', stages: [6],
     label: 'How a heading is marked', help: 'All six heading levels collapse to nothing today.',
     ...sel(['none', 'level-word', 'prefix-word', 'pause-only']),
     words: { none: 'not marked', 'level-word': 'named by level', 'prefix-word': 'given a prefix word', 'pause-only': 'a pause only' },
     default: 'none', owner: 'normalize', settingsId: 'normalize.headingCue', wire: null },
-  { row: 9, id: 'struct.headingPauseMs', panel: 'B', tier: 'more', tag: 'EP', stages: [5],
+  { row: 9, id: 'struct.headingPauseMs', panel: 'B', tier: 'more', tag: 'EP', stages: [6],
     label: 'How long a heading pauses', help: 'Milliseconds, never "comma versus full stop" — a number survives the arrival of SSML; a punctuation mark does not.',
     kind: 'int', range: { min: 0, max: 1500, step: 50 }, unit: 'ms', default: 0,
     owner: 'unassigned', settingsId: 'normalize.headingPauseMs', wire: null },
-  { row: 10, id: 'struct.orderedLists', panel: 'B', tier: 'common', tag: 'EI', stages: [6],
+  { row: 10, id: 'struct.orderedLists', panel: 'B', tier: 'common', tag: 'EI', stages: [7],
     label: 'How a numbered list is said', help: 'A numbered item can keep its numeral, become an ordinal word, or lose its number.',
     ...sel(['numeral', 'word', 'drop']),
     words: { numeral: 'by numeral, one, alpha', word: 'by word, first, alpha', drop: 'without the number' },
     default: 'numeral', owner: 'normalize', settingsId: 'normalize.orderedLists', wire: 'NormalizeOptions.orderedLists' },
-  { row: 11, id: 'struct.bulletMarker', panel: 'B', tier: 'more', tag: 'EI', stages: [6],
+  { row: 11, id: 'struct.bulletMarker', panel: 'B', tier: 'more', tag: 'EI', stages: [7],
     label: 'How a bullet is said', help: 'Whether a bullet marker is dropped or spoken as "item".',
     ...sel(['drop', 'say-item']), words: { drop: 'dropped', 'say-item': 'spoken as item' },
     default: 'drop', owner: 'normalize', settingsId: 'normalize.bulletMarker', wire: null },
-  { row: 12, id: 'struct.tableLeadIn', panel: 'B', tier: 'more', tag: 'EI', stages: [7],
+  { row: 12, id: 'struct.tableLeadIn', panel: 'B', tier: 'more', tag: 'EI', stages: [8],
     label: 'What a table is called', help: 'The lead-in sentence spoken before a table.',
     kind: 'template', maxLength: 60, default: 'Table.',
     owner: 'announce', settingsId: 'announce.tableLeadIn', wire: null },
-  { row: 13, id: 'struct.tableHeaderRepeat', panel: 'B', tier: 'common', tag: 'EI', stages: [7],
+  { row: 13, id: 'struct.tableHeaderRepeat', panel: 'B', tier: 'common', tag: 'EI', stages: [8],
     label: 'How often a table header repeats', help: 'Table rows were "too quick, not obvious what I am hearing" until every value carried its header.',
     ...sel(['every-cell', 'row-start', 'first-row-only', 'never']),
     words: { 'every-cell': 'with every value', 'row-start': 'once a row', 'first-row-only': 'in the first row only', never: 'never' },
     default: 'every-cell', owner: 'normalize', settingsId: 'normalize.tableHeaderRepeat', wire: null },
-  { row: 14, id: 'struct.tableFirstCellHeader', panel: 'B', tier: 'more', tag: 'EI', stages: [7],
+  { row: 14, id: 'struct.tableFirstCellHeader', panel: 'B', tier: 'more', tag: 'EI', stages: [8],
     label: 'Whether the first cell is a header', help: 'Treat the leading cell of each row as that row\'s name rather than a bare value.',
     kind: 'bool', default: false, words: { true: 'treated as a header', false: 'spoken bare' },
     owner: 'normalize', settingsId: 'normalize.tableFirstCellHeader', wire: null },
 
   // ── Panel C — names, paths and identifiers ────────────────────────────────────────────
-  { row: 15, id: 'path.style', panel: 'C', tier: 'common', tag: 'EI', stages: [8],
+  { row: 15, id: 'path.style', panel: 'C', tier: 'common', tag: 'EI', stages: [9],
     label: 'How a path is said', help: 'Paths "made no sense whatsoever" read raw. This is the shape of the repair.',
     ...sel(['spoken', 'terse', 'verbatim']),
     words: { spoken: 'spoken in full', terse: 'terse', verbatim: 'read as written' },
     default: 'spoken', owner: 'normalize', settingsId: 'normalize.pathStyle', wire: 'NormalizeOptions.pathStyle' },
-  { row: 16, id: 'path.extensionStyle', panel: 'C', tier: 'common', tag: 'EI', stages: [8],
+  { row: 16, id: 'path.extensionStyle', panel: 'C', tier: 'common', tag: 'EI', stages: [9],
     label: 'Where the file kind goes', help: 'The file kind was "garbled noise" in front of the name, and wanted to come last.',
     ...sel(['word-last', 'word-first', 'raw-last', 'omit']),
     words: { 'word-last': 'kind last, as a word', 'word-first': 'kind first, as a word', 'raw-last': 'kind last, as written', omit: 'not said at all' },
     default: 'word-last', owner: 'normalize', settingsId: 'normalize.extensionStyle', wire: 'NormalizeOptions.extensionStyle' },
-  { row: 17, id: 'path.namePhrase', panel: 'C', tier: 'more', tag: 'EI', stages: [8],
+  { row: 17, id: 'path.namePhrase', panel: 'C', tier: 'more', tag: 'EI', stages: [9],
     label: 'What a file is called', help: 'The phrase that introduces a file name. {name} is filled in.',
     kind: 'template', maxLength: 60, default: 'file named {name}',
     owner: 'announce', settingsId: 'announce.pathNamePhrase', wire: null },
-  { row: 18, id: 'path.folderPhrase', panel: 'C', tier: 'more', tag: 'EI', stages: [8],
+  { row: 18, id: 'path.folderPhrase', panel: 'C', tier: 'more', tag: 'EI', stages: [9],
     label: 'What a folder is called', help: 'The phrase that introduces the folders. {folders} is filled in.',
     kind: 'template', maxLength: 60, default: 'in folder {folders}',
     owner: 'announce', settingsId: 'announce.pathFolderPhrase', wire: null },
-  { row: 19, id: 'path.depthPolicy', panel: 'C', tier: 'common', tag: 'EI', stages: [8],
+  { row: 19, id: 'path.depthPolicy', panel: 'C', tier: 'common', tag: 'EI', stages: [9],
     label: 'How much of the folder', help: 'Four folders of flat word list, and by the third you have lost the first. This is Q41\'s option space; which one is the default is yours.',
     ...sel(['full', 'last-n', 'first-n', 'filename-only', 'filename-then-location', 'elide-middle']),
     words: { full: 'the whole path', 'last-n': 'the last folders', 'first-n': 'the first folders', 'filename-only': 'the file name only', 'filename-then-location': 'the name, then where it is', 'elide-middle': 'the ends, with the middle elided' },
     default: 'full', owner: 'normalize', settingsId: 'normalize.pathDepthPolicy', wire: null },
-  { row: 20, id: 'path.depthN', panel: 'C', tier: 'common', tag: 'EI', stages: [8],
+  { row: 20, id: 'path.depthN', panel: 'C', tier: 'common', tag: 'EI', stages: [9],
     label: 'How many folders', help: 'How many folders the policy above keeps.',
     kind: 'int', range: { min: 1, max: 8, step: 1 }, unit: 'folders', default: 2,
     owner: 'normalize', settingsId: 'normalize.pathDepthN', wire: null },
-  { row: 21, id: 'path.extensionWords', panel: 'C', tier: 'more', tag: 'EI', stages: [8],
+  { row: 21, id: 'path.extensionWords', panel: 'C', tier: 'more', tag: 'EI', stages: [9],
     label: 'What each file kind is called', help: 'The suffix-to-word table. An unknown suffix is spelled out.',
     kind: 'map', default: {}, owner: 'normalize', settingsId: 'normalize.extensionWords', wire: null },
-  { row: 22, id: 'ident.style', panel: 'C', tier: 'common', tag: 'EI', stages: [2, 9],
+  { row: 22, id: 'ident.style', panel: 'C', tier: 'common', tag: 'EI', stages: [3, 10],
     label: 'How an identifier is said', help: 'Underscore flush underscore buffer is spoken raw today. This is Q39\'s option space; the default is yours.',
     ...sel(['verbatim', 'underscore-pause', 'split-words', 'split-and-announce', 'spell-leading-underscore']),
     words: { verbatim: 'as written', 'underscore-pause': 'with a pause at each underscore', 'split-words': 'as separate words', 'split-and-announce': 'as words, announced as a function', 'spell-leading-underscore': 'with the leading underscore spoken' },
     default: 'verbatim', owner: 'normalize', settingsId: 'normalize.identStyle', wire: null },
-  { row: 23, id: 'ident.parens', panel: 'C', tier: 'more', tag: 'EI', stages: [2, 9],
+  { row: 23, id: 'ident.parens', panel: 'C', tier: 'more', tag: 'EI', stages: [3, 10],
     label: 'How a call\'s brackets are said', help: 'What happens to the parentheses after a function name.',
     ...sel(['keep', 'drop', 'say-call']), words: { keep: 'kept', drop: 'dropped', 'say-call': 'spoken as a call to' },
     default: 'keep', owner: 'normalize', settingsId: 'normalize.identParens', wire: null },
 
   // ── Panel D — numbers and units ──────────────────────────────────────────────────────
-  { row: 24, id: 'num.expandIntegers', panel: 'D', tier: 'common', tag: 'EI', stages: [13],
+  { row: 24, id: 'num.expandIntegers', panel: 'D', tier: 'common', tag: 'EI', stages: [14],
     label: 'Whether numbers become words', help: 'One flag gates both this and units today, so "fifty two milliseconds" with numeral-shaped counts is unreachable. Split here.',
     kind: 'bool', default: true, words: { true: 'spoken as words', false: 'left as numerals' },
     owner: 'normalize', settingsId: 'normalize.expandIntegers', wire: 'NormalizeOptions.expandNumbers' },
-  { row: 25, id: 'num.expandUnits', panel: 'D', tier: 'common', tag: 'EI', stages: [12],
+  { row: 25, id: 'num.expandUnits', panel: 'D', tier: 'common', tag: 'EI', stages: [13],
     label: 'Whether units become words', help: '"52 ms was odd to hear" — units are expanded before the number.',
     kind: 'bool', default: true, words: { true: 'spoken as words', false: 'left as symbols' },
     owner: 'normalize', settingsId: 'normalize.expandUnits', wire: null },
-  { row: 26, id: 'num.unitWords', panel: 'D', tier: 'more', tag: 'EI', stages: [12],
+  { row: 26, id: 'num.unitWords', panel: 'D', tier: 'more', tag: 'EI', stages: [13],
     label: 'What each unit is called', help: 'The symbol-to-word table for units.',
     kind: 'map', default: {}, owner: 'normalize', settingsId: 'normalize.unitWords', wire: null },
-  { row: 27, id: 'num.decimals', panel: 'D', tier: 'more', tag: 'EP', stages: [13],
+  { row: 27, id: 'num.decimals', panel: 'D', tier: 'more', tag: 'EP', stages: [14],
     label: 'How a decimal is said', help: 'Hand three point one four to the engine, or say it in words.',
     ...sel(['engine', 'words']), words: { engine: 'left to the engine', words: 'spoken as words' },
     default: 'engine', owner: 'normalize', settingsId: 'normalize.decimals', wire: null },
