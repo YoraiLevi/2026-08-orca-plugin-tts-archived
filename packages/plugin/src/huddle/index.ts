@@ -21,7 +21,10 @@ import { watch, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentStatusChanged } from '../adapter/index.js'
-import { decodeClaudeLine, type DecodedReply } from './decoders.js'
+import {
+  decoderFor, detectTranscriptFormat, unreadableTranscriptMessage,
+  type DecodedReply, type TranscriptFormat
+} from './decoders.js'
 
 /** Minimal port, so huddle can be tested without a synthesizer. */
 export interface SpeechPort {
@@ -71,6 +74,7 @@ export class HuddleController {
   #stopTimer: NodeJS.Timeout | null = null
   #debounce: NodeJS.Timeout | null = null
   #primed = new Set<string>()   // per FILE: a new session must be primed too, or it dumps its backlog
+  #warnedUnreadable = new Set<string>()   // per FILE: say "cannot read this" once, not per change
 
   constructor(deps: HuddleDeps) { this.#deps = deps }
 
@@ -169,7 +173,15 @@ export class HuddleController {
 
   async #speakNew(file: string): Promise<void> {
     if (!this.#enabled) return
-    const replies = await this.#readReplies(file)
+    const { replies, format } = await this.#read(file)
+    if (format === 'unknown') {
+      // Once per session, not per file change: an unreadable transcript is touched constantly.
+      if (!this.#warnedUnreadable.has(file)) {
+        this.#warnedUnreadable.add(file)
+        this.#deps.notify(unreadableTranscriptMessage(file))
+      }
+      return
+    }
     const fresh = replies.filter((r) => !this.#spoken.has(r.id))
     if (fresh.length === 0) return
     for (const r of fresh) {
@@ -237,14 +249,29 @@ export class HuddleController {
   }
 
   async #readReplies(file: string): Promise<DecodedReply[]> {
+    return (await this.#read(file)).replies
+  }
+
+  /**
+   * Read a transcript with the decoder its own records call for.
+   *
+   * This used to call `decodeClaudeLine` unconditionally, so every non-Claude agent produced total
+   * silence while the plugin reported itself healthy and the panel claimed the format was
+   * supported (006 DC1). `format` is returned rather than swallowed so the caller can SAY that it
+   * could not read the file — "unreadable" and "nothing new" were previously the same empty array.
+   */
+  async #read(file: string): Promise<{ replies: DecodedReply[]; format: TranscriptFormat }> {
     let raw: string
-    try { raw = await readFile(file, 'utf8') } catch { return [] }
-    const out: DecodedReply[] = []
+    try { raw = await readFile(file, 'utf8') } catch { return { replies: [], format: 'unknown' } }
+    const format = detectTranscriptFormat(raw)
+    if (format === 'unknown') return { replies: [], format }
+    const decode = decoderFor(format === 'claude' ? 'claude' : 'codex')
+    const replies: DecodedReply[] = []
     for (const line of raw.split('\n')) {
       if (line.trim().length === 0) continue
-      const decoded = decodeClaudeLine(line)
-      if (decoded !== null) out.push(decoded)
+      const decoded = decode(line)
+      if (decoded !== null) replies.push(decoded)
     }
-    return out
+    return { replies, format }
   }
 }

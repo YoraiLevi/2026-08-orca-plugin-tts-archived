@@ -73,3 +73,59 @@ export function decodeGenericLine(line: string): DecodedReply | null {
 export function decoderFor(agent: AgentKind): (line: string) => DecodedReply | null {
   return agent === 'claude' || agent === 'openclaude' ? decodeClaudeLine : decodeGenericLine
 }
+
+/** What `detectTranscriptFormat` concluded. 'unknown' means we have no decoder for these records. */
+export type TranscriptFormat = 'claude' | 'generic' | 'unknown'
+
+/**
+ * Pick a decoder from the records themselves rather than assuming Claude.
+ *
+ * `#readReplies` called `decodeClaudeLine` unconditionally, so a Codex/Grok/omp record — which
+ * fails `rec['type'] !== 'assistant'` — decoded to null on every line and huddle was completely
+ * mute while `panel.html` claimed "supports Claude, Codex, Grok and omp". `decoderFor`,
+ * `decodeGenericLine` and `UNSUPPORTED_AGENTS` had ZERO non-test callers: P26's shape on a new
+ * wire (006 DC1/DC2, silent-failure site 55).
+ *
+ * Sniffed from the shape, not from a filename, because the filename is a uuid on every format we
+ * have seen. Scans a bounded prefix so a 40 MB transcript costs the same as a small one.
+ */
+export function detectTranscriptFormat(raw: string, maxLines = 200): TranscriptFormat {
+  let sawGeneric = false
+  let n = 0
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue
+    if (++n > maxLines) break
+    let rec: unknown
+    try { rec = JSON.parse(line) } catch { continue }
+    if (!isRecord(rec)) continue
+    // The Claude envelope is unmistakable: a `message` object carrying a content-block array.
+    if (isRecord(rec['message']) && Array.isArray((rec['message'] as Record<string, unknown>)['content'])) {
+      return 'claude'
+    }
+    // The simpler envelope: a role and a string body, on one flat record.
+    if ((typeof rec['role'] === 'string' || typeof rec['type'] === 'string') &&
+        (typeof rec['content'] === 'string' || typeof rec['text'] === 'string')) {
+      sawGeneric = true
+    }
+  }
+  return sawGeneric ? 'generic' : 'unknown'
+}
+
+/**
+ * The honest sentence for a transcript we cannot decode, spoken aloud once per session.
+ *
+ * Silence and "the agent has not answered yet" are indistinguishable to a listener, which is the
+ * S2 failure this whole document class is about. Saying so is worse than reading the reply and far
+ * better than saying nothing.
+ *
+ * `UNSUPPORTED_AGENTS` finally has a caller: when the transcript path names an agent we know we
+ * cannot serve, the sentence names it too, so the listener learns WHICH tool is unreadable rather
+ * than being told a format they cannot see is wrong.
+ */
+export function unreadableTranscriptMessage(file: string): string {
+  const segments = file.toLowerCase().split(/[/\\.]+/)
+  const named = UNSUPPORTED_AGENTS.find((a) => segments.includes(a))
+  return named === undefined
+    ? "Huddle cannot read this agent's transcript, so its replies will not be spoken."
+    : `Huddle cannot read ${named}'s transcript, so its replies will not be spoken.`
+}

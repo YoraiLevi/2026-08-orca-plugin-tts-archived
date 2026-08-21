@@ -198,3 +198,81 @@ describe('C5 the status/toggle/unfollow controls do not delete the queue', () =>
 })
 
 export { boot, settle, writeTranscript, appendReplies }
+
+/** A Codex/Grok/omp-style transcript: a flat record with a role and a string body. */
+async function writeGenericTranscript(root: string, project: string, name: string, texts: string[]): Promise<string> {
+  const dir = join(root, project)
+  await mkdir(dir, { recursive: true })
+  const file = join(dir, `${name}.jsonl`)
+  await writeFile(file, texts.map((text, i) => JSON.stringify({
+    role: 'assistant', id: `${name}-${i}`, content: text
+  })).join('\n') + '\n')
+  return file
+}
+
+/**
+ * 006 section 20 finding 3 / DC1 — huddle silently served nothing to every non-Claude agent.
+ *
+ * `#readReplies` called `decodeClaudeLine` unconditionally, so a Codex record decoded to null on
+ * every line and the plugin was completely mute while `panel.html` said the format was supported.
+ * `decoderFor`, `decodeGenericLine` and `UNSUPPORTED_AGENTS` had zero non-test callers: P26's shape
+ * on a new wire.
+ */
+describe('DC1 huddle reads non-Claude transcripts, or says it cannot', () => {
+  it('a Codex transcript is spoken, through the real HuddleController', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-main-'))
+    const worktree = join(root, 'wt')
+    const project = worktree.replace(/[/\\:]/g, '-')
+    const file = await writeGenericTranscript(root, project, 'codexsess', ['primed already'])
+    const h = await boot(root)
+
+    await h.run('read-aloud.toggle-huddle')
+    h.agentDone(worktree)
+    await settle(20)
+    h.provider.synthesized.length = 0
+
+    const { appendFile } = await import('node:fs/promises')
+    await appendFile(file, JSON.stringify({
+      role: 'assistant', id: 'codexsess-new', content: 'the codex agent replied here'
+    }) + '\n')
+    await settle(90)
+
+    expect(h.spoken(), 'a Codex reply produced silence').toContain('the codex agent replied here')
+  })
+
+  it('CONTROL: the Claude decoder finds nothing in that same file, so the test above can fail', async () => {
+    // Verify by effect needs a case that proves the assertion is capable of failing. This is the
+    // pre-fix behaviour, asserted directly against the decoder that used to be hardcoded.
+    const { decodeClaudeLine, decodeGenericLine, detectTranscriptFormat } =
+      await import('./huddle/decoders.js')
+    const line = JSON.stringify({ role: 'assistant', id: 'x', content: 'the codex agent replied here' })
+    expect(decodeClaudeLine(line), 'the wrong decoder silently returns null — this is DC1')
+      .toBeNull()
+    expect(decodeGenericLine(line)?.text).toBe('the codex agent replied here')
+    expect(detectTranscriptFormat(line)).toBe('generic')
+  })
+
+  it('an undecodable transcript is announced ALOUD, once, rather than producing silence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-main-'))
+    const worktree = join(root, 'wt')
+    const project = worktree.replace(/[/\\:]/g, '-')
+    const dir = join(root, project)
+    await mkdir(dir, { recursive: true })
+    // A shape no decoder we ship understands.
+    const file = join(dir, 'gemini.jsonl')
+    await writeFile(file, JSON.stringify({ kind: 'turn', parts: [{ blob: 'x' }] }) + '\n')
+
+    const h = await boot(root)
+    await h.run('read-aloud.toggle-huddle')
+    h.agentDone(worktree)
+    await settle(90)
+
+    const spoken = h.spoken()
+    expect(spoken, 'huddle went silent instead of saying it could not read the file')
+      .toMatch(/cannot read/i)
+    // UNSUPPORTED_AGENTS finally has a caller: the sentence names the tool, not just the format.
+    expect(spoken).toContain('gemini')
+    // Once per session, not once per file change.
+    expect(spoken.match(/cannot read/gi)?.length).toBe(1)
+  })
+})
