@@ -3,6 +3,14 @@
 **Updated:** 2026-08-21 · **Phase:** v1 shipped to a public repo · **Branch:** `main` ·
 **Repo:** https://github.com/YoraiLevi/orca-plugin-tts
 
+> **Amended 2026-08-21 — forced by the latency measurement pass** (`docs/.research/latency-measurements.md`).
+> The `927 ms` first-audio figure previously printed in the audit table below was **unsupported and
+> unreproducible**: it came from an unrecorded single run of `scripts/speak-e2e.mjs`, which measures
+> neither end of the budget and does not execute today, and it sits **below the minimum of all twenty
+> measured samples**. Every performance number in this file now carries an R006 label
+> (`[measured-here]` with a run count, `[documented]` with a citation, `[claimed]` when nobody has run
+> it). See also PITFALLS **P32** — the inter-sentence gap is the audio device, not the process spawn.
+
 ## One-paragraph status
 
 v1 is built, tested, published, and green on CI across macOS, Linux and Windows. 106 tests, lint
@@ -15,12 +23,12 @@ two Definition-of-Done items are unmet and named below.
 | Criterion | State |
 |---|---|
 | No account, key, or network by default | ✅ |
-| Hotkey speaks clipboard; second press stops < 50 ms | ✅ cancel measured at 1 ms |
+| Hotkey speaks clipboard; second press stops < 50 ms | ⚠️ **kill-to-exit ~3 ms** `[measured-here]` (`afplay`, n=10 ×2, `docs/.research/latency-measurements.md` 1.5). That is the *process dying*, not audio stopping; **drain is unmeasured**. And the contract gate asserts `<= 1000 ms`, not 50 (`packages/providers/src/contract.ts:69`) — a check that could not have failed. |
 | Huddle speaks replies, never thinking, never tool noise | ✅ fixture-asserted |
 | CI green on three OSes | ✅ run 32403931195 |
 | README documents limitations verbatim | ✅ |
 | Memory files reconcile | ✅ |
-| **First audio < 500 ms** | ❌ **927 ms on the OS synth.** Tracked: repo issue #1. Fixed by M9. |
+| **First audio < 500 ms** *(R4.2 scores the **default local backend**; the default is Piper. The row below scores the **OS-synth fallback**, which is not what the budget is written against.)* | ❌ **On the OS synth: between 1,112 ms and 2,017 ms** `[measured-here]` (p50 lower/upper bound, n=10 ×2, `docs/.research/latency-measurements.md` 1.2). Bracket, not midpoint — nothing in userland can see the first sample leave the DAC without a loopback or CoreAudio probe. **M9 is necessary but not sufficient:** `generate()` alone is p50 1,054–1,163 ms `[measured-here]`, 2.1× the whole budget with playback at zero (1.3), so R4.2 on this path needs Piper as well. Tracked: repo issue #1. |
 | **A human installs it and hears an agent reply** | ✅ **VERIFIED 2026-08-21.** Huddle mode spoke a live reply in a real ORCA session, on time and without repeating. |
 
 ## Open work
@@ -57,7 +65,7 @@ two Definition-of-Done items are unmet and named below.
 
 ## Known gaps, named not hidden
 
-1. ~970 ms between sentences (one player process per chunk) — M9 fixes it.
+1. **~950 ms between sentences** `[measured-here]` (p50 950/937/897 ms, n=18 ×3, `docs/.research/latency-measurements.md` 1.1). **The cause is the audio device, not the process** — spawn is 2.3 ms of it, the temp file 0.33 ms, and ~893 ms is CoreAudio open/pre-roll/post-roll/teardown. M9 fixes it **only if it holds the device open across chunks**; pooling player processes would save 2 ms of 950 (PITFALLS P32).
 2. Correlation heuristic; two agents in one worktree → warns rather than guessing. PR #15640 fixes it.
 3. 5 of 14 agents (only those with transcript decoders).
 4. No editor selection; clipboard is the honest fallback.
@@ -67,7 +75,7 @@ two Definition-of-Done items are unmet and named below.
 
 Listening quality. It works; now find out where it sounds wrong. The obvious targets:
 - a reply dense with code, file paths and keyboard symbols (⌘⇧S currently goes to the engine raw)
-- the ~1 s gap between sentences (M9 removes it)
+- the ~950 ms gap between sentences `[measured-here]` (M9 removes it only by holding the device open — P32)
 - a very long reply — is queue-and-drop the right policy in practice?
 
 ## Reading order for a new agent

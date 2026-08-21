@@ -39,7 +39,7 @@ before designing anything.** Our ORCA plugin is a *host* for that design, not a 
 | R3.4 | Default needs **no account, no API key, no network** | Disqualifies Picovoice Orca, ElevenLabs, OpenAI, edge-tts |
 | R3.1/R3.2 | Backend is **configuration, not code**, behind a documented interface | Provider seam exists before the first engine |
 | R4.1 | **Sentence streaming required** — "POST → wait for whole paragraph → play" fails | Huddle mode must synthesize sentence 1 while the agent still types |
-| R4.2 | First audio **< ~500 ms** on the default local backend | |
+| R4.2 | First audio **< ~500 ms** on the default local backend | The **default local backend is Piper** (52–65 ms/sentence `[measured-here]`, P11). On the `say` fallback the budget is unreachable: `generate()` alone is p50 1,054–1,163 ms `[measured-here]` (n=9 ×2), 2.1× the whole budget with playback at zero. Score the two paths separately. |
 | R2.5 | Speech **interruptible** by a second chord | Two-sided cancel: stop the player AND the synthesizer |
 | — | **Two-process rule**: neural model load is seconds; a hotkey must not pay it per press | Resident warm service + thin client |
 | R5.2 | **Playback belongs to the client, not the synthesis service** | Providers emit PCM; a separate sink plays it |
@@ -96,18 +96,38 @@ and that was **wrong** — see below.
 
 ## Settled findings
 
+> **Amended 2026-08-21 — the latency measurement pass.** `docs/.research/latency-measurements.md` is
+> now the source of truth for every performance number in this project, and `pnpm bench:latency`
+> re-runs it (**silent by default**; `--audible` opens the audio device and will interrupt whoever is
+> at the machine). Three things it changed that are easy to get wrong again:
+> **(1)** the inter-sentence gap is the **audio device**, not the process spawn — PITFALLS **P32**;
+> **(2)** STATE.md's `927 ms` first audio was unsupported — the measured bracket is 1,112–2,017 ms
+> on the OS synth; **(3)** every latency number in this repo now carries an R006 label
+> (`[measured-here]` with a run count · `[documented]` with a citation · `[claimed]` when nobody has
+> run it). An unlabelled number in a table beside labelled ones is the failure mode that produced all
+> three.
+
+
 - **ORCA's plugin API cannot deliver agent reply text, selection, or audio-in-panel.** Verified,
   not merely undiscovered. See `orca-plugin-api.md` "Verdict". Plugin system is off by default.
 - **ORCA already ships first-party STT** (`src/main/speech/`, sherpa-onnx model catalog +
   downloader + cloud client + key store + Voice settings pane) and **zero TTS**. That is both the
   precedent to mirror and evidence that ORCA builds voice in the main process, not as a plugin.
-- **Default engine: Piper (VITS) via `sherpa-onnx-node`** — 52–65 ms/sentence measured, no
-  node-gyp, prebuilt binaries. `say` is the never-fails fallback only (its *empty-string spawn*
-  costs 414 ms). **Kokoro is a trap**: measured 16–25× slower than Piper, int8 slower than FP32.
+- **Default engine: Piper (VITS) via `sherpa-onnx-node`** — 52–65 ms/sentence `[measured-here]`
+  (P11), no node-gyp, prebuilt binaries. `say` is the never-fails fallback only: its *empty-string
+  spawn* costs 414 ms `[measured-here]` (5 runs, P10) and a **whole real sentence through
+  `generate()` costs p50 1,054–1,163 ms** `[measured-here]` (n=9 ×2,
+  `docs/.research/latency-measurements.md` 1.3) — so on the fallback the engine *is* the problem,
+  not only the spawn. **Kokoro is a trap**: 16–25× slower than Piper `[derived]` from P11, int8
+  slower than FP32.
 - **One dependency, `sherpa-onnx-node`, covers TTS + future STT + VAD + keyword spotting.**
 - **No preinstalled macOS binary accepts streaming PCM on stdin.** `afplay` refuses it and gives a
-  ~970 ms inter-sentence gap. The ways out are Web Audio in a renderer, a bundled sidecar, or a
-  Homebrew dependency we cannot assume. **This is the sharpest constraint in the project.**
+  **~950 ms inter-sentence gap** `[measured-here]` (p50 950/937/897 ms, n=18 ×3,
+  `docs/.research/latency-measurements.md` 1.1). **The gap is the audio device, not the process
+  spawn** — fork/exec is 2.3 ms of it and the temp file 0.33 ms; ~893 ms is CoreAudio open,
+  pre-roll, post-roll and teardown (PITFALLS **P32**). So the ways out are the ones that keep a
+  device open — Web Audio in a renderer, or a bundled sidecar — and *not* a faster or pooled
+  player. **This is the sharpest constraint in the project.**
 - **Barge-in is not "kill the player"** — it must cancel in-flight synthesis *and* flush buffered
   audio, or the synthesizer keeps producing speech for text the user already interrupted.
 - **Port buzz's `preprocess_for_tts`** (7 stages, no deps, fully tested) and **add the four rows
@@ -127,8 +147,12 @@ these without new evidence.
   never blocked on upstream — the block was on *display*, not on *control*.
 - **A panel CAN act today**, via `terminal.sendText`. Exactly three host methods are panel-callable
   and two of them mutate.
-- **Stop is pushed, never polled**, at p50 120 ms / p99 250 ms, failing CI above 400 ms. The panel
-  poll floor alone is 345 ms, so a polled Stop is double the budget by construction.
+- **Stop is pushed, never polled**, at p50 120 ms / p99 250 ms `[claimed]` — a target assembled
+  from four estimated segments, failing CI above 400 ms. The panel poll floor alone is 345 ms
+  `[derived]` (10,000/30 plus one watchdog slot), so a polled Stop is double the budget by
+  construction — **that** part is arithmetic over a documented rate limit, not an estimate. What is
+  measured on the Stop path is only `kill`-to-exit, ~3 ms `[measured-here]` (n=10 ×2); **audio
+  drain is unmeasured** — see `003` "Q13 — the Stop latency number".
 - **The spoken channel is a ladder**: a structural classifier that needs no agent cooperation is the
   floor and the deliverable; a `speak` fence is an enhancement on top. We never write to a user's
   `CLAUDE.md`.
