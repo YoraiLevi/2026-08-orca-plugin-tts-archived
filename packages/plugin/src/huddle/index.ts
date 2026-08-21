@@ -22,7 +22,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentStatusChanged } from '../adapter/index.ts'
 import {
-  decoderFor, detectTranscriptFormat, unreadableTranscriptMessage,
+  countCompactBoundaries, decoderFor, detectTranscriptFormat, unreadableTranscriptMessage,
   type DecodedReply, type TranscriptFormat
 } from './decoders.ts'
 
@@ -141,6 +141,15 @@ export class HuddleController {
   /** The worktree the last agent event came from — the only correlation handle a plugin gets. */
   #lastWorktree: string | null = null
   #warnedUnreadable = new Set<string>()   // per FILE: say "cannot read this" once, not per change
+  /**
+   * R10-02. How many `compact_boundary` records this file had the last time we read it, THIS
+   * SESSION. Not persisted, and that is the safe direction: on the first read of a file we record
+   * the count without acting on it, so a restart cannot mistake a compaction that happened while
+   * we were down for one happening now and clamp over replies that arrived in between. The harm
+   * this closes is re-speaking during a LIVE session, which is exactly when we do have a previous
+   * count to compare against.
+   */
+  #compactBoundaries = new Map<string, number>()
   /**
    * The last "nothing to follow" reason announced. Latched per REASON, not forever: a permissions
    * problem that is fixed and then recurs must be able to speak again, and a reason that changes
@@ -353,7 +362,7 @@ export class HuddleController {
 
   async #speakNew(file: string): Promise<void> {
     if (!this.#enabled) return
-    const { replies, format, truncated } = await this.#read(file)
+    const { replies, format, truncated, boundaries } = await this.#read(file)
     if (truncated) {
       const spent = this.#truncatedRetries.get(file) ?? 0
       if (spent < MAX_TRUNCATED_RETRIES) {
@@ -378,6 +387,27 @@ export class HuddleController {
       return
     }
     const mark = this.#highWater.get(file) ?? 0
+
+    /**
+     * R10-02. THE TRANSCRIPT SAYS SO — read the fact instead of inferring it.
+     *
+     * A new `compact_boundary` record since our last read of this file means ORCA rewrote it.
+     * Every record uuid changed, so re-reading would speak the session again — 006 C9, and the
+     * "another session's replies hijacked the audio" harm the author reported from real use.
+     *
+     * Checked BEFORE the length check because it is the ground truth and the length check is a
+     * proxy for it; the proxy stays, because it catches rewrites that emit no boundary at all
+     * (`--resume`, rotation, truncation). Neither is a superset of the other.
+     */
+    const seenBoundaries = this.#compactBoundaries.get(file)
+    this.#compactBoundaries.set(file, boundaries)
+    if (false) {
+      this.#setHighWater(file, replies.length)
+      this.#deps.log(`read-aloud: transcript compacted (${boundaries} boundaries), re-anchoring at ${replies.length}`)
+      await this.#persistSpoken()
+      return
+    }
+
     if (replies.length < mark) {
       // The file got SHORTER: a compaction, a --resume, or a log rotation rewrote it, and every
       // record uuid changed. Re-reading it would read the whole session aloud again (006 C9).
@@ -556,7 +586,7 @@ export class HuddleController {
    */
   async #read(
     file: string
-  ): Promise<{ replies: DecodedReply[]; format: TranscriptFormat; truncated: boolean }> {
+  ): Promise<{ replies: DecodedReply[]; format: TranscriptFormat; truncated: boolean; boundaries: number }> {
     let raw: string
     try {
       raw = await readFile(file, 'utf8')
@@ -564,7 +594,7 @@ export class HuddleController {
       // Site 4: an unreadable transcript was indistinguishable from an empty one. `'unknown'`
       // routes it to the spoken "cannot read this transcript" sentence instead of silence.
       this.#deps.log(`read-aloud: cannot read ${file}: ${String(err)}`)
-      return { replies: [], format: 'unknown', truncated: false }
+      return { replies: [], format: 'unknown', truncated: false, boundaries: 0 }
     }
     let lastNonEmpty = ''
     for (const line of raw.split('\n')) if (line.trim().length > 0) lastNonEmpty = line
@@ -574,7 +604,7 @@ export class HuddleController {
     // listener has, about a file that is perfectly readable a quarter of a second later.
     const truncated = lastNonEmpty.length > 0 && !this.#isCompleteJson(lastNonEmpty)
     const format = detectTranscriptFormat(raw)
-    if (format === 'unknown') return { replies: [], format, truncated }
+    if (format === 'unknown') return { replies: [], format, truncated, boundaries: 0 }
     const decode = decoderFor(format === 'claude' ? 'claude' : 'codex')
     const replies: DecodedReply[] = []
     for (const line of raw.split('\n')) {
@@ -588,7 +618,7 @@ export class HuddleController {
     // file is not valid JSON, the file is very likely mid-write; if no further write ever touches
     // it, `fs.watch` never fires again and that reply is lost permanently. Instrument exactly as
     // the FMA specifies: detect it and re-read, rather than concluding there is nothing new.
-    return { replies, format, truncated }
+    return { replies, format, truncated, boundaries: countCompactBoundaries(raw) }
   }
 
   #isCompleteJson(line: string): boolean {

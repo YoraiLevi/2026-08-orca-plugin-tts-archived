@@ -6,6 +6,93 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P40 — A test that arranges its precondition by out-running the system fails for reasons unrelated to the code, and the misdiagnosis is worse than the flake
+**Symptom:** two agents took clean readings in clean detached worktrees minutes apart and got
+**657/658** and **653/658**. Same commit, same command, different answer. Measured here at load
+average ~32, `packages/plugin/src/main.test.ts` passed **8 of 10** consecutive runs
+`[measured-here]`, failing with the test's own message:
+
+    C5 ... > status answers the question AND every reply it counted is still spoken
+      AssertionError: the queue had already drained; no depth to destroy
+      expected 'alpha reply one here bravo reply two …' not to contain 'charlie reply'
+
+**Cause:** the precondition was arranged by a **race the test had to win**. C5 asserts that a
+control (status, unfollow) does not destroy queued speech — a real accessibility property — so it
+needs the queue to still HAVE depth at the instant the control runs. It arranged that with
+`provider.delayMs = 150` and `await settle(70)`: a bet that three utterances at 150 ms each take
+longer to drain than seventy `setTimeout(r, 5)` turns take to return. On a quiet machine the bet
+wins. Under load a `setTimeout(5)` is not 5 ms, `settle()` spends seconds of wall clock, the queue
+drains before the control is invoked, and the assertion goes red **for scheduling, not for code**.
+Same shape, same file: the C1 provenance test at `delayMs = 200`.
+
+**The part that did real damage — the misdiagnosis.** One of these reds was attributed to *a peer's
+uncommitted work in the shared tree*, and then "cleared" by re-running it on a quiet machine and
+seeing green. **That verification could not have distinguished the two hypotheses.** A load-dependent
+flake and a peer's bad edit both go green when you re-run on an idle machine — the probe would have
+passed either way, so it was a ritual, not evidence, and the wrong cause went into the record. The
+question that was never asked is the one `verify by effect` names: *what result would have proved me
+wrong?* Here it is cheap — `git stash` the peer's change, or `git worktree add` at the same commit,
+and re-run **under the same load**. Change one variable at a time; a re-run that changes both the
+tree AND the machine's load measures neither.
+
+**Instead — control the drain, do not out-run it.**
+- Give the fake a **gate the test opens** rather than a delay the test hopes is long enough.
+  `RecordingProvider.hold()` blocks inside `generate()`; `SpeechService.#drain()` awaits
+  `#speakOne()` which awaits that generator, so the drain stops at utterance one and everything
+  behind it provably stays in `#pending` for as long as the test wants and no longer. The
+  precondition becomes a fact the test established, not a race it won.
+- Wait for a **condition**, not a duration. `until(predicate, what)` polls until the thing is true.
+  Paired with a gate this is sound in both directions: it cannot be satisfied early (the gate holds
+  it) and it cannot be missed late (it keeps waiting). `settle(n)` alone can be too SHORT on a quiet
+  machine as easily as it can be beaten on a busy one — both were live risks here.
+- Wait on an **effect the system emits**, not a proxy for it. `settle(20) // prime + watch
+  established` is a guess; `read-aloud: watching <file>` is a log line HuddleController emits only
+  after `#readReplies` has primed `#spoken` and `fs.watch` is up. The harness now keeps a log tape
+  so readiness is observed.
+- A backstop is **not** a budget. `until()` caps at 30 s and says so in its message: *"this is a
+  HANG, not slowness"*. It fires only when the condition will never be true. Contrast a 5,000 ms
+  vitest `testTimeout` on a test that shells out to a whole-repo checker — that IS a budget, and it
+  goes red on a slow machine while the code is perfect.
+- **Never fix a race with a longer sleep.** That converts a fast flake into a slow one and moves it
+  onto someone else's machine. The one legitimate use of a raised timeout is when the test is not
+  racing anything and the number is a hang-detector justified by a measured worst case — as with
+  `scripts/check-citations.test.mjs`, where the six tests that shell out to the whole-repo checker
+  carry `{ timeout: 20_000 }` against a measured worst case of ~1.8 s at load ~30 `[measured-here]`,
+  an 11× margin, while the sixteen tests that run on tiny temp fixtures carry none.
+
+**Verify by effect — and take the measurement in the FAILING condition, which is a busy machine.**
+Ten consecutive runs of `packages/plugin/src/main.test.ts`, load average ~17–33 `[measured-here]`:
+
+| | passes |
+|---|---|
+| before (`delayMs` + `settle`) | **8 / 10** |
+| after (gate + `until`) | **10 / 10** |
+
+A green run on a quiet machine proves nothing about either. **A suite count taken today means "the
+machine was quiet", not "the code is correct"** — never quote one without naming the load it was
+taken at.
+
+**And prove the fix did not remove the test's teeth.** A determinism fix that also blinds the test is
+worse than the flake. Each of the three was mutated back to the bug it guards and watched go red
+`[measured-here]`:
+
+| mutation in `main.ts` | red |
+|---|---|
+| `s.announce(parts, 'now')` → `s.speak(parts, 'replace')` | `status destroyed the queued reply "bravo reply"` |
+| unfollow's `announce(..., 'now')` → `speak(..., 'replace')` | `unfollow discarded replies the listener was waiting for` |
+| `resolveLabel: (id) => existsSync(id) ? … : null` → `(id) => sessionLabel(id)` | `provenance is never re-checked: expected … to match /has since ended/` |
+
+**The general shape, so it can be recognised elsewhere:** any test whose precondition is *"X has not
+finished yet"* is racing the scheduler unless something the test controls is holding X. Swept the
+suite for it; the sound ones all share one property — the wait can only be too LONG, never too
+short (`queue.test.ts` holds `cancelSynthesis` open with a promise the test resolves; the
+`maxQueued` and half-flushed-line assertions get MORE true the longer you wait). The one remaining
+genuine wall-clock assertion is `CANCEL_BUDGET_MS = 50` in `packages/providers/src/contract.ts`,
+and it is **correct as written** — there the number is the product requirement (R2.5 barge-in), not
+a test convenience, so it must never be raised to make a red go away. Measured 1–9 ms over 10 runs
+at load ~14–25 `[measured-here]`: a 5.5× margin, the thinnest in the suite. If it ever goes red,
+that is a finding about the machine or the code, not about the budget.
+
 ## P39 — Streaming made Stop able to land mid-request, and the cache silently stopped existing
 **Symptom:** the fix landed, the 13-chunk fixture got 23× faster, and the WARM path collapsed —
 p50 3,327 ms instead of 39 ms, with **20 of 20** "warm" trials issuing a `POST /speak`. FR-022, the

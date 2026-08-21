@@ -91,6 +91,49 @@ export function decoderFor(agent: AgentKind): (line: string) => DecodedReply | n
   return agent === 'claude' || agent === 'openclaude' ? decodeClaudeLine : decodeGenericLine
 }
 
+/**
+ * R10-02. ORCA WRITES THE COMPACTION DOWN; we were inferring it from file length.
+ *
+ * `{"type":"system","subtype":"compact_boundary"}` is emitted at the boundary — 3 occurrences in a
+ * 200-transcript census `[measured-here]` (019 R10-02). Nothing in this repo read `subtype`, so
+ * huddle detected a rewritten transcript only by "the reply count got SHORTER", and its own comment
+ * names the stake: *"a lost reply is recoverable, a replayed session is not"* — the
+ * "another session's replies hijacked the audio" harm on HANDOFF's listening-lessons table.
+ *
+ * The heuristic is strictly weaker than the fact. A compaction that leaves the decodable reply
+ * count equal or higher is invisible to it, and huddle then re-reads replies it has already spoken.
+ *
+ * This does NOT replace the length check, and that is a deliberate answer rather than caution.
+ * The two catch different things and neither is a superset:
+ *   - the BOUNDARY RECORD catches a compaction that did not shrink the decodable reply count,
+ *     which is exactly the case the length check cannot see;
+ *   - the LENGTH CHECK catches a rewrite that emits no boundary record at all — `--resume`, a log
+ *     rotation, a truncated or replaced file. ORCA writes `compact_boundary` for compaction, not
+ *     for those.
+ * Removing either one re-opens a hole, and `huddle.test.ts` holds one test per direction.
+ *
+ * Deliberately NOT folded into `DecodedReply`: `decodeClaudeLine` returning a third kind is
+ * R10-01's fix, it has a constraint of its own (the unknown-block-type allowlist is principle
+ * VIII's real defence and must not become a blocklist), and pinning R10-02 to it would make a
+ * one-line fact-read wait on a decoder redesign.
+ */
+export function isCompactBoundary(line: string): boolean {
+  let rec: unknown
+  try { rec = JSON.parse(line) } catch { return false }
+  if (!isRecord(rec)) return false
+  return rec['type'] === 'system' && rec['subtype'] === 'compact_boundary'
+}
+
+/** How many compaction boundaries this transcript currently contains. */
+export function countCompactBoundaries(raw: string): number {
+  let n = 0
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue
+    if (isCompactBoundary(line)) n++
+  }
+  return n
+}
+
 /** What `detectTranscriptFormat` concluded. 'unknown' means we have no decoder for these records. */
 export type TranscriptFormat = 'claude' | 'generic' | 'unknown'
 

@@ -381,3 +381,86 @@ describe('006 TT3 — a half-written final line is re-read, not concluded on', (
     c.dispose()
   })
 })
+
+/**
+ * R10-02 — the transcript STATES the compaction; huddle was inferring it from file length.
+ *
+ * ORCA writes `{"type":"system","subtype":"compact_boundary"}` at the boundary. Huddle detected a
+ * rewritten transcript only by "the decodable reply count got SHORTER", and its own comment names
+ * the stake: *"a lost reply is recoverable, a replayed session is not"* — the "another session's
+ * replies hijacked the audio" harm the author reported from real use.
+ *
+ * The two directions below are the whole finding. The first is the case the length check CANNOT
+ * see, and it is what makes reading the record worth doing. The second is the case the record
+ * cannot see, and it is why the length check stays.
+ */
+const boundary = (): string => JSON.stringify({ type: 'system', subtype: 'compact_boundary' })
+
+describe('R10-02 a compaction is read from the transcript, not inferred from its length', () => {
+  it('a compaction that does NOT shrink the reply count is still detected', async () => {
+    const { root, worktree, file } = await scaffold()
+    const speech = new FakeSpeech()
+    const h = boot(root, new MemoryStore(), speech)
+    h.toggle()
+    h.onAgentStatus({ worktreeId: `r::${worktree}`, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(20)
+
+    await appendFile(file, [record(1), record(2), record(3)].join('\n') + '\n')
+    await settle()
+    expect(speech.spoken, 'the first three replies were not spoken').toEqual(['reply 1', 'reply 2', 'reply 3'])
+
+    // ORCA compacts: it rewrites the file as a summary plus the re-emitted turns, every record
+    // carrying a NEW uuid. The decodable reply count goes UP, not down, so the "file got shorter"
+    // heuristic sees nothing — and the high-water mark then treats records 4 and 5 as new, which
+    // is the re-reading 006 C9 calls unrecoverable. This is the case the length check CANNOT see.
+    speech.spoken.length = 0
+    const rewritten = [
+      boundary(),
+      ...[11, 12, 13, 14, 15].map((i) => record(i)),
+    ].join('\n') + '\n'
+    await writeFile(file, rewritten)
+    await settle()
+
+    expect(speech.spoken, 'the rewritten session was read aloud again').toEqual([])
+  })
+
+  it('CONTROL: a rewrite with NO boundary record is still caught by the length check', async () => {
+    // `--resume`, a log rotation and a truncation emit no `compact_boundary`. If reading the record
+    // had replaced the length check rather than joining it, this would speak the session again.
+    const { root, worktree, file } = await scaffold()
+    const speech = new FakeSpeech()
+    const h = boot(root, new MemoryStore(), speech)
+    h.toggle()
+    h.onAgentStatus({ worktreeId: `r::${worktree}`, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(20)
+
+    await appendFile(file, [record(1), record(2), record(3)].join('\n') + '\n')
+    await settle()
+    expect(speech.spoken.length).toBe(3)
+
+    speech.spoken.length = 0
+    await writeFile(file, record(21) + '\n')     // shorter, no boundary record
+    await settle()
+    expect(speech.spoken, 'a non-compaction rewrite was read aloud').toEqual([])
+  })
+
+  it('CONTROL: a transcript that ALREADY contains a boundary is not treated as compacting', async () => {
+    // The count is compared against the previous read, not against zero. Without that, every read
+    // of a transcript that has ever been compacted would clamp, and nothing would ever be spoken
+    // again — an "always silent" pass that satisfies the first test for the wrong reason.
+    const { root, worktree, file } = await scaffold()
+    const speech = new FakeSpeech()
+    const h = boot(root, new MemoryStore(), speech)
+    h.toggle()
+    h.onAgentStatus({ worktreeId: `r::${worktree}`, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(20)
+
+    await writeFile(file, [boundary(), record(1)].join('\n') + '\n')
+    await settle()
+    speech.spoken.length = 0
+
+    await appendFile(file, record(2) + '\n')
+    await settle()
+    expect(speech.spoken, 'a normal reply after an old compaction was swallowed').toEqual(['reply 2'])
+  })
+})
