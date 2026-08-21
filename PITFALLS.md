@@ -6,6 +6,22 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P34 — A concurrent agent's `git add -A` claims your uncommitted work
+**Symptom:** mid-fix, `git status` showed the source files clean while the working tree plainly
+contained the edits. They had been swept into `172c061` — a **documentation** commit from another
+agent working the same repo, which staged everything rather than its own paths. Worse follow-on:
+`git checkout <file>` was then used to undo a one-line mutation probe and reverted the ENTIRE fix,
+because the fix was no longer in the working tree relative to HEAD. Roughly 80 lines had to be
+re-applied from scratch.
+**Cause:** several agents share one worktree and one index. `git add -A` / `git commit -a` is not
+"commit my work", it is "commit whatever anyone happens to have open". And `git checkout` as an
+undo assumes your baseline is HEAD, which stops being true the moment somebody else commits.
+**What to do instead:** stage **explicit paths**, never `-A` or `-a`. To undo a deliberate mutation
+probe, `cp file /tmp/x.bak` first and `cp` it back — never `git checkout`. Commit early and often
+so the window in which your work is unattributed and revertible stays small. If you find your work
+already committed by someone else, say so in your own commit message: the content is fine, only the
+attribution is wrong, and the record is worth more than the blame.
+
 ## P33 — The number in the document was never the number in the assertion
 **Symptom:** nine places quoted provider `cancel()` as *"measured within 50 ms"* — `STATE.md`,
 `docs/TASKS.md` x4, `docs/PLAN.md` x2, `docs/design/007-user-stories.md` x3 — and all nine were
