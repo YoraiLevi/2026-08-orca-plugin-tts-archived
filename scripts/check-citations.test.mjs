@@ -99,3 +99,151 @@ describe('a threshold calibrated in one configuration is refused in another', ()
     expect(out).toContain('SUPERSEDED')
   })
 })
+
+/**
+ * QUOTE-GONE — the signal for a citation that is stale because the code it quotes was REMEDIED.
+ *
+ * These run against a SYNTHETIC repository built in a temp directory, not against this one. Three
+ * reasons, and the third is the important one:
+ *   - the real repo's counts move whenever any of five agents edits a file;
+ *   - `006-fma.md` is being edited by another agent as this is written;
+ *   - a fixture lets the NEGATIVE cases be stated. A rule that only ever fires is not a rule, and
+ *     the two exclusions below (elided quotes, non-statement braces) are where this signal would
+ *     otherwise become a check that could only go one way.
+ */
+import { mkdtempSync, mkdirSync, writeFileSync, cpSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+
+function fixture(docBody, sourceBody) {
+  const root = mkdtempSync(join(tmpdir(), 'cit-'))
+  mkdirSync(join(root, 'scripts'), { recursive: true })
+  mkdirSync(join(root, 'docs'), { recursive: true })
+  mkdirSync(join(root, 'packages/core/src'), { recursive: true })
+  cpSync(SCRIPT, join(root, 'scripts', 'check-citations.mjs'))
+  writeFileSync(join(root, 'packages/core/src/thing.ts'), sourceBody)
+  writeFileSync(join(root, 'docs', 'note.md'), docBody)
+  execFileSync('git', ['init', '-q'], { cwd: root })
+  execFileSync('git', ['add', '-A'], { cwd: root })   // the fixture's OWN repo, never ours
+  const run = () => {
+    try {
+      execFileSync('node', [join(root, 'scripts', 'check-citations.mjs')],
+        { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ORCA_SRC: '/nonexistent-orca' } })
+      return ''
+    } catch (err) { return `${err.stdout ?? ''}${err.stderr ?? ''}` }
+  }
+  return run()
+}
+
+/**
+ * `readRoot` is camelCase ON PURPOSE: the checker only lets STRONG anchors decide a verdict, and a
+ * lowercase word like `marker` is deliberately discarded as possibly-ordinary-English. A fixture
+ * anchored on one produces "unanchored", not "stale", and every assertion below goes vacuous.
+ *
+ * The anchor also sits far below the cited line ON PURPOSE. The checker's slack is 10 lines plus the
+ * block the anchor opens, so a fixture with the symbol near the citation verifies as OK and every
+ * assertion below would be vacuous. The first version of this file made exactly that mistake and
+ * all four tests passed against an empty string.
+ */
+const SOURCE_REMEDIED = [
+  ...Array.from({ length: 40 }, (_, i) => `// filler ${i}`),
+  'export function readRoot (root) {',
+  '  try { return read(root) } catch (err) { return { reason: err.code } }',
+  '}', '', '',
+].join('\n')
+
+describe('QUOTE-GONE separates a remedied claim from a drifted pointer', () => {
+  it('flags a citation whose quoted code is no longer in the file', () => {
+    const out = fixture(
+      'The bare catch at `packages/core/src/thing.ts:2` — `try { return read(root) } catch { return null }`' +
+      ' in `readRoot` swallows the cause.\n',
+      SOURCE_REMEDIED,
+    )
+    // The COUNT, not the word: the summary line names every bucket including the empty ones, so
+    // `toContain('QUOTE-GONE')` would be true no matter what the checker decided.
+    expect(out).toMatch(/· 1 QUOTE-GONE/)
+    expect(out).toMatch(/^QUOTE-GONE \(1\)/m)
+    expect(out).toContain('docs/note.md:1')
+  })
+
+  it('CONTROL: a citation whose quoted code SURVIVES is ordinary drift, not QUOTE-GONE', () => {
+    // Same shape, same staleness — only the quote differs. Without this, the rule above would
+    // pass for an implementation that flagged every stale citation.
+    const out = fixture(
+      'The catch at `packages/core/src/thing.ts:2` — `catch (err) { return { reason: err.code } }`' +
+      ' in `readRoot` names the cause.\n',
+      SOURCE_REMEDIED,
+    )
+    expect(out).toContain('STALE CITATIONS')
+    expect(out).toMatch(/· 0 QUOTE-GONE/)
+    expect(out).not.toMatch(/^QUOTE-GONE \(/m)
+  })
+
+  it('an ELIDED quote is never evidence, because it could never have matched', () => {
+    const out = fixture(
+      'The call at `packages/core/src/thing.ts:2` — `try { return read(…) } catch { … }` in `readRoot`.\n',
+      SOURCE_REMEDIED,
+    )
+    expect(out).toContain('STALE CITATIONS')
+    expect(out).toMatch(/· 0 QUOTE-GONE/)
+    expect(out).not.toMatch(/^QUOTE-GONE \(/m)
+  })
+
+  it('a braced shape that is not a statement is not treated as quoted source', () => {
+    // An invented response shape, not code that was ever in the file.
+    const out = fixture(
+      'It answers `packages/core/src/thing.ts:2` with `200 { played: \'elsewhere\' }` from `readRoot`.\n',
+      SOURCE_REMEDIED,
+    )
+    expect(out).toContain('STALE CITATIONS')
+    expect(out).toMatch(/· 0 QUOTE-GONE/)
+    expect(out).not.toMatch(/^QUOTE-GONE \(/m)
+  })
+})
+
+/**
+ * UNREAD ANNOTATIONS — P35, caught by the tool instead of by a person a week later.
+ *
+ * Two shapes, both of which really happened here: a `citation-check: ignore` marker written with
+ * its reason INSIDE, which the matcher does not accept and which therefore suppressed nothing
+ * while looking like it did; and `[live tree]`, a stamp one document uses to say "this pointer may
+ * have moved" that this tool has never read.
+ */
+describe('an annotation the parser does not read is named, not silently ignored', () => {
+  it('names a `[live tree]`-style prose stamp sitting on a citation', () => {
+    const out = fixture(
+      'See `packages/core/src/thing.ts:2` `[live tree]` in `readRoot`.\n', SOURCE_REMEDIED,
+    )
+    expect(out).toMatch(/^UNREAD ANNOTATIONS \(1\)/m)
+    expect(out).toContain('prose stamp')
+  })
+
+  it('CONTROL: an R006 evidence label is NOT an unread suppression', () => {
+    // `[measured-here]` qualifies a NUMBER and claims nothing about a citation. Without this
+    // exclusion the check reported 58 hits in this repo, 58 of them noise — which would bury the
+    // real ones exactly as a weak anchor buries real drift.
+    const out = fixture(
+      'See `packages/core/src/thing.ts:2` `[measured-here]` in `readRoot`.\n', SOURCE_REMEDIED,
+    )
+    expect(out).not.toMatch(/^UNREAD ANNOTATIONS/m)
+  })
+
+  it('names a citation-check marker written with its reason inside, which suppresses nothing', () => {
+    const out = fixture(
+      'See `packages/core/src/thing.ts:2` in `readRoot`. <!-- citation-check: ignore — verified by hand -->\n',
+      SOURCE_REMEDIED,
+    )
+    expect(out).toMatch(/^UNREAD ANNOTATIONS \(1\)/m)
+    expect(out).toContain('malformed marker')
+    // And the proof that it suppressed nothing: the citation is still counted.
+    expect(out).toContain('STALE CITATIONS')
+  })
+
+  it('CONTROL: the well-formed marker is not named, and really does suppress', () => {
+    const out = fixture(
+      'See `packages/core/src/thing.ts:2` in `readRoot`. <!-- citation-check: ignore --><!-- why: checked -->\n',
+      SOURCE_REMEDIED,
+    )
+    expect(out).not.toMatch(/^UNREAD ANNOTATIONS/m)
+    expect(out).not.toContain('STALE CITATIONS')
+  })
+})

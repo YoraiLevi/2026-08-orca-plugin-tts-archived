@@ -345,6 +345,75 @@ tolerated. That is a larger change and deserves its own Job.
 `standing` versus `measured` — so the gap is visible instead of resolved by moving a threshold to
 fit the number it measures.
 
+## What the checker should have caught and did not — two, one fixed, one bounded
+
+The re-audit found two failures that were not staleness at all: things the instrument was blind to.
+The architect asked whether either is fixable in the tool rather than by hand. One is, and now is;
+the other is only partly, and the boundary is written down here so nobody spends a day on the rest.
+
+### Fixed — an annotation the parser does not read
+
+**P35, twice over.** `<!-- citation-check: ignore — VERIFIED CORRECT … -->` never parsed, because
+the matcher allows nothing between `ignore` and `-->`, so markers written with their reason inside
+suppressed nothing while looking like they did — and `--fix` then rewrote a citation `009` E-01 says
+explicitly not to touch. Separately, `017-review-round8.md` stamps ten citations `` `[live tree]` ``
+and explains at its top that they may have moved; that is an honest disclosure addressed to a
+**human**, and this tool had never read it.
+
+Both are now **named on every run**, as `UNREAD ANNOTATIONS`, with the count by kind. They do not
+fail the run — whether an unread marker should break the build belongs with the ratchet decision,
+not smuggled in beside it — but a tool that silently ignores an annotation somebody wrote *for* it
+is the same class of defect it exists to catch.
+
+The exclusion matters as much as the rule. R006's evidence vocabulary — `[measured-here]`,
+`[claimed]`, `[derived]` and the rest — is a different and legitimate convention that qualifies a
+**number**, not a citation. Without excluding it the check reported **58 hits, 58 of them noise**,
+burying the two real ones. That is the weak-anchor mistake in a new costume, and the vocabulary is
+restated in the script rather than imported so that adding a word to it shows up in a diff.
+
+### Fixed as far as it can be — the remedied row
+
+`006`'s rows are stale by **remedy**: TT1 quotes `try { dirs = await readdir(root) } catch { return
+null }` and that bare catch has since been fixed. Re-pointing it makes the pointer green beside a
+sentence describing a defect that no longer exists — a **false claim**, and strictly worse than the
+stale pointer it replaces.
+
+**What is not automatable, stated plainly so the next person does not try.** Whether a document's
+CLAIM still holds is a question about prose. It needs a human to read the row against today's code.
+No amount of anchor cleverness decides it, and a tool that guessed would produce exactly the
+plausible-but-wrong verdict this whole file exists to prevent.
+
+**What is automatable, and now is.** When a document quotes a **code fragment verbatim** and that
+exact fragment no longer occurs anywhere in the cited file, the citation is stale for a reason no
+re-numbering can fix. That is decidable, and it is reported as a separate bucket, **QUOTE-GONE** — a
+flag for a human, never a fix:
+
+```
+stale is:  133 DRIFTED · 1 LOST · 19 QUOTE-GONE
+QUOTE-GONE (19) — the document quotes code verbatim and that exact code is
+no longer in the cited file. READ THE ROW; do not re-number it.
+  docs/design/006-fma.md:51 -> packages/plugin/src/huddle/index.ts
+    gone: `try { dirs = await readdir(root) } catch { return null }`
+  docs/design/006-fma.md:52 -> packages/plugin/src/huddle/index.ts
+    gone: `try { raw = await readFile(file,'utf8') } catch { return [] }`
+```
+
+**Validated against the three rows that motivated it, negative control included:** TT1 and TT2 are
+flagged; **TT3 is not**, because the `catch { return null }` it quotes is still in `decoders.ts` — it
+is ordinary drift and the tool says so. A rule that fired on all three would have been useless.
+
+Two exclusions carry the weight, and both are tested:
+- **An elided quote is never evidence.** `child.on('close', () => { …; resolve(true) })` can never
+  match, so treating its absence as deletion is a check that could only go one way.
+- **A braced shape that is not a statement is not quoted source.** `200 { played: 'elsewhere' }` is a
+  response shape a document invented for the reader; it was never in the file and its absence proves
+  nothing.
+
+Fifteen tests in `scripts/check-citations.test.mjs`, every one proved able to fail against eleven
+mutants. The four QUOTE-GONE tests run against a **synthetic repository** in a temp directory rather
+than this one, because this repo's counts move whenever any of five agents edits a file — and
+because a fixture is the only way to state the negative cases at all.
+
 ## What this checker cannot catch
 
 Stated plainly, because a tool that hides its blind spots is worse than none.

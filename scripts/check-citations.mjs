@@ -481,6 +481,58 @@ function verifyAgainst(cit, target, anchors) {
   }
 }
 
+/* ---------------------------------------------------------------- quoted code, and REMEDY
+ *
+ * WHAT THE CHECKER USED TO MISS ENTIRELY, and the most expensive kind of stale citation there is.
+ *
+ * `006-fma.md` row TT1 cites `huddle/index.ts:130` and quotes the code it is about, verbatim:
+ * `try { dirs = await readdir(root) } catch { return null }`. That bare catch has since been
+ * FIXED — today the same site separates ENOENT from everything else and returns a structured
+ * reason. The citation is stale, but re-pointing it at the fix is the wrong repair: the pointer
+ * goes green while the sentence beside it describes a defect that no longer exists. A stale
+ * pointer is a navigation problem; a re-pointed pointer on a remedied defect is a FALSE CLAIM,
+ * and it is the one the tool was least able to see.
+ *
+ * WHAT IS AUTOMATABLE, AND WHAT IS NOT. Whether the document's CLAIM still holds is a question
+ * about prose and cannot be decided here — that needs a human, and this comment exists so the
+ * next person does not spend a day trying. What IS decidable is narrower and still useful: when
+ * the document quotes a CODE FRAGMENT verbatim and that exact fragment no longer occurs anywhere
+ * in the cited file, the citation is stale for a reason no re-numbering can fix. That signal is
+ * reported separately as QUOTE-GONE, and it is a flag for a human, never a fix.
+ *
+ * Verified against the three rows that motivated it: TT1 and TT2 quote bare catches that are gone
+ * and are flagged; TT3 quotes `catch { return null }`, which is still in `decoders.ts`, and is
+ * correctly left as ordinary drift.
+ */
+// Must contain a real STATEMENT marker, not merely a brace. `200 { played: 'elsewhere' }` is an
+// HTTP response shape a document invented for the reader; it was never in the source and its
+// absence proves nothing.
+const CODE_ISH = /[;=]|=>|\(|\breturn\b|\bawait\b|\bcatch\b|\bfunction\b/
+// An ELIDED quote can never match, so it must never be evidence. `child.on('close', () => { …;
+// resolve(true) })` is the author abbreviating, not the code being gone — treating it as gone is
+// a check that could only ever go one way, which is the failure this whole tool exists to end.
+const ELIDED = /…|\.\.\./
+
+function codeQuotes(context) {
+  return [...context.matchAll(/`([^`\n]+)`/g)]
+    .map((m) => m[1].trim())
+    // A fragment, not an identifier: it must look like code AND carry more than one token.
+    .filter((q) => q.length >= 12 && /\s/.test(q) && CODE_ISH.test(q) && !ELIDED.test(q))
+}
+
+const collapse = (t) => t.replace(/\s+/g, ' ').trim()
+
+/**
+ * true when the document quotes code verbatim and NONE of those quotes survive in the file.
+ * Whitespace is collapsed on both sides so a reflow is not mistaken for a deletion.
+ */
+function quotesGone(context, absPath) {
+  const quotes = codeQuotes(context)
+  if (quotes.length === 0) return false
+  const hay = collapse(fileLines(absPath).join(' '))
+  return quotes.every((q) => !hay.includes(collapse(q)))
+}
+
 // ok beats unanchored beats stale: with several candidate files for one bare name, a
 // candidate we cannot check is weaker evidence of a bug than a candidate we can.
 const RANK = { ok: 0, unanchored: 1, stale: 2 }
@@ -671,6 +723,69 @@ const problems =
   REFUSAL !== null ||
   stale.length > STALE_LIMIT || (STRICT && unanchored.length > 0) || (REQUIRE_ORCA && !ORCA_PRESENT)
 
+/* ---------------------------------------------------------------- unread suppressions
+ *
+ * P35, TWICE. An annotation the parser does not read is a suppression that never happened, and
+ * this repo has now produced two different shapes of it:
+ *
+ *   1. `<!-- citation-check: ignore — VERIFIED CORRECT … -->`. The matcher is
+ *      /<!--\s*citation-check:\s*ignore\s*-->/ and nothing may sit between `ignore` and `-->`, so
+ *      every marker written with its reason INSIDE parsed as ordinary prose. `--fix` then rewrote
+ *      a citation that `009` E-01 says explicitly not to touch.
+ *   2. `` `[live tree]` ``. `017-review-round8.md` stamps ten citations with it and explains at
+ *      its top that they may have moved. That is an honest disclosure addressed to a HUMAN; this
+ *      tool has never read it, so those citations are counted like any other and rot on the next
+ *      edit to the file they point into.
+ *
+ * Both are now NAMED. Not failed on — whether an unread marker should break the build belongs
+ * with the ratchet decision, not smuggled in here — but a tool that silently ignores an
+ * annotation someone wrote FOR it is the same class of defect it was built to catch.
+ *
+ * Matches inside backticks are skipped: PITFALLS and `016` quote the broken shape in prose in
+ * order to document it, and flagging the documentation of a bug as the bug is noise.
+ */
+const VALID_MARKER = /<!--\s*citation-check:\s*ignore(-file|-begin|-end)?\s*-->/
+/** R006's evidence vocabulary. Not suppressions -- they qualify a NUMBER, not a citation. */
+const R006_LABELS = new Set([
+  'measured-here', 'measured', 'measured-third-party', 'documented', 'claimed', 'derived',
+  'estimated', 'unmeasured', 'inferred',
+])
+function unreadSuppressions() {
+  const out = []
+  for (const doc of DOCS) {
+    const lines = readFileSync(join(REPO, doc), 'utf8').split('\n')
+    lines.forEach((line, i) => {
+      const quoted = (m) => {
+        const before = line.slice(0, line.indexOf(m))
+        return (before.split('`').length - 1) % 2 === 1
+      }
+      for (const m of line.match(/<!--[^>]*citation-check[^>]*-->/g) ?? []) {
+        if (VALID_MARKER.test(m) || quoted(m)) continue
+        out.push({ doc, line: i + 1, kind: 'malformed marker', text: m.slice(0, 72) })
+      }
+      // A prose stamp sitting beside a citation, e.g. `:810` `[live tree]` -- MINUS R006's
+      // evidence vocabulary, which is a different and legitimate convention that says how well a
+      // NUMBER is supported and claims nothing about a citation. Restated here rather than
+      // imported from anywhere, so adding a word to it is a decision that shows up in a diff
+      // (PITFALLS P36). Without this exclusion the check reports 58 hits, 58 of them noise, and
+      // buries the two real ones -- which is the same mistake the weak-anchor rule above exists
+      // to avoid.
+      if (new RegExp(String.raw`${LINES}`).test(line)) {
+        for (const m of line.match(/`\[[a-z][a-z0-9 -]{2,24}\]`/g) ?? []) {
+          if (R006_LABELS.has(m.slice(2, -2))) continue
+          out.push({ doc, line: i + 1, kind: 'prose stamp', text: m })
+        }
+      }
+    })
+  }
+  return out
+}
+const UNREAD = unreadSuppressions()
+
+const quoteGone = stale.filter(({ cit, r }) => quotesGone(cit.context, r.target.abs))
+const drifted = stale.filter(({ r }) => r.now && r.now.length > 0).length - quoteGone.length
+const lost = stale.length - drifted - quoteGone.length
+
 if (stale.length) {
   console.error(`\nSTALE CITATIONS (${stale.length})\n`)
   for (const { cit, r } of stale) {
@@ -682,6 +797,36 @@ if (stale.length) {
       console.error(`    fix:   ${r.anchor} is now at ${r.target.rel}:${shown}`)
     }
   }
+}
+
+// Named, always, when there are any: this is the one bucket a human must look at row by row, and
+// a count alone gives them nothing to look at.
+if (quoteGone.length) {
+  console.error(`\nQUOTE-GONE (${quoteGone.length}) — the document quotes code verbatim and that exact code is`)
+  console.error(`no longer in the cited file. Re-pointing these makes the pointer green beside a sentence`)
+  console.error(`describing something that is no longer true. READ THE ROW; do not re-number it.\n`)
+  const seen = new Set()
+  for (const { cit, r } of quoteGone) {
+    const key = `${cit.doc}:${cit.docLine} -> ${r.target.rel}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    console.error(`  ${key}`)
+    for (const q of codeQuotes(cit.context).slice(0, 2)) {
+      console.error(`    gone: \`${q.length > 96 ? q.slice(0, 93) + '…' : q}\``)
+    }
+  }
+}
+
+if (UNREAD.length) {
+  console.error(`\nUNREAD ANNOTATIONS (${UNREAD.length}) — written for this tool, or read as if they were,`)
+  console.error(`and NOT parsed by it. A suppression the parser does not read is a suppression that never`)
+  console.error(`happened (PITFALLS P35). Valid: <!-- citation-check: ignore --> with the reason in a`)
+  console.error(`SECOND comment beside it, never inside it.\n`)
+  const byKind = new Map()
+  for (const u of UNREAD) byKind.set(u.kind, (byKind.get(u.kind) ?? 0) + 1)
+  for (const [k, n] of byKind) console.error(`  ${String(n).padStart(3)}  ${k}`)
+  for (const u of UNREAD.slice(0, 12)) console.error(`       ${u.doc}:${u.line}  ${u.text}`)
+  if (UNREAD.length > 12) console.error(`       … and ${UNREAD.length - 12} more`)
 }
 
 if (unanchored.length && (STRICT || LIST)) {
@@ -756,8 +901,6 @@ if (REFUSAL !== null) {
  * to the churn-invariant number is a change to what the gate MEANS and that is not a decision to
  * smuggle into a bug fix — see docs/.research/citation-audit.md for the recommendation.
  */
-const drifted = stale.filter(({ r }) => r.now && r.now.length > 0).length
-const lost = stale.length - drifted
 
 if (SUMMARY || problems) {
   console.error(
@@ -765,7 +908,9 @@ if (SUMMARY || problems) {
     ` (${orcaHead ? orcaHead.slice(0, 10) : 'n/a'}) · ${counts.external} external\n` +
     `verdicts:  ${counts.ok} verified · ${counts.stale} stale · ${counts.unanchored} unanchored\n` +
     `stale is:  ${drifted} DRIFTED (anchor still in the file, pointer off — moves with code churn)` +
-    ` · ${lost} LOST (anchor not in the file at all — the claim is in question)`,
+    ` · ${lost} LOST (anchor not in the file at all — the claim is in question)` +
+    ` · ${quoteGone.length} QUOTE-GONE (the document quotes code verbatim and that code is gone —` +
+    ` likely REMEDIED, never re-point without reading the row)`,
   )
   if (FIX) {
     console.error(`\n--fix rewrote ${fixedCount} citation(s); ${skippedCount} left for a human.`)
