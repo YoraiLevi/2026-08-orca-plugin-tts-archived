@@ -322,7 +322,7 @@ with `speech:partial`, `speech:final`, `speech:ready`, `speech:stopped`, `speech
 `speech:downloadProgress` push events at `:5083-5118`.
 
 **Evidence 3 — a plugin panel has no preload, so no `window.api`.**
-`src/renderer/src/components/right-sidebar/PluginPanel.tsx:223-226`:
+`src/renderer/src/components/right-sidebar/PluginPanel.tsx:121-124`:
 
 ```
       // SECURITY: never add allow-same-origin — the srcdoc frame must stay an

@@ -59,7 +59,7 @@ plugin today:
   **`SpeechService` calls `provider.generate(chunk.text)` with no options at all**
   (`speech-service.ts:121`). Voice and rate are therefore not settable by any path through the
   running plugin, even though `OsSynthProvider` implements both
-  (`packages/providers/src/os-synth/index.ts:143-165`).
+  (`packages/providers/src/os-synth/index.ts:196-218`).
 
 **Recommendation:** T124 should iterate a `SpeechSettings` schema covering all three option types
 (matching T120's "settings schema shared by plugin and lab"), not `NormalizeOptions` alone.
@@ -98,7 +98,7 @@ pronounces abbreviations and numbers" — is mostly designed out already.
 ### Where the two genuinely differ, and what to do about it
 
 **Difference 1 — inter-chunk pauses are a transport artifact today, not prosody.**
-`OsSynthProvider` declares `streaming: false` (`os-synth/index.ts:35`) and synthesizes a whole
+`OsSynthProvider` declares `streaming: false` (`os-synth/index.ts:41`) and synthesizes a whole
 utterance to a temp WAV before yielding anything (`os-synth/index.ts:120-132`). `SubprocessSink`
 then spawns **one player process per chunk** (`sinks/subprocess-sink.ts:70-83`), which its own
 header documents as a **~970 ms inter-sentence gap on macOS**
@@ -141,8 +141,8 @@ machine-local, not a reason to wait.
 
 ### Recommendation
 
-Build M11 now, on `OsSynthProvider`, which `docs/TASKS.md:18` already records as v1's only engine
-(T001c). Gate M11 as written ("change a control, hear the difference in under two seconds",
+Build M11 now, on `OsSynthProvider`, which `docs/TASKS.md:18` already records as `OS-synth-only`
+for v1 (T001c). Gate M11 as written ("change a control, hear the difference in under two seconds",
 `docs/TASKS.md:292`). Add one requirement to the lab spec: **each control is tagged
 engine-independent or engine-provisional**, and exported settings (T112f) carry the provider id and
 platform they were tuned on, so M9 can re-open exactly the three provisional controls rather than
@@ -155,7 +155,7 @@ the whole set.
 Fifteen transforms run in `normalize()` (`index.ts:81-94`), not twelve. Three different counts
 exist in the repo: `docs/architecture.md:96` says 11, `000-open-questions.md` Q23 says 12, the
 in-file banner comments are misnumbered (`index.ts:438` labels the number stages "stage 10";
-`index.ts:579` labels `collapseWhitespace` "stage 11" while sitting *below* `tidyPunctuation`).
+`index.ts:618-620` labels `collapseWhitespace` "stage 11" while sitting *below* `tidyPunctuation`).
 **Fix the count in the docs before the lab renders stage intermediates**, or the UI will disagree
 with itself.
 
@@ -207,9 +207,9 @@ Hardcoded values in the speech path a listener might reasonably want to change.
 | H19 | Chunk size | `core/src/chunker/index.ts:53` | `DEFAULT_MAX_UNITS = 200` chars | **unexposed preference, high value** — with the ~970 ms per-chunk gap (`plugin/src/sinks/subprocess-sink.ts:8-10`), chunk size *is* the pacing control |
 | H20 | `isolateFirstSentence` | `core/src/chunker/index.ts:66` | `true`, and never forwarded | **unexposed preference** — `SpeechService` passes only `maxUnits` (`plugin/src/speech-service.ts:112-114`), so this option is unreachable from the plugin |
 | H21 | `ABBREVIATIONS` table | `core/src/chunker/index.ts:46-51` | 30 fixed tokens | defensible as fixed |
-| H22 | Queue overflow limit | `plugin/src/main.ts:41` | `maxQueued: 8` | **unexposed preference** — and it disagrees with `DEFAULT_MAX_QUEUED = 20` (`plugin/src/speech-service.ts:28`); the shipped value is 8 |
+| H22 | Queue overflow limit | `plugin/src/main.ts:41` | `maxQueued: 8` | **unexposed preference** — and it disagrees with `DEFAULT_MAX_QUEUED = 20` (`plugin/src/speech-service.ts:74`); the shipped value is 8 |
 | H23 | Overflow-notice coalescing delay | `plugin/src/main.ts:45` | 500 ms | defensible as fixed |
-| H24 | Voice and rate are never passed | `plugin/src/speech-service.ts:121` | `generate(chunk.text)`, no options | **the single largest gap** — `SynthesizeOptions.voice`/`.rate` exist (`core/src/types/index.ts:26-31`) and `OsSynthProvider` implements both (`providers/src/os-synth/index.ts:143-165`), but no caller can reach them |
+| H24 | Voice and rate are never passed | `plugin/src/speech-service.ts:121` | `generate(chunk.text)`, no options | **the single largest gap** — `SynthesizeOptions.voice`/`.rate` exist (`core/src/types/index.ts:26-31`) and `OsSynthProvider` implements both (`providers/src/os-synth/index.ts:196-218`), but no caller can reach them |
 | H25 | Linux ignores `rate` | `providers/src/os-synth/index.ts:161-166` | `-w`, `-v` only | **bug (R1 parity)** — rate is honoured on macOS and Windows, silently dropped on Linux |
 | H26 | Rate scale differs per OS | `providers/src/os-synth/index.ts:144,150` | `rate*175` wpm vs. −10…+10 clamp | **unexposed preference + not portable** — one "rate" number does not mean the same thing on two platforms |
 | H27 | Output sample rate | `providers/src/os-synth/index.ts:41,142` | 22050 Hz, `LEI16@22050` | defensible as fixed |
@@ -242,7 +242,7 @@ bug (H25) · 15 defensible as fixed.**
    choices while the loudest complaint stays unfixable.
 4. **`packages/core/dist/` is committed and stale.** It is tracked (`git ls-files
    packages/core/dist`), not gitignored, and last written at `9627118` — two normalizer commits
-   ago. `packages/core/dist/normalizer/index.js:304-305` still emits the *old* path wording
+   ago. `packages/core/dist/normalizer/index.js:304-305` still emits the *old* path wording <!-- citation-check: ignore -->
    (`"the python file session handler"`) and has no `extensionStyle` at all. The shipped artifact
    is safe — `packages/core/package.json` points `main` at `./src/index.ts` and
    `scripts/build.mjs:24` bundles from `packages/plugin/src/main.ts` — but **T111's

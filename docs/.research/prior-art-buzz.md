@@ -1150,8 +1150,8 @@ without a single platform branch, and its tests are pure-logic unit tests that r
 
 | Mechanism | Why it's portable | Evidence |
 |---|---|---|
-| `preprocess_for_tts` — the 7-stage markdown→speech normalizer | `&str → String`. No I/O, no deps, no `cfg`. | `preprocessing.rs` (whole file); tests `:414-543` run on the Linux CI job |
-| The natural-boundary splitter + abbreviation guard | Pure function over `&str` + a `token_count` closure | `pocket_april.rs:961-1133`; tests `:1440-1518` |
+| `preprocess_for_tts` — the 7-stage markdown→speech normalizer | `&str → String`. No I/O, no deps, no `cfg`. | `preprocessing.rs` (whole file); tests `preprocessing.rs:414-543` run on the Linux CI job |
+| The natural-boundary splitter + abbreviation guard | Pure function over `&str` + a `token_count` closure | `pocket_april.rs:961-1133`; tests `pocket_april.rs:1440-1518` |
 | "Isolate first sentence, then pack the rest" | One boolean into the same pure function | `pocket_april.rs:1046-1050` |
 | Generation-tagged queue; barge-in-clears vs voice-switch-preserves | Integer comparisons and a `swap` | `tts.rs:604-618`; `tts_voice_transition.rs:484-493` |
 | Playback state as a reducer (PR #3240) | Testable with no audio device at all | `features/message-tts/lib/playbackReducer.test.mjs` |

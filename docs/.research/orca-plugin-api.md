@@ -111,9 +111,10 @@ Default `false` at `src/shared/constants.ts:319`. A user must opt in via Setting
 
 ### Manifest
 
-`orca-plugin.json` at the plugin root (`src/shared/plugins/plugin-manifest.ts:146`). Schema at
+`orca-plugin.json` at the plugin root — `PLUGIN_MANIFEST_FILENAME`
+(`src/shared/plugins/plugin-manifest.ts:146`). Schema at
 `plugin-manifest.ts:78-133`. Required: `manifestVersion: 1`, `id`, `publisher`, `name`, `version`
-(semver), `engines.orca` (only the `">=x.y.z"` grammar, `:41-44`), `pluginApi: 1`.
+(semver), `engines.orca` (only the `">=x.y.z"` grammar, `plugin-manifest.ts:41-44`), `pluginApi: 1`.
 
 Canonical identity is `<publisher>.<id>` (`plugin-manifest.ts:149-151`), which is also the install
 directory name.
@@ -320,7 +321,7 @@ exposed (`plugin-host-api.ts:10-12`), and this is structural, not documentary:
 
 `src/shared/plugins/plugin-host-protocol.ts`. Parent→child: `init`, `invokeCommand`,
 `deliverEvent`, `hostResult`, `shutdown` (`:47-53`). Child→parent: `ready`, `commandResult`,
-`eventAck`, `hostCall`, `log`, `fatal` (`:95-102`). Zod-validated on both sides "because the child
+`eventAck`, `hostCall`, `log`, `fatal` (`:56-95`). Zod-validated on both sides "because the child
 runs third-party code — nothing it sends is trusted structurally" (`:7-8`).
 
 ### Events
@@ -364,7 +365,7 @@ which zod-parses and returns `parsed.data` — a strip, not merely a check
 
 So a plugin learns *that* an agent changed state, in *which* pane. Not what it said. **VERIFIED.**
 
-`state` is one of `working | blocked | waiting | done`
+`state` is one of `working | blocked | waiting | done` — `AGENT_STATUS_STATES`
 (`src/shared/agent-status-types.ts:18`). Rows flagged `restoredUnconfirmed` are dropped before
 emission (`src/main/index.ts:2902-2905`).
 
@@ -463,9 +464,9 @@ and it is not plugin-visible.
 
 | Agent | Transcript root |
 |---|---|
-| Claude | `~/.claude/projects/<slug>/<id>.jsonl` (`:27`, `:82`) |
+| Claude | `~/.claude/projects/<slug>/<id>.jsonl` (`:27,82`) |
 | Codex | orca-managed home `/sessions`, else `CODEX_HOME` / `~/.codex/sessions` (`:41-42`) |
-| omp | `~/.omp/agent/sessions` (`:55`) |
+| omp | `~/.omp/agent/sessions` (`:55,68`) |
 | Grok | `~/.grok/sessions` (`:66`) |
 
 **Only five agents have transcript decoders** — `claude`, `openclaude`, `codex`, `grok`, `omp`
@@ -594,7 +595,7 @@ point into it. VERIFIED.
 
 Plugin commands surface in exactly two places: their declared keybinding, and the Settings →
 Keybindings list under a "Plugins" group
-(`src/renderer/src/lib/plugin-command-keybindings.ts:19-35`). Dispatch matches at
+(`src/renderer/src/lib/plugin-command-keybindings.ts:56-72`). Dispatch matches at
 `findPluginCommandForKeybinding` (`:56-73`), which skips `context: 'worktree'` commands when no
 worktree is active.
 
@@ -669,7 +670,7 @@ message the worker.
 
 Panel→host bridge budget (`src/shared/plugins/plugin-panel-bridge.ts:22-23`): 64 KB per message,
 **30 messages per 10 seconds**. Panels may call only the three `panel: true` methods
-(`plugin-host-api.ts:263-265`). A watchdog pings every 10 s and demotes a panel that misses a pong
+(`plugin-host-api.ts:129,139,149`). A watchdog pings every 10 s and demotes a panel that misses a pong
 (`plugin-panel-bridge.ts:35-36`). Design tokens are injected as a curated 20-property allowlist so
 panels can match the app theme (`plugin-panel-shell.ts:34-55`).
 
@@ -693,7 +694,8 @@ speech-runtime-service.ts                                   lazy singleton wirin
 Renderer side: `src/renderer/src/components/dictation/microphone-devices.ts`,
 `src/renderer/src/hooks/use-audio-capture.ts` (uses `AudioContext`,
 `navigator.mediaDevices.getUserMedia`), settings at
-`src/renderer/src/components/settings/VoicePane.tsx` and `VoiceMicrophoneSetting.tsx:89-94`.
+`src/renderer/src/components/settings/VoicePane.tsx` and `requestMicrophoneAccess`
+(`VoiceMicrophoneSetting.tsx:88-95`).
 Settings type `VoiceSettings` in `src/shared/speech-types.ts`.
 
 ### Audio playback that does exist: notification sounds only
@@ -865,7 +867,7 @@ fallbacks. It is plain ES5-flavoured inline script — no bundler, no framework.
 The end-to-end behaviour is pinned by `tests/e2e/plugin-demo.spec.ts`, whose stated invariant is
 that the plugin *"stays inert before visible consent, then its panel, worker command, and event
 subscription all work"* (`:1-4`), including an assertion that the panel document carries
-`default-src 'none'` (`:40-43`).
+`default-src 'none'` (`plugin-demo.spec.ts:40-43`).
 
 ### Other in-tree plugins
 
@@ -894,9 +896,9 @@ macOS, Windows, and Linux (`README.md:11`). `appId: com.stablyai.orca`, `product
 
 | Platform | Artifacts | Install channels |
 |---|---|---|
-| macOS | `dmg` + `zip`, **x64 and arm64** (`electron-builder.config.cjs:440-456`) | Direct download; Homebrew cask `brew install --cask stablyai/orca/orca` (`README.md:221-222`, `Casks/orca.rb`) |
-| Windows | NSIS `orca-windows-setup.exe` (`:355-364`) | Direct download only. **x64 only — no Windows arm64 build.** |
-| Linux | AppImage + deb (declared `:489`); rpm also release-required | Direct download; Arch AUR `stably-orca-bin` (`README.md:224-226`) |
+| macOS | `dmg` + `zip`, **x64 and arm64** (`config/electron-builder.config.cjs:440-456`) | Direct download; Homebrew cask `brew install --cask stablyai/orca/orca` (`README.md:221-222`, `Casks/orca.rb`) |
+| Windows | NSIS `orca-windows-setup.exe` (`config/electron-builder.config.cjs:355-364`) | Direct download only. **x64 only — no Windows arm64 build.** |
+| Linux | AppImage + deb (declared `config/electron-builder.config.cjs:489`); rpm also release-required | Direct download; Arch AUR `stably-orca-bin` (`README.md:224-226`) |
 
 Not present: winget, Chocolatey, MSI, Snap, Flatpak, npm. VERIFIED.
 
@@ -906,7 +908,7 @@ Both apply to **ORCA**, not to plugins — see "Signing and review" in the distr
 plugins are never signed.
 
 **Linux floor:** Ubuntu 20.04 / glibc 2.31, enforced by an `afterPack` gate
-(`docs/reference/linux-glibc-compatibility.md:1-7`). **Directly relevant to us:** the sherpa-onnx
+(`docs/reference/linux-glibc-compatibility.md:57-63`). **Directly relevant to us:** the sherpa-onnx
 prebuilt needs `GLIBCXX_3.4.29` (Ubuntu 22.04+) and is exempted only because it loads lazily in the
 speech worker (`docs/reference/linux-glibc-compatibility.md:79-86`). A TTS backend on the same
 runtime inherits that floor — ORCA's own STT already does.
@@ -936,7 +938,7 @@ export function getPluginsDataDir(userDataPath: string): string {
 
 - **Install (immutable, hash-addressed):** `<userData>/plugins/<publisher>.<id>/<hash>/`
 - **Per-plugin data (writable):** `<userData>/plugins-data/<publisher>.<id>/`, holding `storage.json`
-  and `settings.json` (`src/main/plugins/plugin-storage-store.ts:19-36`)
+  and `settings.json` (`src/main/plugins/plugin-storage-store.ts:14-31`)
 
 `PluginService` is constructed with a late `app.getPath('userData')`
 (`src/main/index.ts:2804-2805`) — **not** the `getCanonicalUserDataPath()` that other subsystems use
@@ -973,8 +975,9 @@ non-Latin username — the cache is relocated
 
 The fallback hashes the requested path and relocates under an ASCII shared root — `%PROGRAMDATA%`,
 `%ALLUSERSPROFILE%`, `%PUBLIC%`, `C:\ProgramData` — as
-`<root>\Orca\speech-models\<sha256-prefix-16>` (`:22-44,53-60`), migrating existing files with a
-`.partial` + atomic-rename copy (`:84-86`).
+`<root>\Orca\speech-models\<sha256-prefix-16>`. The ASCII root candidates, `%ALLUSERSPROFILE%`
+among them, are `model-cache-path.ts:22-44`; the `speech-models` join is `:53-60`.
+Existing files are migrated with a `.partial` + atomic-rename copy (`model-cache-path.ts:84-86`).
 
 > **If our TTS uses onnxruntime or sherpa-onnx, we hit this identical bug**, and cross-platform
 > parity is a hard requirement. We must mirror this logic. There is an existing regression test to
@@ -1175,9 +1178,9 @@ Component: `src/renderer/src/components/settings/PluginDevelopmentSection.tsx`. 
 
 Under the hood this writes the `devPluginPaths` setting
 (`PluginsSettingsSection.tsx:284`, type at `src/shared/global-settings-types.ts:312-313`) and
-triggers a refresh. Discovery then reads each dev path as a plugin root
-(`src/main/plugins/plugin-discovery.ts:220,238`). Dev plugins have `isDev: true` and
-`contentHash: null` (`plugin-discovery.ts:38-50`) — they are exempt from the hash-addressed
+triggers a refresh. Discovery then walks `devPluginPaths` and reads each as a plugin root
+(`src/main/plugins/plugin-discovery.ts:220,238`).
+Dev plugins have `isDev: true` and `contentHash: null` (`plugin-discovery.ts:142-145`) — they are exempt from the hash-addressed
 immutable layout, but **not** from manifest validation, artifact validation, or consent.
 
 **Prerequisites, in order:** enable `pluginSystemEnabled` (Settings → Plugins toggle) → add the dev
@@ -1290,7 +1293,7 @@ installing a source cannot turn URL parsing into arbitrary command execution."*
 `orca-marketplace.json` as a marketplace source
 (`src/renderer/src/components/settings/PluginMarketplaceSourceDialog.tsx:154-155`: *"Use an HTTPS or
 SSH repository URL containing orca-marketplace.json"*). We can publish our own index. The official
-one is `stablyai/orca-plugins` (`src/shared/plugins/plugin-marketplace.ts:11-12`); its entries
+one is `stablyai/orca-plugins` (`src/shared/plugins/plugin-marketplace.ts:119-120`); its entries
 require a resolved exact commit so a listing is reproducible (`:51-53`).
 
 **There is no npm publish path, no `orca plugin install` command, and no central registry
@@ -1304,7 +1307,7 @@ submission.** Distribution is: push a git tag, tell people the `URL#ref`. VERIFI
   reserved identity must resolve to the stablyai org, and cannot be installed from a local path at
   all (`src/main/plugins/plugin-install-trust.ts:8-26`,
   `plugin-marketplace.ts:9-12`). Pick something like `publisher: "<our-handle>"`, `id: "tts"`.
-- `version` must be **strict semver** (`plugin-manifest.ts:34-35,86`).
+- `version` must be **strict semver** (`plugin-manifest.ts:80-81,132`).
 - `manifestVersion: 1` and `pluginApi: 1` are literals — no other value validates.
 - `engines.orca` must match `>=x.y.z` exactly; no ranges, carets, or tildes
   (`plugin-manifest.ts:41-44`). We would declare `>=1.4.0`.

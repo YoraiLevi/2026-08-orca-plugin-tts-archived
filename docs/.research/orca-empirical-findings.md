@@ -488,7 +488,7 @@ iframe disappeared (`locator('#hdr')` timed out after 30 s where it had resolved
 
 1. **The fingerprint only churns when the manifest declares instructional contributions.** With no
    `keybindings`, the fingerprint was byte-identical across edits and the plugin stayed `running`.
-   The mechanism is visible in `src/shared/plugins/plugin-consent-fingerprint.ts:29-33`: the tree
+   The mechanism is visible in `hasInstructionalPluginContributions` (`src/shared/plugins/plugin-consent-fingerprint.ts:9-17`): the tree
    content identity is folded in **only** when `contributes.keybindings | vmRecipes | agents` is
    non-empty. **A TTS plugin wants a keybinding, so it opts into the churn.**
 2. **There is no worker hot-reload at all.** With a stable fingerprint, `main.mjs` was edited and

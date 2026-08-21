@@ -175,7 +175,7 @@ After: `80 passed (80)`.
 
 ## Bug 3 — voice and rate have no wire
 
-**Was:** `speech-service.ts:121` called `provider.generate(chunk.text)` with no options.
+**Was:** `speech-service.ts:257` called `provider.generate(chunk.text)` with no options.
 `SynthesizeOptions.voice`/`.rate` existed and `OsSynthProvider` implemented both — on all three
 platforms — but no caller could reach them. `isolateFirstSentence` was unreachable the same way:
 `SpeechService` built its `ChunkerOptions` from `maxUnits` alone (H20).
