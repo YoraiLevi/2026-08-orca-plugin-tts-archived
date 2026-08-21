@@ -82,7 +82,15 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   // is never delayed behind a process spawn.
   void registry.resolve().then((resolved) => {
     if (resolved === null) {
-      const why = registry.lastFailure ?? 'no speech engine is available on this system'
+      // `lastFailureDetail` is the named form (006 sites 45/46): "nothing was registered" is a bug
+      // in our own wiring, "unknown id" is a stale settings file, and "prepare failed" is a fact
+      // about this machine — and all three used to arrive here as the same bare `null`, reported
+      // as "no speech engine is available on this system". The listener could act on exactly none
+      // of them, and neither could the next agent reading a bug report.
+      const detail = registry.lastFailureDetail
+      const why = detail === null
+        ? registry.lastFailure ?? 'no speech engine is available on this system'
+        : `no speech engine is available on this system (${detail.kind}) — ${detail.reason}`
       engineError = why
       host.log(`read-aloud: ${why}`)
       // The ONE announcement that genuinely cannot be spoken: there is no engine to speak it with.

@@ -331,3 +331,43 @@ describe('TT6 read-aloud.follow reaches switchTo end to end', () => {
     expect(spoken).not.toMatch(/Now reading from/i)
   })
 })
+
+/**
+ * 006 sites 45/46/54 end to end: when no engine resolves, the plugin used to report
+ * "no speech engine is available on this system" — one sentence for six causes, and
+ * `registry.lastFailure` was `null` for most of them.
+ *
+ * Outcome chosen: **make it distinguishable**, not spoken. There is no engine to speak with, which
+ * is the one announcement this project has already recorded as unspeakable (round 4). What was
+ * fixable is that the report now names WHICH failure it is, so the notification, the log and any
+ * future bug report all carry an actionable cause instead of a shrug.
+ */
+describe('006 sites 45/46 — total engine failure reports a named cause', () => {
+  it('names the engine and the thrown reason, not just "no speech engine is available"', async () => {
+    class BrokenProvider extends RecordingProvider {
+      override async prepare(): Promise<void> {
+        throw new Error('say could not be spawned: ENOENT')
+      }
+    }
+    const notifications: string[] = []
+    const orca: OrcaApi = {
+      commands: { register: () => {} },
+      events: { on: () => {} },
+      host: {
+        call: async (action, params) => {
+          if (action === 'notifications.show') notifications.push(String(params?.['body'] ?? ''))
+          return { value: undefined }
+        }
+      },
+      log: () => {}
+    }
+    activate(orca, { provider: new BrokenProvider(), sink: new FakeSink(), projectsDir: '/nonexistent' })
+    await settle(10)
+    const engineReport = notifications.find((n) => n.includes('no speech engine'))
+    expect(engineReport, 'total engine failure was not reported at all').toBeDefined()
+    expect(String(engineReport), 'the cause is what a user or a bug report can act on')
+      .toContain('say could not be spawned')
+    expect(String(engineReport), 'which KIND of failure this is must survive to the report')
+      .toContain('prepare-failed')
+  })
+})

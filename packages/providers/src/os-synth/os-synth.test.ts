@@ -188,3 +188,47 @@ describe('E-06 in-band synthesizer commands never reach the engine', () => {
       .toBeGreaterThan(plain * 1.5)
   }, 30_000)
 })
+
+/**
+ * 006 site 41 + 54, and the first of the FMA's "three to fix first".
+ *
+ * `prepare()` called `listVoices()`, which catches everything and returns `[]` WITHOUT throwing —
+ * so a broken `say` or a broken PowerShell set `#warm = true`, the registry reported
+ * `rung: 'preferred'` with no reason, and the plugin logged "engine ready" while being permanently
+ * mute. The reason was written to `unavailableReason`, whose own doc comment says it exists so the
+ * reason reaches a notification, and no caller read it.
+ *
+ * Verified by effect exactly as the FMA specifies — "rename `say` on the PATH, activate, and
+ * assert the plugin announces the failure". Emptying PATH is that, hermetically: the child process
+ * can no longer resolve `say` (or `powershell`), so `spawn` emits ENOENT.
+ *
+ * NOTHING HERE PLAYS AUDIO. `say -v '?'` and `Get-InstalledVoices` open no audio device, and both
+ * are expected to fail to spawn at all (P31).
+ */
+describe('006 finding 1 — prepare() must not report warm on a synthesizer that cannot run', () => {
+  it('throws, names the reason, and stays cold when the binary cannot be resolved', async () => {
+    if (process.platform === 'linux') return   // the Linux ladder already throws; covered above
+    const p = new OsSynthProvider({ timeoutMs: 5_000 })
+    const realPath = process.env['PATH']
+    let thrown: unknown = null
+    try {
+      process.env['PATH'] = ''
+      await p.prepare().catch((e: unknown) => { thrown = e })
+    } finally {
+      process.env['PATH'] = realPath
+    }
+    expect(thrown, 'prepare() reported success on a synthesizer that cannot be spawned').not.toBeNull()
+    expect(p.isWarm, 'a provider that cannot speak must never report itself warm').toBe(false)
+    expect(p.unavailableReason, 'the reason must survive where a caller can read it').toBeTruthy()
+    expect(String((thrown as Error).message), 'the message must name the missing binary')
+      .toMatch(process.platform === 'darwin' ? /say/ : /powershell/)
+  })
+
+  it('CONTROL: with a real PATH the same provider prepares and reports warm', async () => {
+    // Without this the assertions above could pass on a provider that never prepares at all.
+    const p = new OsSynthProvider({ timeoutMs: 30_000 })
+    await p.prepare()
+    expect(p.isWarm).toBe(true)
+    expect(p.unavailableReason, 'a working engine must report no reason').toBeNull()
+  })
+})

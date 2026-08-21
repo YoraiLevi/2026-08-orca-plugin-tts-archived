@@ -225,11 +225,36 @@ export class OsSynthProvider implements TtsProvider {
   /** Which Linux binary is actually driving speech, once detected. `null` on other platforms. */
   get linuxBackend(): LinuxBackend | null { return this.#linuxBackend ?? null }
 
+  /**
+   * Confirm the synthesizer actually answers, and THROW when it does not.
+   *
+   * This used to be `await this.listVoices()`, which catches everything and returns `[]` without
+   * throwing — so on macOS and Windows a broken `say` or a broken PowerShell set `#warm = true`,
+   * the registry reported `rung: 'preferred'` with no reason, and the plugin logged "engine ready"
+   * while being permanently mute. The real cause was written to `unavailableReason`, whose own doc
+   * comment says it exists "so the reason reaches a notification instead of dying in a catch
+   * block", and NO CALLER READ IT (006 sites 41 and 54, and the first of the FMA's three to fix
+   * first). P25 and P18 fused: a probe that cannot fail, feeding a diagnostic nobody reads.
+   *
+   * `listVoices()` keeps its forgiving contract — it answers a settings UI's question, and "[]"
+   * is a survivable answer there. `prepare()` answers "can this machine speak at all", and the
+   * only honest answers to that are yes and a named no.
+   */
   async prepare(): Promise<void> {
     if (this.#warm) return
     // Presence is not warmth; confirm the binary actually answers.
-    if (this.#platform === 'linux') await this.#resolveLinuxBackend()   // throws, loudly, by design
-    else await this.listVoices()
+    if (this.#platform === 'linux') { await this.#resolveLinuxBackend(); this.#warm = true; return }
+    const voices = await this.listVoices()
+    if (voices.length === 0) {
+      const why = this.#unavailableReason ??
+        `${this.#platform === 'darwin' ? 'say' : 'powershell'} ran but listed no voices`
+      this.#unavailableReason = why
+      const err = new OsSynthUnavailableError(this.#platform, [this.#platform === 'darwin' ? 'say' : 'powershell'])
+      err.message = `${err.message} — ${why}`
+      this.#notify(`Read Aloud: ${err.message}`)
+      throw err
+    }
+    this.#unavailableReason = null
     this.#warm = true
   }
 
