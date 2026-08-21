@@ -273,3 +273,87 @@ describe('losses and degradations reach the audio stream', () => {
     expect(provider.synthesized.join(' ')).toContain('Speech is degraded on this machine')
   })
 })
+
+/**
+ * 006 sites 31, 32, 33 and 53 — the losses that happen INSIDE a reply.
+ *
+ * All four ended in `this.#deps.log?.(...)` or a bare `return`. The listener hears sentence one,
+ * then the next reply starts, and the middle of their answer is gone with nothing to distinguish
+ * it from the agent having finished. Site 31 is the FMA's "most reachable total-silence path in the
+ * product": a reply that is only code, only a diagram, only emoji, only a check mark.
+ *
+ * Every service here is built with **no `log` and no `onDropped`** — the developer-facing channels
+ * do not exist — so an assertion can only pass on text the provider was actually handed to speak.
+ * Urgency is `'next'` throughout: these all describe something that already happened, and
+ * interrupting the sentence being followed to report a sentence already lost is a second loss.
+ */
+describe('006 sites 31/32/33/53 — a loss inside a reply is spoken, not logged', () => {
+  it('site 31: a reply with nothing speakable in it is announced, not silently skipped', async () => {
+    const provider = new RecordingProvider()
+    const s = new SpeechService({ provider, sink: new FakeSink(), announceDelayMs: 5 })
+    // Emoji-only. A code fence would NOT do: it normalizes to "Here, a code block is omitted."
+    // — a fixture that cannot express the failure makes the assertion green for free (P33).
+    s.speak('\u{1F389}\u{1F389}', 'queue')
+    await settle()
+    expect(provider.synthesized.join(' '), 'total silence, indistinguishable from no answer')
+      .toMatch(/nothing in it that could be read aloud/i)
+  })
+
+  it('CONTROL: a reply with real prose in it is never announced as unspeakable', async () => {
+    const provider = new RecordingProvider()
+    const s = new SpeechService({ provider, sink: new FakeSink(), announceDelayMs: 5 })
+    s.speak('Here is a real answer.', 'queue')
+    await settle()
+    const said = provider.synthesized.join(' ')
+    expect(said).toContain('Here is a real answer')
+    expect(said, 'a working reply must not be reported as a loss').not.toMatch(/could be read aloud/i)
+  })
+
+  it('site 33: synthesis failing mid-reply is spoken, not swallowed into a log', async () => {
+    class DiesAfterFirstChunk extends RecordingProvider {
+      calls = 0
+      override async *generate(text: string, opts: SynthesizeOptions = {}): AsyncIterable<AudioChunk> {
+        this.calls++
+        if (this.calls === 2) throw new Error('engine died')
+        yield* super.generate(text, opts)
+      }
+    }
+    const provider = new DiesAfterFirstChunk()
+    const s = new SpeechService({
+      provider, sink: new FakeSink(), announceDelayMs: 5, maxUnits: 24
+    })
+    s.speak('First sentence here. Second sentence here. Third sentence here.', 'queue')
+    await settle()
+    expect(provider.synthesized.join(' '), 'the listener was never told their reply was truncated')
+      .toMatch(/cut short/i)
+  })
+
+  it('site 32: pressing skip is NOT reported as a failure', async () => {
+    // The reason site 32 had to be fixed before site 33 could be: with all six causes collapsed
+    // into one silent return, announcing the loss would announce every skip as an engine failure.
+    const provider = new RecordingProvider()
+    const s = new SpeechService({ provider, sink: new FakeSink(), announceDelayMs: 5, maxUnits: 20 })
+    s.speak('Alpha sentence one. Bravo sentence two. Charlie sentence three.', 'queue')
+    await new Promise((r) => setTimeout(r, 2))
+    await s.skip()
+    await settle()
+    expect(provider.synthesized.join(' '), 'a control the listener pressed became an error report')
+      .not.toMatch(/cut short|failed/i)
+  })
+
+  it('site 53: a mid-word cut is named, once, instead of being computed and discarded', async () => {
+    const provider = new RecordingProvider()
+    const s = new SpeechService({
+      provider, sink: new FakeSink(), announceDelayMs: 5, maxUnits: 12
+    })
+    // No sentence, clause or word boundary inside the limit, so the chunker must cut mid-word and
+    // marks it `boundary: 'scalar'` — which speech-service.ts read only `.text` from.
+    s.speak('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'queue')
+    await settle()
+    // The announcement is itself chunked at maxUnits, so re-join it the way a listener hears it.
+    const said = provider.synthesized.join('').replace(/\s+/g, ' ')
+    expect(said, 'the mid-word cut was computed correctly and told to nobody')
+      .toMatch(/cut mid-word/i)
+    expect(said.match(/cut mid-word/gi)?.length, 'one paste must not produce a dozen reports').toBe(1)
+  })
+})

@@ -82,6 +82,44 @@ interface PendingUtterance {
 }
 
 /**
+ * Why an utterance did not reach the listener whole. 006 site 32: cancelled, skipped and superseded
+ * were three different things arriving at the same silent `return` mid-chunk-list, so "the engine
+ * died halfway through your reply" and "you pressed skip" were indistinguishable — and only the
+ * first of those is a loss worth telling anyone about.
+ */
+type SpeakOutcome = 'spoken' | 'empty' | 'cancelled' | 'skipped' | 'superseded' | 'synthesis-failed'
+
+/**
+ * Losses that are worth a sentence, and the sentence each one gets.
+ *
+ * Coalesced on the same timer as queue overflow, for the same reason: a burst of losses must
+ * produce ONE report naming the total, not a burst of reports. Announcing each separately would
+ * flood the only channel the listener has, which is the harm this class of message exists to
+ * prevent, not to cause.
+ */
+type LossKind = 'unspeakable' | 'synthesis-failed' | 'cut-mid-word'
+
+const LOSS_SENTENCE: Record<LossKind, (n: number) => string> = {
+  // 006 site 31, "the most reachable total-silence path in the product": a reply that is only code,
+  // only a diagram, only emoji, only a check mark normalizes to nothing and produced a log line.
+  // For a listener, that is indistinguishable from the agent not having answered.
+  unspeakable: (n) => n === 1
+    ? 'One reply had nothing in it that could be read aloud.'
+    : `${n} replies had nothing in them that could be read aloud.`,
+  // 006 site 33: the listener hears sentence one, the rest of the reply is gone, and the NEXT
+  // queued reply starts — so the loss is disguised as the conversation moving on.
+  'synthesis-failed': (n) => n === 1
+    ? 'A reply was cut short: the voice engine failed part way through it.'
+    : `${n} replies were cut short: the voice engine failed part way through them.`,
+  // 006 site 53: the chunker computes `boundary: 'scalar'` to mark a mid-word cut and the speech
+  // service read only `.text`. Rare by construction — it needs 200 characters with no sentence,
+  // clause or word boundary in them — which is exactly why it is worth naming when it happens.
+  'cut-mid-word': (n) => n === 1
+    ? 'One very long unbroken run of text was cut mid-word to be read.'
+    : `${n} very long unbroken runs of text were cut mid-word to be read.`
+}
+
+/**
  * What a self-test observed, end to end. Every field is a value that MOVED, not a state that was
  * asserted: bytes the provider actually produced for a phrase synthesized fresh at that moment,
  * and whether the sink's player exited 0.
@@ -115,6 +153,8 @@ export class SpeechService {
   #current: string | null = null
   #droppedPendingAnnounce = 0
   #dropTimer: ReturnType<typeof setTimeout> | null = null
+  #losses = new Map<LossKind, number>()
+  #lossTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(deps: SpeechServiceDeps) {
     this.#deps = deps
@@ -232,6 +272,26 @@ export class SpeechService {
   }
 
   /**
+   * Record a loss and speak it, coalesced, in the audio stream.
+   *
+   * Urgency is always `'next'`, deliberately. Every one of these describes something that has
+   * ALREADY happened — a reply that could not be read, an engine that died mid-sentence, a run cut
+   * mid-word. Interrupting the sentence the listener is currently following to tell them about a
+   * sentence they already lost is a second loss, not a fix for the first (P30).
+   */
+  #noteLoss(kind: LossKind, count = 1): void {
+    this.#losses.set(kind, (this.#losses.get(kind) ?? 0) + count)
+    if (this.#lossTimer !== null) return   // one flush per window; do NOT restart the timer
+    this.#lossTimer = setTimeout(() => {
+      this.#lossTimer = null
+      const entries = [...this.#losses.entries()]
+      this.#losses.clear()
+      for (const [k, n] of entries) if (n > 0) this.announce(LOSS_SENTENCE[k](n), 'next')
+    }, this.#deps.announceDelayMs ?? DEFAULT_ANNOUNCE_DELAY_MS)
+    ;(this.#lossTimer as unknown as { unref?: () => void }).unref?.()
+  }
+
+  /**
    * Coalesce a burst of drops into one spoken sentence naming the TOTAL.
    *
    * The count accumulates. The previous implementation restarted a timer holding only the latest
@@ -265,6 +325,8 @@ export class SpeechService {
     this.#cancelled = true
     this.#pending = []
     if (this.#dropTimer !== null) { clearTimeout(this.#dropTimer); this.#dropTimer = null }
+    if (this.#lossTimer !== null) { clearTimeout(this.#lossTimer); this.#lossTimer = null }
+    this.#losses.clear()
     this.#droppedPendingAnnounce = 0
     await this.#playback.bargeIn()
   }
@@ -278,8 +340,14 @@ export class SpeechService {
         if (next === undefined) break
         this.#current = next.label ?? null
         this.#skip = false
-        await this.#speakOne(next.text)
+        const outcome = await this.#speakOne(next.text)
         this.#current = null
+        // An announcement that cannot be spoken must never announce that it cannot be spoken: that
+        // is an unbounded loop in the one channel the listener has.
+        if (next.announcement !== true) {
+          if (outcome === 'empty') this.#noteLoss('unspeakable')
+          else if (outcome === 'synthesis-failed') this.#noteLoss('synthesis-failed')
+        }
         if (this.#cancelled) break
       }
     } finally {
@@ -301,11 +369,16 @@ export class SpeechService {
     return opts
   }
 
-  async #speakOne(text: string): Promise<void> {
+  /**
+   * Returns WHY it stopped, rather than a bare `return`. Site 32: cancelled, skipped and superseded
+   * all arrived at one indistinguishable early return, so the caller could not tell a loss the
+   * listener should hear about from a control the listener just pressed.
+   */
+  async #speakOne(text: string): Promise<SpeakOutcome> {
     const spoken = normalize(text, this.#deps.normalizeOptions ?? {})
     if (spoken.length === 0) {
       this.#deps.log?.('nothing speakable in that text')
-      return
+      return 'empty'
     }
     const chunkerOpts: { maxUnits?: number; isolateFirstSentence?: boolean } = {}
     if (this.#deps.maxUnits !== undefined) chunkerOpts.maxUnits = this.#deps.maxUnits
@@ -315,18 +388,29 @@ export class SpeechService {
     const chunker = new Chunker(chunkerOpts)
     const chunks = [...chunker.addText(spoken), ...chunker.finish()]
 
+    // Site 53: `boundary: 'scalar'` marks a cut that landed mid-word because 200 characters went by
+    // with no sentence, clause or word boundary in them. The chunker computed it correctly and
+    // nothing read it. Counted once per utterance, not once per chunk: a base64 blob would
+    // otherwise generate a dozen identical reports about one paste.
+    if (chunks.some((c) => c.boundary === 'scalar')) this.#noteLoss('cut-mid-word')
+
     const generation = this.#playback.begin()
     for (const chunk of chunks) {
-      if (this.#cancelled || this.#skip || generation !== this.#playback.generation) return
+      if (this.#cancelled) return 'cancelled'
+      if (this.#skip) return 'skipped'
+      if (generation !== this.#playback.generation) return 'superseded'
       try {
         for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
-          if (!this.#playback.push(generation, audio)) return
+          if (!this.#playback.push(generation, audio)) return 'superseded'
         }
       } catch (err) {
-        // R024: contain the failure. Speech stops; the host does not.
+        // R024: contain the failure. Speech stops; the host does not — but the LISTENER is told,
+        // because the alternative is hearing sentence one and then the next reply starting, with
+        // the middle of their answer silently missing (site 33).
         this.#deps.log?.(`synthesis failed: ${String(err)}`)
-        return
+        return 'synthesis-failed'
       }
     }
+    return 'spoken'
   }
 }
