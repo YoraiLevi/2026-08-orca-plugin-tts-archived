@@ -134,22 +134,22 @@ Four properties of that shape are the reason four documents each need to widen i
   (`packages/providers/src/contract.ts:75-84`) asserts the field is *present and typed* and could not
   have failed on its value.
 - **`cancel()` is the only transport verb** (`types/index.ts:53`), and on the OS-synth provider it is
-  `SIGKILL` (`os-synth/index.ts:240`) plus, on the Linux floor, a best-effort `spd-say --cancel`
-  (`:243-245`). There is no position to resume from, because nothing records one.
+  `SIGKILL` (`os-synth/index.ts:298`) plus, on the Linux floor, a best-effort `spd-say --cancel`
+  (`:305-309`). There is no position to resume from, because nothing records one.
 - **`generate()` yields audio or nothing** (`types/index.ts:48`). The Linux floor takes the "nothing"
-  branch (`os-synth/index.ts:318-323`, `#speakDirect()` at `:407-414`) and the caller cannot tell that
-  from an empty synthesis, a timeout return (`:332`), or a zero-byte WAV (`:337`). Four different
+  branch (`os-synth/index.ts:400-405`, `#speakDirect()` at `:491`) and the caller cannot tell that
+  from an empty synthesis (`:395`), a timeout return (`:477`), or a zero-byte WAV (`:421`). Four different
   outcomes, one indistinguishable `return`.
 - **A caller discovers capabilities by failure.** There is no `supports()`. `opts.rate` is honoured on
-  macOS (`:354`) and Windows (`:360`) and, until it was fixed, was silently dropped on Linux — the H25
-  parity bug, now closed at `:191`. The class of bug is open even though that instance is closed.
+  macOS (`:438`) and Windows (`:444`) and, until it was fixed, was silently dropped on Linux — the H25
+  parity bug, now closed at `:193`. The class of bug is open even though that instance is closed.
 
 ## 2. The six extensions, and where each comes from
 
 | # | Extension | Requested by | Lands with | Platform evidence |
 |---|---|---|---|---|
 | 1 | Per-utterance identity: voice, **rate as wpm**, pitch in semitones | `005` sections 4, 8.2, 8.4 | M15 | rate everywhere; pitch on all three by three different surfaces (`q-round1-platform.md` Q33) |
-| 2 | `pause()` / `resume()`, distinct from `cancel()` | `003` section 8.7 (`:1283-1296`) | M13 | macOS `pauseSpeaking(at: .word)`, Windows `Pause()`/`Resume()`, Linux SSIP `PAUSE`/`RESUME` — **`[documented]`**, item 2 |
+| 2 | `pause()` / `resume()`, distinct from `cancel()` | `003` section 8.7 (`:1283-1296`) <!-- citation-check: ignore — the bare `:NN` inherits the PRECEDING path (a research file); the prose names `003`, where these lines are correct. R7-21 characterises this inheritance shape as a false positive. --> | M13 | macOS `pauseSpeaking(at: .word)`, Windows `Pause()`/`Resume()`, Linux SSIP `PAUSE`/`RESUME` — **`[documented]`**, item 2 |
 | 3 | Audio-format variance, including synthesized earcon PCM | `004` section 2 (**`004:126-127`** — corrected 2026-08-21, R7-21: `004:102` was wrong at this document's own pinned SHA `32b929a`, where the sentence *"Branch on `chunk.format`, do not assume WAV"* was at `004:91`; it is `004:126-127` at HEAD), `005` section 11.1d (`:623-627`) | M11 | our own three rungs already differ; the earcon is generated PCM at a rate the provider did not choose |
 | 4 | **`spoke-elsewhere` as a first-class outcome** | `008` X-10, resolved in `009` section 1 | **already shipped, unmodelled** | `PITFALLS.md` P25; `os-synth/index.ts:318-323` |
 | 5 | **Word-boundary events** | nobody — found by the platform probe, unscheduled | M13's cursor, and precise resume | **`[measured-here]` on macOS** (F2); Windows `SpeakProgress` and Linux SSIP index marks **`[documented]`** |
@@ -561,7 +561,7 @@ floor is therefore `spd-say --wait`, which **cannot write a WAV** — verified a
 `brailcom/speechd`: `src/clients/say/options.c` has no file-output option (`-w` is `--wait`), and
 `src/modules/module_utils.c` `module_audio_init` opens only oss/alsa/nas/libao/pulse, so no capture
 path exists. The daemon speaks; we get nothing. Our code takes that branch at
-`os-synth/index.ts:318-323` and returns from `#speakDirect()` (`:407-414`) having yielded zero chunks.
+`os-synth/index.ts:400-405` and returns from `#speakDirect()` (`:491`) having yielded zero chunks.
 
 This is a **deliberate, announced violation of R5.2/R021** taken because silence is worse for
 assistive technology, and it is already declared three times (`os-synth/index.ts:110-117`, P25, 005
@@ -651,7 +651,7 @@ a wrong-value lie.
 | `prosody.pitchSemitones` | macOS `say` CLI (no `-p` flag; only in-band `[[pbas]]` — **`[measured-here]`**), Windows `Speak` (no `Pitch` property — **`[documented]`**) | identity falls back to call-sign + earcon, which are portable by construction | *"Voice pitch is not available on this system, so agents are told apart by name."* |
 | `prosody.rate.calibration = 'exact'` | Windows: `$s.Rate` is `-10..+10` with no documented wpm meaning | the seed formula, **shown as an assumption**, and the Voice Lab offers "recalibrate" | *"Speed on Windows is estimated until you calibrate it."* |
 | `prosody.voiceVerification` | macOS `say` (exits 0 on a bogus voice — **`[measured-here]`**), Windows `SelectVoice` (substring match — **`[documented]`**) | the provider reports `'none'`; the identity layer refuses to count voice as a distinguishing axis | *"This system cannot confirm which voice it used, so voices are not used to tell agents apart."* |
-| `transport.pause` | today: every provider — `cancel()` is `SIGKILL` (`os-synth/index.ts:240`) | `PauseUnsupportedError`, refusal earcon, **no cancel** | *"Pause is not available with the system voice. Stop, then read again."* |
+| `transport.pause` | today: every provider — `cancel()` is `SIGKILL` (`os-synth/index.ts:298`) | `PauseUnsupportedError`, refusal earcon, **no cancel** | *"Pause is not available with the system voice. Stop, then read again."* |
 | `events.word` | Windows and Linux until their sidecars land; the `spd-say` rung permanently | the M13 cursor drops to sentence granularity **and says so in the header** | *"Word tracking is not available here."* |
 | `playback: 'client'` | the `spd-say` rung | section 5.2's whole table | already spoken at detection (`os-synth/index.ts:265-268`) — but see the note below |
 | `ssml` | `say` (`'in-band'`, dangerous), espeak-ng CLI, `spd-say` | punctuation-faked pauses, as the normalizer does today | nothing — this one is inaudible and correctly so |
@@ -672,7 +672,7 @@ copies the shape.
 
 `packages/providers/src/contract.ts` today has six tests: one chunk (`:29`), empty input (`:39`),
 cancel within `CANCEL_BUDGET_MS = 50` (`:12`, `:47`), capabilities typed (`:75`), `prepare()`
-idempotent (`:86`), voices listable (`:94`). Test `T041d` is the one FMA PV11 calls a check that
+idempotent (`:94`), voices listable (`:105`). Test `T041d` is the one FMA PV11 calls a check that
 could not have failed.
 
 | New test | Asserts | Negative control |
@@ -711,7 +711,7 @@ are measurements, and that is the honest state of this project's most load-beari
 | 3 | **`spawn('say', …)` — process start, before one phoneme** | **414 ms min / 418 ms median, 5 runs** | **`[measured-here]`** (P10) |
 | 4 | actual synthesis of a real sentence, on top of segment 3 | **~640–750 ms** — segments 2–5 together measure p50 1,054–1,163 ms (F4) and segment 3 is 414 of it | **`[derived]`** from `[measured-here]` |
 | 5 | `readFile` the WAV back, `rm` the dir (`:336`, `:340`) | ~2 ms | **`[claimed]`** `[claimed]` |
-| 6 | sink: `mkdtemp` + `writeFile` + **`spawn('afplay', …)`** (`subprocess-sink.ts:52-61`, `:75`) | **~950 ms**, of which the spawn is 2.3 ms and the temp file 0.33 ms — **the rest is the audio device open** (F5) | **`[measured-here]`** |
+| 6 | sink: `mkdtemp` + `writeFile` + **`spawn('afplay', …)`** (`subprocess-sink.ts:98-105`, `:128`) | **~950 ms**, of which the spawn is 2.3 ms and the temp file 0.33 ms — **the rest is the audio device open** (F5) | **`[measured-here]`** |
 
 > **Amended 2026-08-21, forced by findings 1 and 3 of `docs/.research/latency-measurements.md`.**
 > Rows 4 and 6 read `UNMEASURED` — which was an admission, not a label, and is `[claimed]` under
@@ -903,7 +903,7 @@ the first: **M9 builds the thing, and the thing is the device, not the engine**
 | Per-turn earcons become affordable — **~870 ms `[measured-here]` recovered per turn** | prepending a 140 ms chunk stops costing a whole device cycle | 005 section 11.1d, re-costed 2026-08-21 from 140 ms to **p50 874 / 862 ms measured**, n=10 ×2 |
 | Ducking for a phone call becomes possible | a spawned player participates in no audio session policy: it cannot request ducking, cannot be ducked, cannot yield | FMA **B-04**, which calls this *"structural, not an oversight to patch later"* |
 | Word cursor, and precise resume after barge-in | the events ride the same in-process stream as the audio | F2 |
-| Two-sided cancel is real everywhere but the floor | we hold both the synthesizer and the device | `os-synth/index.ts:240` is `SIGKILL` on a child that has already written its WAV |
+| Two-sided cancel is real everywhere but the floor | we hold both the synthesizer and the device | `os-synth/index.ts:298` is `SIGKILL` on a child that has already written its WAV |
 
 Four of those five are things other designs already assume and none of them can have today.
 
@@ -932,7 +932,7 @@ synthesis through three unrelated APIs. **Costed here rather than hidden**, per 
 - **Linux is a socket client, and it cannot be a synthesis service at all.** SSIP's full verb list is
   `set/history/stop/cancel/pause/resume/sound_icon/char/key/list/get/help/block/speak/quit`
   (`speechd` `src/server/parse.c:98-110`) — **no audio-retrieval verb**; `SET` has no audio-output
-  parameter (`:424-680`); and the last theoretical capture route is closed at
+  parameter (`:424-680` <!-- citation-check: ignore — external brailcom/speechd, path inherited by the tool from a repo file; see section 15's R7-21 block, which records that these five pointers are unpinned and why they are not "fixed" with a number. -->); and the last theoretical capture route is closed at
   `src/audio/libao.c:75`, which calls `ao_open_live()` and cannot open a file driver. So **the Linux
   resident service is a `spoke-elsewhere` provider with pause/resume and index marks** — better
   transport, still no bytes. Section 5's rung is the permanent Linux answer *unless* the
@@ -1374,9 +1374,9 @@ Every `path:line` here was read at **`32b929a`** with `packages/` clean, not cop
 document — 009 records that a previous correction table was itself 16 lines stale.
 
 **One stale citation found, in two places.** The Windows rate formula
-`Math.round((opts.rate - 1) * 10)` is at **`packages/providers/src/os-synth/index.ts:360`**, not
-`:366`. `docs/design/005-agent-identity.md` section 8.2 and `docs/design/006-fma.md` PV14 both cite
-`:366`, which now lands on `$s.Rate = ${rate}`. The finding itself — the linear formula over-shoots
+`Math.round((opts.rate - 1) * 10)` is at **`packages/providers/src/os-synth/index.ts:444`**, not
+`:366`. <!-- citation-check: ignore — this line QUOTES a stale citation as the finding. Re-anchoring it would delete the defect it reports (R7-21, and 014's own declared-contribution note). --> `docs/design/005-agent-identity.md` section 8.2 and `docs/design/006-fma.md` PV14 both cite
+`:366`, which now lands on `$s.Rate = ${rate}`. <!-- citation-check: ignore — same: the wrong line IS the claim. --> The finding itself — the linear formula over-shoots
 in the middle and saturates from `rate` 2.0 upward — is unchanged and correct. Not fixed here; this
 document changes no file but itself.
 
@@ -1384,7 +1384,7 @@ document changes no file but itself.
 >
 > 1. **The blanket sentence above does not cover the external citations, and reads as though it
 >    does.** Section 9 and section 13 cite `brailcom/speechd` at `src/server/parse.c:98-110`,
->    `:424-680`, `src/audio/libao.c:75`, `src/clients/say/options.c` and `module_utils.c` with **no
+>    `:424-680` <!-- citation-check: ignore — an EXTERNAL brailcom/speechd path; the bare `:NN` inherits the preceding repo path, which is the tool's blind spot. The real defect is that these five pointers carry no SHA, and it is stated in this very block rather than fixed by a line number. -->, `src/audio/libao.c:75`, `src/clients/say/options.c` and `module_utils.c` with **no
 >    commit and no version**. R001 requires a recorded SHA. There is no vendored copy in this repo, so
 >    **as written those five pointers are unverifiable** — and the load-bearing claim *"`spoke-elsewhere`
 >    is the permanent Linux floor"* rests entirely on them. **Nobody in this session could reach the
