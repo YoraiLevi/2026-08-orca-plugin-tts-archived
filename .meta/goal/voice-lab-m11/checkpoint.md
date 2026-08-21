@@ -14,24 +14,21 @@ because the machine reached **load average 51.62** with seven agents running and
 containing nothing unusual took **71 seconds and dropped a chunk**. A measurement there is a
 property of the swarm, not the code. **This is the first task on resume.**
 
-## UNCOMMITTED WORK IN THE TREE AT THE BREAK — read before you touch huddle
+## The huddle work RESOLVED before the break — this section is kept as history
 
-`packages/plugin/src/huddle/{decoders.ts,index.ts,huddle.test.ts}` are **modified and NOT
-committed**, and they are **RED**: 1 of 28 huddle tests failing, `pnpm lint` exit 1. `tsc -b
---force` is clean.
+An earlier revision of this checkpoint warned that `packages/plugin/src/huddle/**` was uncommitted
+and **red**. **That is no longer true and the warning is retired**, because a stale warning costs
+more than no warning.
 
-**This was deliberately left uncommitted.** An earlier batch of the same agent's work was preserved
-at `20e64cc` after verifying 56/56 green; this later batch is mid-edit and committing it would land
-a red on a tree that is otherwise green at `20e64cc` (`lint` 0, `typecheck` 0). Preserving work is
-worth a byline, not a broken build.
+The agent landed it at **`03186ea` — "R10-02: read the compaction the transcript states, instead of
+inferring it"**: huddle no longer infers a compaction from *"the file got shorter"* but reads the
+`{"type":"system","subtype":"compact_boundary"}` record ORCA actually writes. Verified at that
+commit: huddle **28/28**, `pnpm lint` 0, `tsc -b --force` 0.
 
-Most likely **R10-02**: huddle infers a compaction from *"the file got shorter"* instead of reading
-the `{"type":"system","subtype":"compact_boundary"}` record ORCA actually writes — a strictly weaker
-proxy for a fact that is in the file, guarding a harm the code itself calls unrecoverable.
-
-**On resume:** find the failing test, finish or revert the change, and commit it deliberately.
-Do not simply `git checkout` these files — P34's second half records `git checkout`-as-undo
-destroying 80 lines here once. Read them first.
+Kept as history because the judgement is worth reusing: **an earlier batch of the same agent's work
+was preserved by the architect at `20e64cc` after checking it was 56/56 green, and a later batch was
+deliberately NOT committed because it was red.** Preserving a peer's work across a break is worth a
+byline; it is not worth a broken build, and only running the tests tells you which case you are in.
 
 ## Resume here — the one task waiting on the reset
 
