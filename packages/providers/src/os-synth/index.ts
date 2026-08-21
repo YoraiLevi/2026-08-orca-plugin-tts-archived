@@ -47,6 +47,42 @@ const CAPABILITIES: ProviderCapabilities = {
   sampleRate: 22050
 }
 
+/**
+ * Neutralize in-band synthesizer command syntax before any text reaches a spawned engine.
+ *
+ * `[[` opens an embedded command on BOTH engines we drive from prose:
+ *  - macOS `say`: `[[volm 0.2]]` sets playback volume. VERIFIED BY EFFECT on macOS 26.5 —
+ *    `say -o a.wav "hello [[volm 0.2]] world"` and `say -o c.wav "hello world"` produce
+ *    byte-identical output (41258 bytes each), i.e. the bracketed run is executed, not spoken,
+ *    while `"hello [ [volm 0.2]] world"` produces 129692 bytes because it IS spoken.
+ *  - espeak-ng: text inside `[[ ]]` is reinterpreted as phoneme mnemonics — its own man page
+ *    gives `espeak-ng -ven-us "[[h@'loU]]"` -> speaks "hello" (espeak-ng/espeak-ng
+ *    `src/espeak-ng.1.ronn`, EXAMPLES). So the prose is silently replaced by whatever those
+ *    letters mean as phonemes.
+ *
+ * This is a LIVE defect in shipped v1: an agent reply, or a repository containing that string in a
+ * code comment, can set the assistive tool's volume to zero with no error and no indication. The
+ * normalizer does not close it — `expandNumbers` happens to destroy integer arguments
+ * (`[[pbas 46]]` -> `[[pbas forty six]]`) but decimals are handed to the engine untouched, so
+ * `[[volm 0.2]]` survives verbatim. That is luck, not a defence.
+ *
+ * The fix is a separator, not a delete: the lexer needs the two brackets adjacent, so one space
+ * between them makes the run inert while the listener still hears every character the agent wrote.
+ * Deleting it would be a silent omission, which is the failure class this project exists to avoid.
+ *
+ * ORDER MATTERS for design 005: any control token WE generate (`[[pbas n]]`) must be prepended
+ * AFTER this runs, never before — this function cannot tell our tokens from the agent's prose.
+ *
+ * Windows is not routed through here because it is clean: `System.Speech`'s `Speak(String)` speaks
+ * plain text (SSML has its own entry point, `SpeakSsml`), and `#command` already doubles single
+ * quotes, which is the only PowerShell metacharacter inside a single-quoted string. It is applied
+ * on every platform anyway, because a no-op on a clean surface costs nothing and the next engine
+ * we add is more likely to have the hole than not.
+ */
+export function neutralizeInBandCommands(text: string): string {
+  return text.replace(/\[\[/g, '[ [')
+}
+
 export class OsSynthUnavailableError extends Error {
   constructor(platform: string, tried: readonly string[]) {
     super(`No OS speech synthesizer found on ${platform}. Tried: ${tried.join(', ')}`)
@@ -137,8 +173,11 @@ const clamp = (n: number, lo: number, hi: number): number => Math.max(lo, Math.m
  * parity bug: rate worked on macOS and Windows and silently did nothing on Linux).
  */
 export function linuxCommand(
-  backend: LinuxBackend, text: string, outFile: string, opts: SynthesizeOptions
+  backend: LinuxBackend, rawText: string, outFile: string, opts: SynthesizeOptions
 ): { cmd: string; args: string[] } {
+  // Also neutralized here, not only at `#command`: this builder is exported and is what the tests
+  // (and any future caller) reach, and the operation is idempotent, so belt-and-braces is free.
+  const text = neutralizeInBandCommands(rawText)
   if (backend === 'spd-say') {
     // --wait: exit only once the message has been spoken, so utterances stay in order.
     const args = ['--wait']
@@ -302,7 +341,11 @@ export class OsSynthProvider implements TtsProvider {
     }
   }
 
-  #command(text: string, outFile: string, opts: SynthesizeOptions): { cmd: string; args: string[] } {
+  #command(rawText: string, outFile: string, opts: SynthesizeOptions): { cmd: string; args: string[] } {
+    // Every engine sees escaped text. Done here, at the single spawn boundary, rather than in the
+    // normalizer: the normalizer is platform-agnostic and pure, and this is a property of the
+    // engine we are about to hand the string to.
+    const text = neutralizeInBandCommands(rawText)
     switch (this.#platform) {
       case 'darwin': {
         // WAV, never the default AIFF: decodeAudioData rejects AIFF-C (measured, E6e).

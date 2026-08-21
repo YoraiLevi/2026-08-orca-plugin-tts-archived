@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { OsSynthProvider, linuxCommand } from './index.js'
+import { OsSynthProvider, linuxCommand, neutralizeInBandCommands } from './index.js'
 import { runProviderContract } from '../contract.js'  // test-only entry, never via the barrel
 
 // T045: the contract runs against the real OS synthesizer on whatever platform CI is on.
@@ -114,4 +114,51 @@ describe('T042f Linux is never silently silent', () => {
     await p.prepare().catch(() => undefined)
     expect(said.join(' ')).toContain('apt install espeak-ng')
   })
+})
+
+/**
+ * NM14 / cross-review E-06 — in-band speech commands in agent prose.
+ *
+ * `[[` opens an embedded command on macOS `say` (`[[volm 0.2]]` sets playback volume) and switches
+ * espeak-ng into phoneme-mnemonic mode (its own man page: `espeak-ng -ven-us "[[h@'loU]]"` speaks
+ * "hello"). Neither is closed by the normalizer: `expandNumbers` happens to mangle integer
+ * arguments, but decimals are handed through untouched, so `[[volm 0.2]]` reached `say` verbatim in
+ * shipped v1. An agent reply — or a repo containing that string in a comment — could silence the
+ * assistive tool with no error and no indication.
+ */
+describe('E-06 in-band synthesizer commands never reach the engine', () => {
+  it('neutralizes the opener without deleting a single character the agent wrote', () => {
+    expect(neutralizeInBandCommands('a [[volm 0.2]] b')).toBe('a [ [volm 0.2]] b')
+    // Silent omission is the failure class this project exists to avoid: every character survives.
+    const before = 'x [[pbas 46]] y [[volm 0]] z'
+    const after = neutralizeInBandCommands(before)
+    expect(after.replace(/ /g, '')).toBe(before.replace(/ /g, ''))
+    expect(after).not.toContain('[[')
+    // Idempotent, because it runs at two layers.
+    expect(neutralizeInBandCommands(after)).toBe(after)
+  })
+
+  it('no argument vector handed to a Linux engine can carry an opener', () => {
+    for (const backend of ['espeak-ng', 'espeak', 'spd-say'] as const) {
+      const { args } = linuxCommand(backend, "hi [[h@'loU]] there", '/tmp/a.wav', {})
+      expect(args.join(' '), `${backend} received a phoneme-mode opener`).not.toContain('[[')
+      expect(args.join(' ')).toContain('there')
+    }
+  })
+
+  it('VERIFY BY EFFECT: bracketed text is spoken, not executed (macOS)', async () => {
+    if (process.platform !== 'darwin') return
+    const p = new OsSynthProvider()
+    const bytes = async (text: string): Promise<number> => {
+      let n = 0
+      for await (const c of p.generate(text)) n += c.data.length
+      return n
+    }
+    const plain = await bytes('hello world')
+    const injected = await bytes('hello [[volm 0.2]] world')
+    // Before the fix these were byte-identical (41258 each, measured): `say` consumed the run as a
+    // command. Now the words are synthesized, so the audio is materially longer.
+    expect(injected, 'the bracketed run was executed as a command, not spoken')
+      .toBeGreaterThan(plain * 1.5)
+  }, 30_000)
 })
