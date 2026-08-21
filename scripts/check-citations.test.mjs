@@ -246,6 +246,37 @@ describe('an annotation the parser does not read is named, not silently ignored'
     expect(out).toContain('STALE CITATIONS')
   })
 
+  /**
+   * The two kinds are gated differently, and the argument is the whole reason this section exists.
+   *
+   * A malformed marker is a FALSE CLAIM OF COVERAGE — somebody meant to suppress a check, the
+   * suppression never happened, and the document reads as though it did. Worse than a stale
+   * citation, which is wrong and says so. It has already caused damage: `--fix` rewrote a citation
+   * `009` E-01 says not to touch because its marker was one of these.
+   *
+   * A prose stamp claims nothing about this tool. Failing on it would punish a document for being
+   * honest about its own volatility.
+   */
+  it('a malformed marker FAILS the run — a suppression that never happened', () => {
+    const { code, out } = fixture(
+      'See `packages/core/src/thing.ts:2` in `readRoot`. <!-- citation-check: ignore — verified by hand -->\n',
+      SOURCE_REMEDIED,
+    )(['--max-lost=1'])
+    expect(out).toMatch(/annots:\s+1 malformed/)
+    expect(code).not.toBe(0)
+  })
+
+  it('CONTROL: a prose stamp does NOT fail the run, on the same otherwise-green fixture', () => {
+    // Same shape, same green baseline — only the annotation differs. Without this, the test above
+    // passes for a checker that fails on any annotation at all.
+    const { code, out } = fixture(
+      'See `packages/core/src/thing.ts:2` `[live tree]` in `readRoot`.\n', SOURCE_REMEDIED,
+    )(['--max-lost=1'])
+    expect(out).toMatch(/\+ 1 prose stamp/)
+    expect(out).toMatch(/annots:\s+0 malformed/)
+    expect(code).toBe(0)
+  })
+
   it('CONTROL: the well-formed marker is not named, and really does suppress', () => {
     const out = fixture(
       'See `packages/core/src/thing.ts:2` in `readRoot`. <!-- citation-check: ignore --><!-- why: checked -->\n',

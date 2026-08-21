@@ -58,7 +58,8 @@
   },
   "superseded": {
     "34": "Calibrated 2026-08-21 against the ORCA-ABSENT run while docs/.research/citation-audit.md's Numbers table reported 33 from the ORCA-RESOLVED run. Two populations, one number. It was never a threshold on the number anyone was reading, and the checker now refuses it rather than enforcing it.",
-    "85 / 98 (total)": "The total-count ratchet. Superseded by the move to LOST, not by being raised. Both numbers stay in standing_total_stale_SUPERSEDED and both are still printed on every run."
+    "85 / 98 (total)": "The total-count ratchet. Superseded by the move to LOST, not by being raised. Both numbers stay in standing_total_stale_SUPERSEDED and both are still printed on every run.",
+    "gate on the total": "Superseded 2026-08-21 by the move to LOST. See gateChangedWhy, quoteGoneDecision and unreadAnnotationDecision, which together record everything the gate does and does not cover."
   },
   "gate": "LOST",
   "gateChangedOn": "2026-08-21",
@@ -100,5 +101,59 @@
     "orca:87097551f8": 85,
     "orca:absent": 98,
     "why": "The old TOTAL-count ratchet, measured clean at 98309f8, kept visible rather than deleted. It was never met again after 4ccfa20 and was never raised to meet it - see gateChangedWhy."
-  }
+  },
+  "gatedOn": [
+    "LOST",
+    "malformed citation-check markers"
+  ],
+  "notGated": [
+    "DRIFTED",
+    "QUOTE-GONE",
+    "prose stamps"
+  ],
+  "quoteGoneDecision": [
+    "QUOTE-GONE IS REPORTED AND NOT GATED. The architect asked for the argument rather than a guess,",
+    "so here it is, and it turns on WHO CREATES ONE.",
+    "",
+    "A new QUOTE-GONE appears when somebody FIXES CODE that a document quotes verbatim. That is the",
+    "same shape as the DRIFTED problem one level up: gating it makes the bug fix the thing that breaks",
+    "the build. The person who fixed the bug is usually not the person who can fix the document, and",
+    "for 006-fma fixing the document is not an edit at all - it is the pin-vs-reconcile decision that",
+    "belongs to the author. Blocking their commit leaves them a bad doc edit or a bypass, which is the",
+    "'lie or make it worse' trap the LOST move was made to escape.",
+    "",
+    "Nor would a ratchet at the current count help. It may only fall, and the next good fix to quoted",
+    "code raises it - so it would go red for exactly the behaviour we want, and the only way back to",
+    "green would be to raise it. A ratchet that a correct action breaks is not a ratchet.",
+    "",
+    "WHAT IS DIFFERENT FROM DRIFTED, AND WHY IT STILL PRINTS ITS ROWS. DRIFTED is a navigation problem:",
+    "the claim is intact, the pointer is off. QUOTE-GONE is a SEMANTIC divergence - the document",
+    "describes code that is no longer there - so it is worth acting on and worth naming row by row",
+    "with the vanished quote beside it. It is a work queue, not a gate. It is 19 today and none of them",
+    "can be cleared without a human reading the row.",
+    "",
+    "REVISIT IT if QUOTE-GONE ever stops being dominated by 006. Today 15 of 19 are in the record",
+    "documents, where re-pointing is harmful by construction. If a future QUOTE-GONE population were",
+    "mostly live documents that CAN be fixed cheaply, gating it at a falling ratchet would become",
+    "reasonable, because then a correct action would clear it rather than break it."
+  ],
+  "unreadAnnotationDecision": [
+    "MALFORMED citation-check MARKERS ARE GATED AT ZERO. PROSE STAMPS ARE REPORTED.",
+    "",
+    "The architect's instinct was right and the split is what makes it actionable. A malformed marker",
+    "is a FALSE CLAIM OF COVERAGE: somebody wrote `<!-- citation-check: ignore - reason -->` intending",
+    "to suppress a check, the matcher accepts nothing between `ignore` and `-->`, and the suppression",
+    "never happened while the document reads as though it did. That is strictly worse than a stale",
+    "citation, which is wrong and says so. It has already done damage - `--fix` rewrote",
+    "plugin-host-api.ts:261-265, the one citation 009 E-01 says explicitly not to touch, because its",
+    "marker was one of these (PITFALLS P35).",
+    "",
+    "Gated at ZERO, and the count is zero today. Zero is the only moment when setting a threshold is",
+    "not an argument about a backlog, which is the whole lesson of the 34.",
+    "",
+    "A PROSE STAMP is not a claim about this tool. 017 writes `[live tree]` and states at its top that",
+    "those pointers may have moved; that is a disclosure addressed to a reader. Failing on it would",
+    "punish a document for being honest about its own volatility. Named, so the next person knows the",
+    "parser does not honour it, and not gated."
+  ]
 }

@@ -631,6 +631,85 @@ if (FIX) {
 // ORCA checkout HEAD -- documents claim a pinned commit; say so if the tree has moved.
 const orcaHead = counts.orca > 0 ? (gitFiles(ORCA, ['rev-parse', 'HEAD'])[0] ?? null) : null
 
+/* ---------------------------------------------------------------- unread suppressions
+ *
+ * P35, TWICE. An annotation the parser does not read is a suppression that never happened, and
+ * this repo has now produced two different shapes of it:
+ *
+ *   1. `<!-- citation-check: ignore — VERIFIED CORRECT … -->`. The matcher is
+ *      /<!--\s*citation-check:\s*ignore\s*-->/ and nothing may sit between `ignore` and `-->`, so
+ *      every marker written with its reason INSIDE parsed as ordinary prose. `--fix` then rewrote
+ *      a citation that `009` E-01 says explicitly not to touch.
+ *   2. `` `[live tree]` ``. `017-review-round8.md` stamps ten citations with it and explains at
+ *      its top that they may have moved. That is an honest disclosure addressed to a HUMAN; this
+ *      tool has never read it, so those citations are counted like any other and rot on the next
+ *      edit to the file they point into.
+ *
+ * Both are now NAMED. Not failed on — whether an unread marker should break the build belongs
+ * with the ratchet decision, not smuggled in here — but a tool that silently ignores an
+ * annotation someone wrote FOR it is the same class of defect it was built to catch.
+ *
+ * Matches inside backticks are skipped: PITFALLS and `016` quote the broken shape in prose in
+ * order to document it, and flagging the documentation of a bug as the bug is noise.
+ */
+const VALID_MARKER = /<!--\s*citation-check:\s*ignore(-file|-begin|-end)?\s*-->/
+/** R006's evidence vocabulary. Not suppressions -- they qualify a NUMBER, not a citation. */
+const R006_LABELS = new Set([
+  'measured-here', 'measured', 'measured-third-party', 'documented', 'claimed', 'derived',
+  'estimated', 'unmeasured', 'inferred',
+])
+function unreadSuppressions() {
+  const out = []
+  for (const doc of DOCS) {
+    const lines = readFileSync(join(REPO, doc), 'utf8').split('\n')
+    lines.forEach((line, i) => {
+      const quoted = (m) => {
+        const before = line.slice(0, line.indexOf(m))
+        return (before.split('`').length - 1) % 2 === 1
+      }
+      for (const m of line.match(/<!--[^>]*citation-check[^>]*-->/g) ?? []) {
+        if (VALID_MARKER.test(m) || quoted(m)) continue
+        out.push({ doc, line: i + 1, kind: 'malformed marker', text: m.slice(0, 72) })
+      }
+      // A prose stamp sitting beside a citation, e.g. `:810` `[live tree]` -- MINUS R006's
+      // evidence vocabulary, which is a different and legitimate convention that says how well a
+      // NUMBER is supported and claims nothing about a citation. Restated here rather than
+      // imported from anywhere, so adding a word to it is a decision that shows up in a diff
+      // (PITFALLS P36). Without this exclusion the check reports 58 hits, 58 of them noise, and
+      // buries the two real ones -- which is the same mistake the weak-anchor rule above exists
+      // to avoid.
+      if (new RegExp(String.raw`${LINES}`).test(line)) {
+        for (const m of line.match(/`\[[a-z][a-z0-9 -]{2,24}\]`/g) ?? []) {
+          if (R006_LABELS.has(m.slice(2, -2))) continue
+          out.push({ doc, line: i + 1, kind: 'prose stamp', text: m })
+        }
+      }
+    })
+  }
+  return out
+}
+const UNREAD = unreadSuppressions()
+const MALFORMED = UNREAD.filter((u) => u.kind === 'malformed marker')
+const PROSE_STAMPS = UNREAD.filter((u) => u.kind === 'prose stamp')
+
+/**
+ * THE TWO KINDS ARE NOT THE SAME THING, and only one of them fails the run.
+ *
+ * A MALFORMED MARKER is a FALSE CLAIM OF COVERAGE. Somebody wrote
+ * `<!-- citation-check: ignore — reason -->` intending to suppress a check; the matcher accepts
+ * nothing between `ignore` and `-->`, so the suppression never happened while the document reads
+ * as though it did. That is strictly worse than a stale citation: a stale citation is wrong and
+ * says so, this is wrong and claims to be handled. It has already done damage — `--fix` rewrote
+ * `plugin-host-api.ts:261-265`, the one citation `009` E-01 says explicitly not to touch, because
+ * its marker was one of these. GATED AT ZERO, which costs nothing today because there are zero,
+ * and zero is the only moment when setting a threshold is not an argument about a backlog.
+ *
+ * A PROSE STAMP is not a claim about this tool at all. `017` writes `[live tree]` and says at its
+ * top that those pointers may have moved; that is a disclosure addressed to a reader, and nobody
+ * asserted the checker would honour it. Naming it is useful; failing on it would punish a document
+ * for being honest. REPORTED, NOT GATED.
+ */
+
 // Disjoint by construction, so the three always sum to `stale.length`. Subtracting one bucket's
 // count from another's is how a total quietly stops adding up.
 const quoteGone = stale.filter(({ cit, r }) => quotesGone(cit.context, r.target.abs))
@@ -754,66 +833,9 @@ const { limit: LOST_LIMIT, refuse: REFUSAL } = resolveThreshold()
  */
 const problems =
   REFUSAL !== null ||
-  lost > LOST_LIMIT || (STRICT && unanchored.length > 0) || (REQUIRE_ORCA && !ORCA_PRESENT)
+  lost > LOST_LIMIT || MALFORMED.length > 0 ||
+  (STRICT && unanchored.length > 0) || (REQUIRE_ORCA && !ORCA_PRESENT)
 
-/* ---------------------------------------------------------------- unread suppressions
- *
- * P35, TWICE. An annotation the parser does not read is a suppression that never happened, and
- * this repo has now produced two different shapes of it:
- *
- *   1. `<!-- citation-check: ignore — VERIFIED CORRECT … -->`. The matcher is
- *      /<!--\s*citation-check:\s*ignore\s*-->/ and nothing may sit between `ignore` and `-->`, so
- *      every marker written with its reason INSIDE parsed as ordinary prose. `--fix` then rewrote
- *      a citation that `009` E-01 says explicitly not to touch.
- *   2. `` `[live tree]` ``. `017-review-round8.md` stamps ten citations with it and explains at
- *      its top that they may have moved. That is an honest disclosure addressed to a HUMAN; this
- *      tool has never read it, so those citations are counted like any other and rot on the next
- *      edit to the file they point into.
- *
- * Both are now NAMED. Not failed on — whether an unread marker should break the build belongs
- * with the ratchet decision, not smuggled in here — but a tool that silently ignores an
- * annotation someone wrote FOR it is the same class of defect it was built to catch.
- *
- * Matches inside backticks are skipped: PITFALLS and `016` quote the broken shape in prose in
- * order to document it, and flagging the documentation of a bug as the bug is noise.
- */
-const VALID_MARKER = /<!--\s*citation-check:\s*ignore(-file|-begin|-end)?\s*-->/
-/** R006's evidence vocabulary. Not suppressions -- they qualify a NUMBER, not a citation. */
-const R006_LABELS = new Set([
-  'measured-here', 'measured', 'measured-third-party', 'documented', 'claimed', 'derived',
-  'estimated', 'unmeasured', 'inferred',
-])
-function unreadSuppressions() {
-  const out = []
-  for (const doc of DOCS) {
-    const lines = readFileSync(join(REPO, doc), 'utf8').split('\n')
-    lines.forEach((line, i) => {
-      const quoted = (m) => {
-        const before = line.slice(0, line.indexOf(m))
-        return (before.split('`').length - 1) % 2 === 1
-      }
-      for (const m of line.match(/<!--[^>]*citation-check[^>]*-->/g) ?? []) {
-        if (VALID_MARKER.test(m) || quoted(m)) continue
-        out.push({ doc, line: i + 1, kind: 'malformed marker', text: m.slice(0, 72) })
-      }
-      // A prose stamp sitting beside a citation, e.g. `:810` `[live tree]` -- MINUS R006's
-      // evidence vocabulary, which is a different and legitimate convention that says how well a
-      // NUMBER is supported and claims nothing about a citation. Restated here rather than
-      // imported from anywhere, so adding a word to it is a decision that shows up in a diff
-      // (PITFALLS P36). Without this exclusion the check reports 58 hits, 58 of them noise, and
-      // buries the two real ones -- which is the same mistake the weak-anchor rule above exists
-      // to avoid.
-      if (new RegExp(String.raw`${LINES}`).test(line)) {
-        for (const m of line.match(/`\[[a-z][a-z0-9 -]{2,24}\]`/g) ?? []) {
-          if (R006_LABELS.has(m.slice(2, -2))) continue
-          out.push({ doc, line: i + 1, kind: 'prose stamp', text: m })
-        }
-      }
-    })
-  }
-  return out
-}
-const UNREAD = unreadSuppressions()
 
 
 /**
@@ -859,7 +881,9 @@ if (UNREAD.length && (problems || LIST)) {
   console.error(`SECOND comment beside it, never inside it.\n`)
   const byKind = new Map()
   for (const u of UNREAD) byKind.set(u.kind, (byKind.get(u.kind) ?? 0) + 1)
-  for (const [k, n] of byKind) console.error(`  ${String(n).padStart(3)}  ${k}`)
+  for (const [k, n] of byKind) {
+    console.error(`  ${String(n).padStart(3)}  ${k}${k === 'malformed marker' ? '   <- FAILS THE RUN' : '   (reported, not gated)'}`)
+  }
   for (const u of UNREAD.slice(0, 12)) console.error(`       ${u.doc}:${u.line}  ${u.text}`)
   if (UNREAD.length > 12) console.error(`       … and ${UNREAD.length - 12} more`)
 }
@@ -914,6 +938,13 @@ console.error(
   `                     + ${lost} LOST (anchor nowhere in the file — the claim is in question, GATED)\n` +
   `                     + ${quoteGone.length} QUOTE-GONE (quoted code is gone — likely REMEDIED,` +
   ` read the row, never re-point)`,
+)
+// Named on every run for the same reason the stale breakdown is: a gate you cannot see the inputs
+// to is a gate nobody can act on.
+console.error(
+  `annots:    ${MALFORMED.length} malformed citation-check marker(s) — GATED at 0: a suppression` +
+  ` that never happened\n` +
+  `                     + ${PROSE_STAMPS.length} prose stamp(s) — reported, not gated`,
 )
 if (DIRTY.length > 0) {
   console.error(
