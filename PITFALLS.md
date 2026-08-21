@@ -6,6 +6,36 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P37 — Stage identity is a positional integer, so inserting a stage silently re-points every reference
+**Symptom:** the normalizer needed one new transform, `stripHtmlComments`, and it is only correct at
+position 2 — after `stripFencedCode`, which is the one placement where it cannot reach a `<!--`
+written inside a fenced code block. That one insert is a **five-file breaking change**: the
+normalizer, `scripts/voice-lab.mjs` (`STAGES` **and** `apply[]`), `voice-lab/lib/controls.mjs`, its
+inlined twin in `voice-lab/index.html`, and two test files. Two of them are byte-compared at boot by
+`assertLoadedModuleIsOnDiskSource()`, so a half-done renumber does not fail a test — it makes the
+Voice Lab server **refuse to start**, on every fixture, with a message about a stale `dist`.
+**Cause:** a stage is addressed by its ORDINAL. `stages: [8]` on a control, `FIXED_BY_DESIGN_STAGES
+= [3, 10, 14, 15]`, `stage 13 expandNumbers` in eight documents. An ordinal is a name that changes
+meaning when its neighbours move.
+**The part that has no indicator at all:** `FIXED_BY_DESIGN_STAGES = [3, 10, 14, 15]`. After an
+insert at 2 those four integers are still in range, still valid, and now name four DIFFERENT
+transforms. The listener is told "fixed by design" about a stage two controls govern, and is sent to
+the wrong knob. Nothing type-checks it, nothing tests it, and the ladder still renders. Contrast the
+same repo's `STAGES` name list, which is compared against the call order in `normalize()` and went
+red immediately — the difference is that one list carries NAMES and the other carries POSITIONS.
+**Instead:** address stages by NAME wherever a name will do — `stages: ['speakFilePaths']` cannot be
+made wrong by an insert, and a typo in it is a lookup failure rather than a plausible wrong answer.
+Where the ordinal must stay (the ladder's display numbering), DERIVE it from the name list rather
+than writing it a second time. Until that refactor exists, treat "insert a stage" as a
+five-file atomic change and serialise it against anyone else in the tree: a split renumber leaves
+the Lab unbootable, and if someone is measuring against that server they get a corrupted reading
+they cannot diagnose.
+**Verify by effect:** change one integer in `FIXED_BY_DESIGN_STAGES` and run `pnpm test`. Today it
+goes red only because `lab.test.mjs` recomputes the same list from `controlsForStage()` — which is
+the ONE check standing between that constant and a silent wrong answer. Delete that test and the
+constant becomes unfalsifiable. Found by J21, 2026-08-21, adding the HTML-comment stage; the
+architect's arbitration is in `.meta/goal/voice-lab-m11/ledger.md`.
+
 ## P36 — A test that IMPORTS the table it is checking cannot fail
 **Symptom:** `token-conservation.test.ts` asserts that a check mark reaches the listener as the
 word "yes" — 006 site 50, where `stripEmoji` deleted verdict glyphs and "check done" / "cross done"
