@@ -152,3 +152,25 @@ audit trail that explains the whole session after the fact.
 - **Lesson for the ledger, not just this job:** a long-running Job that writes its ledger
   entry LAST loses the map when it dies. Future briefs should require the ledger row to be
   written incrementally, as each finding is resolved.
+
+### J03 `fma-fixes` — RESUMED and done
+- **forensics first, and the ledger was wrong**: J03 landed **eight** commits, not four. The four
+  the entry above missed — `83f0a5d`, `7decced`, `cdb72bf`, `8bd984b` — are the four that closed
+  the FMA's own "three to fix first" (finding 1, sites 31/32/33/35/36/41/42/43/44/45/46/53/54) and
+  **cascade C6**. Reconstructed from `git show`; the dead agent wrote no report.
+- did: `docs/.research/fix-round7-report.md` — **written and committed BEFORE the code** (50cc300),
+  appended as each site closed. Then section 19 **rank 3** (cascade C1, provenance re-resolved at
+  speak time), site **37**, section 19 **rank 4** (a pressed control answers aloud), site **24**'s
+  unbounded deferred buffer, and an end-to-end test proving the new wire is wired.
+- deliberately left, each with a written argument in the report: sites 16, 34, 40, 47, 49, 52.
+  **49 and 52 are false positives** — verified by re-reading the source, not by trusting the audit.
+- evidence: suite **330 -> 337**, 18 files, green. Every fix mutation-verified (the mutation and
+  the exact red message are in each commit body). No test opens an audio device (P31).
+- C6 was **re-verified by effect rather than redone**: reverting `await cancelSynthesis()` to
+  `void` turns the guard red.
+- new pitfall **P34**: a concurrent agent's `git add -A` swept this job's uncommitted source into
+  `172c061`, and `git checkout` as an undo then reverted the whole fix. ~80 lines of rework.
+- **next blind spot, ranked first**: section 19 rank 5 — whether the words spoken are the words
+  that were written. Its cheap 60% is a corpus test over `fixtures/` asserting every input token
+  appears in the output or in an announcement; it needs no offset map and would have caught the
+  deleted check marks of site 50.
