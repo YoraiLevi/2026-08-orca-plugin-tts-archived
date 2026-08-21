@@ -27,11 +27,29 @@
  * — which is itself why this seam had no test.
  */
 import { describe, expect, it } from 'vitest'
-import { SpeechService } from '../speech-service.js'
+import { SpeechService } from '../speech-service.ts'
 import type {
   AudioChunk, PlaybackSink, ProviderCapabilities, SynthesizeOptions, TtsProvider
 } from '@orca-tts/core'
 
+/**
+ * Wait for a CONDITION, never for a duration.
+ *
+ * A fixed sleep is a prediction about how fast this machine is, and the machine is the one part of
+ * the system nobody controls. Under load the prediction is wrong and the test goes red for a reason
+ * that has nothing to do with the code — which is `019`/`021` R12-01, and this file was one of the
+ * nine that had it. The ceiling is generous because it is a BACKSTOP against a hang, not a
+ * measurement: on a quiet machine this returns almost immediately, and on a loaded one it still
+ * returns the right answer instead of a faster wrong one.
+ */
+const until = async (done: () => boolean, ceilingTicks = 600): Promise<void> => {
+  for (let i = 0; i < ceilingTicks; i++) {
+    if (done()) return
+    await new Promise((r) => setTimeout(r, 5))
+  }
+}
+
+/** Only for the rows that assert something did NOT happen; there is no condition to wait on. */
 const settle = async (): Promise<void> => {
   for (let i = 0; i < 40; i++) await new Promise((r) => setTimeout(r, 5))
 }
@@ -78,7 +96,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
     const p = new SpyProvider()
     const s = service(p)
     s.speak('\u{1f389}\u{1f389}\u{1f389}')          // emoji only: normalizes to nothing
-    await settle()
+    await until(() => reports(p.said).length > 0)
     expect(reports(p.said), 'a reply that could not be read aloud was not reported').toHaveLength(1)
     expect(p.said.join(' ')).toContain('nothing in it that could be read aloud')
   })
@@ -88,7 +106,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
     p.failOn = 'alpha'
     const s = service(p)
     s.speak('Alpha one. Beta two.')
-    await settle()
+    await until(() => p.said.some((t) => t.includes('cut short')))
     expect(p.said.join(' ')).toContain('cut short')
   })
 
@@ -133,7 +151,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
     s.speak('\u{1f389}', 'queue')
     s.speak('\u{1f38a}', 'queue')
     s.speak('\u{1f386}', 'queue')
-    await settle()
+    await until(() => reports(p.said).length > 0)
     const r = reports(p.said)
     expect(r, `expected one coalesced report, got ${JSON.stringify(r)}`).toHaveLength(1)
     // "three", not "3": the report is itself spoken, so it goes through `normalize()` like any
@@ -152,7 +170,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
     p.failOn = 'z'
     const s = service(p)
     s.announce('zzz')
-    await settle()
+    await until(() => p.said.length >= 10)   // the runaway this row exists to detect
     expect(p.said.length, 'the announcement channel fed itself').toBeLessThan(10)
   })
 })

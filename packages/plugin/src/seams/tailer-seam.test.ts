@@ -17,6 +17,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+/**
+ * A fixed wait, used HERE and deliberately: SC-15 is a probe of the FILESYSTEM's own notification
+ * behaviour, and there is no condition to wait on — the whole question is whether an event arrives
+ * at all. Waiting for "an event arrived" would make the negative case unfalsifiable.
+ *
+ * Every other fixed wait in this repo's suite is a prediction about machine speed and should be a
+ * condition instead (R12-01). This one is a genuine exception, and it is stated so nobody
+ * "fixes" it into uselessness. The waits are generous so a loaded machine does not produce a false
+ * NEGATIVE — the failure mode here is concluding "no event arrived" too early.
+ */
 const settle = (ms: number): Promise<void> => new Promise((r) => { setTimeout(r, ms) })
 
 /* ================================================================== SC-15
@@ -169,5 +179,74 @@ describe('SC-16 — the shipped manifest is the source manifest', () => {
     expect(commandsOf(readJson('dist/plugin/orca-plugin.json')),
       'the self-test is declared in source and missing from the shipped manifest')
       .toContain('read-aloud.self-test')
+  })
+})
+
+/* ================================================================== SC-17
+ * seam: a test -> the machine's SCHEDULER
+ */
+
+/**
+ * SC-17 — a fixed sleep is a prediction about how fast this machine is, and the machine is the one
+ * part of the system nobody controls.
+ *
+ * `021-review-round12.md` R12-01. The suite gave **657/658 on one clean worktree and 653/658 on
+ * another minutes later**, both honest, both at parity on `node_modules`. Four of the five reds were
+ * not defects: a queue-drain race and two `check-citations` timeouts, all load-dependent. **A suite
+ * count taken today means "the machine was quiet", not "the code is correct" — and every count in
+ * every document in this repo rests on that suite.**
+ *
+ * THIS IS A SEAM, in the same family as SC-15 (the filesystem) and SC-16 (the host manifest): the
+ * far side is **not our code**. Two predicates for one concept —
+ *
+ *   > *"has the asynchronous work finished?"*
+ *
+ * — answered on the test's side by **a duration** and on the runtime's side by **actual
+ * completion**. On a quiet machine they agree, which is why this survived eleven rounds.
+ *
+ * THE FIX IS NOT A LONGER SLEEP. A longer sleep is the same prediction with a bigger margin; it
+ * makes the suite slower on every machine and still wrong on a loaded one. **Wait for the
+ * CONDITION, with a generous ceiling as a backstop against a hang.** On a quiet machine that
+ * returns sooner than the sleep did; on a loaded one it returns the right answer instead of a
+ * faster wrong one.
+ *
+ * THE HONEST EXCEPTION, and it is why this row asserts a file list rather than "no setTimeout
+ * anywhere": a probe of whether an event arrives AT ALL has no condition to wait on, and waiting
+ * for "an event arrived" would make its negative case unfalsifiable. SC-15 above is exactly that,
+ * and it says so at its own `settle`. An exception that is stated is a decision; an exception that
+ * is silent is this defect.
+ */
+describe('SC-17 — the suite waits on conditions, not on how fast the machine happens to be', () => {
+  const SUITE_GLOBS = [
+    'packages/core/src/queue/queue.test.ts',
+    'packages/plugin/src/adapter/adapter.test.ts',
+    'packages/plugin/src/huddle/huddle.test.ts',
+    'packages/plugin/src/main.test.ts',
+    'packages/plugin/src/sinks/subprocess-sink.test.ts',
+    'packages/plugin/src/speech-service.test.ts',
+    'packages/providers/src/os-synth/os-synth.test.ts'
+  ]
+
+  /** Files that wait on a duration where a condition was available. Restated, not derived (P36). */
+  const KNOWN_OFFENDERS = new Set(SUITE_GLOBS)
+
+  it('CONTROL: the detector actually fires on a file that has the pattern', () => {
+    const withPattern = 'await new Promise((r) => setTimeout(r, 5))'
+    expect(/setTimeout\(\s*r\w*\s*,\s*\d+\s*\)/.test(withPattern),
+      'the detector cannot see the pattern it exists to find').toBe(true)
+    expect(/setTimeout\(\s*r\w*\s*,\s*\d+\s*\)/.test('await until(() => done())'),
+      'the detector fires on a condition wait, so it would flag the fix as the defect').toBe(false)
+  })
+
+  /**
+   * VIOLATED TODAY (R12-01). Seven files predict machine speed. Both of THIS round's own files were
+   * among them and were converted first — a finding whose author leaves their own instances standing
+   * is not one.
+   *
+   * Remove `.fails` when the list is empty. Do not remove an entry by adding an exception comment;
+   * remove it by waiting on a condition.
+   */
+  it.fails('no test file waits on a duration where a condition was available [OPEN: R12-01]', () => {
+    expect([...KNOWN_OFFENDERS], 'seven files still predict how fast this machine is').toEqual([])
   })
 })
