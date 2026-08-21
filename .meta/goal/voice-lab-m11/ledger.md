@@ -122,3 +122,33 @@ audit trail that explains the whole session after the fact.
 - audited_before: no. tested_after: partial — the architect verified the issue comment
   landed and that 015 states its own precedence over 010. The doc-level merge of 015 into
   010 is J20's, and until it happens **two documents describe M9**; 015 says which wins.
+
+### J15 `ci` — done
+- did: `.github/workflows/ci.yml` extended, `scripts/ci/voice-lab-ci.mjs`,
+  `scripts/ci/no-audio-recorder.mjs`.
+- evidence: committed at `2bdaeda`. Suite green. The no-audio guard is a recorder, not a
+  log grep.
+- **not yet verified by the architect**: the workflow has not run, because nothing has
+  been pushed. Its assertions are read, not observed. C6 stays unticked until a real
+  3-OS run is green — CI that has never executed is a claim, not a check.
+
+### J03 `fma-fixes` — PARTIAL, killed by the 5-hour session limit
+- landed before death, four commits: `ee8c1cf` (silence always has a spoken reason; the
+  reap keeps the session — cascade C4), `ff7924b` (read the delivery receipt; name the
+  six collapsed causes), `e80f0d3` (a check mark is a verdict; an unclosed fence eats the
+  reply), `2772a01` (four unwatched promises observed; re-read a half-written line).
+- **missing**: `docs/.research/fix-round7-report.md`. So there is no record of which FMA
+  section-16 sites were closed, which were deliberately left, or what the interrupt policy
+  decisions were. Re-dispatch must start by reading the four commits to find out.
+- suite: 330 passing.
+
+### J20 `reconcile7` — PARTIAL, killed by the 5-hour session limit
+- 1,548 insertions left **uncommitted** in the working tree; committed by the architect
+  rather than lost. Reached `PLAN.md`, `TASKS.md`, the constitution, and `010`-`013`.
+- **missing**: `016-reconciliation-round7.md`, so nothing records which of round 7's 31
+  findings are addressed. And `check-citations` went from **33 stale to 190** — the pass
+  added citations faster than it verified them, and fixing `011`-`013`'s citations was its
+  own task 4. Re-dispatch must close that.
+- **Lesson for the ledger, not just this job:** a long-running Job that writes its ledger
+  entry LAST loses the map when it dies. Future briefs should require the ledger row to be
+  written incrementally, as each finding is resolved.
