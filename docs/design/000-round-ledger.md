@@ -49,6 +49,7 @@ The bar makes the counter measure convergence rather than enthusiasm.
 | 6 | Fold the measurements · audit tests that cannot fail · design M16 + M17 | 3 | **9 unfailable tests, 3 live mutants, 2 designs** | no | M17 declared not buildable to R1 parity, with evidence |
 | 7 | Adversarial review of everything rounds 4–6 produced | 1 | **31** | **no** | see `014-review-round7.md` |
 | 8 | Adversarial review of `PLAN.md`, `TASKS.md`, the constitution's budget table, `006` and `packages/core/src/**` — run, not read | 1 | **26** | **no** | see `017-review-round8.md`. 22 of 26 came from executing the code, 2 from a peer's implementation work re-verified here; **0** from reading a document |
+| 9 | **Build**, not review: `006` section 22 — seam contracts, one row per adjacent pair, each seen red | 1 | **6** | **no** | see `018-review-round9.md`. 9 rows, 3 seams asked-and-empty, 5 rows OPEN. Every row proved red; the mutation log is `018` section 4 |
 
 ## Parking lot
 
@@ -145,3 +146,51 @@ contracts*, one row per adjacent pair, each row stating what the upstream compon
 the downstream one cannot accept — and they write the tests that let each row go red, by feeding one
 component's **real output** to the next. Two components that each pass their own unit tests is the
 condition that produced all 24.
+
+## Close of round 9 — the counter, and the first sign of a bend
+
+Round 9 executed that instruction. `006` **section 22 exists**: nine rows, three seams asked and
+recorded as empty or unclosable, two covered by tests that already existed, five rows **OPEN** and
+marked `it.fails` so they turn red the moment they are fixed. Every row was **seen red** — the
+mutation log is `018` section 4, and two mutations **survived** and are recorded as survivors.
+
+**6 items clear the bar**, against round 8's 26:
+
+| Item | Clause |
+|---|---|
+| **R9-01** — `006` gains a section whose subject is a seam, with the seen-red closing rule | 1 |
+| **R9-02** — NM12 is a **control-map** defect with a Lab-specific listener experience, and now has a detection | 3 |
+| **R9-03** — a consistently-wrong control-to-transform binding survives the whole 598-test suite and the boot assertion, **measured** | 5 |
+| **R9-04** — stale citations went **91 to 130 in one afternoon** with the ratchet still at 34; the drift rate makes a hand-walked ratchet decoration | 5 |
+| **R9-05** — the sink collapses every non-`wav` format to `chunk.bin`, silently | 3 |
+| **R9-06** — `bytesPlayed` moves for audio nobody heard, so `selfTest()` — the instrument for the FMA's rank-one undetectable — can report success while mute | 3 |
+
+Two recorded results do **not** clear the bar and are named so the count can be checked: **R9-07**
+(mutation M1 survived, bounding SC-4's sensitivity — a property of a test written this round) and
+**R9-08** (part of R8-26's premise was wrong; the existing suite *does* catch a stage-name swap — a
+correction to an item, not a new one).
+
+**Dry counter: 0 of 3.** Round 9 was not dry.
+
+**But the count fell four-fold, and that is the first thing in this process that looks like
+convergence.** `018` section 6 argues both readings and refuses to pick between them from one round,
+because they are not distinguishable from inside a single round: round 8 harvested a backlog that a
+never-applied method had accumulated, and a backlog is harvested once; round 9's six items are
+mostly things its instruments found *while being built*, which is what both a converging and a
+slowing process look like.
+
+**What round 10 must do to make the counter mean something.** Section 22 was scoped to the **audio
+path**. The ORCA-facing seams — transcript tailing, the decoder, the adapter (`006` sections 1, 2
+and 8) — were deliberately not re-derived and are a second, untouched inventory. Round 10 extends
+section 22 to them, by the same rule: a row closes only when a test feeds one component's real
+output to the next and has been seen red.
+
+- If round 10 comes back **thin**, that is a genuine dry signal, because the same method will have
+  been applied twice to two different inventories.
+- If it comes back **thick**, the seam method still has a backlog and the counter is not yet
+  measuring convergence.
+
+One caution the round-9 record puts on itself, and the ledger keeps: **two of round 9's six items
+were on a seam nobody had looked at, found by one probe in ten minutes, one layer below the one the
+brief named.** There is no evidence the layer below that has been examined either. A thin round 10
+is necessary for a dry signal; on its own it is not sufficient.
