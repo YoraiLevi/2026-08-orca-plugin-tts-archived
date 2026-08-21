@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SpeechService } from './speech-service.js'
+import { numberToWords } from '@orca-tts/core'
 import type {
   AudioChunk, PlaybackSink, ProviderCapabilities, SynthesizeOptions, TtsProvider
 } from '@orca-tts/core'
@@ -175,5 +176,88 @@ describe('voice, rate and chunking are reachable from the caller', () => {
     await settle()
     expect(isolated.synthesized[0]?.trim()).toBe('One here.')
     expect(grouped.synthesized[0], 'isolateFirstSentence:false had no effect').toContain('Two here.')
+  })
+})
+
+/**
+ * 006 section 20 finding 2 — the audio stream is the channel, not the notification tray.
+ *
+ * Every "never fail silently" path in this plugin used to terminate in `notifications.show`, whose
+ * `{ delivered }` result is discarded. For a listener who is dyslexic and voice-first that is the
+ * same as no report at all: of the 55 silent-failure sites the FMA found, the number reaching the
+ * audio stream was ZERO.
+ *
+ * These tests give the service NO desktop-notification path — the assertions are on text the
+ * provider was actually asked to synthesize, so the only way they pass is if it is genuinely said.
+ */
+describe('losses and degradations reach the audio stream', () => {
+  it('a queue overflow is SPOKEN, naming the total, with the notification path disabled', async () => {
+    const provider = new RecordingProvider()
+    const dropped: number[] = []
+    const s = new SpeechService({
+      provider, sink: new FakeSink(), maxQueued: 2, announceDelayMs: 5,
+      // Accounting only — this test asserts the SPOKEN sentence, not that this fired.
+      onDropped: (n) => dropped.push(n)
+    })
+    for (let i = 0; i < 6; i++) s.speak(`reply number ${i}`, 'queue')
+    await settle()
+
+    const total = dropped.reduce((a, b) => a + b, 0)
+    expect(total, 'the queue did not actually overflow, so nothing was proved').toBeGreaterThan(1)
+    const spoken = provider.synthesized.join(' ')
+    // Through the real pipeline: normalize() turns "3" into "three", so a match here also proves
+    // the announcement was not slipped in past the normalizer.
+    expect(spoken, 'the drop was never spoken').toContain(`Skipped ${numberToWords(total)} older repl`)
+  })
+
+  it('a burst names the TOTAL dropped, not just the last drop', async () => {
+    const provider = new RecordingProvider()
+    const dropped: number[] = []
+    const s = new SpeechService({
+      provider, sink: new FakeSink(), maxQueued: 2, announceDelayMs: 20,
+      onDropped: (n) => dropped.push(n)
+    })
+    for (let i = 0; i < 8; i++) s.speak(`reply number ${i}`, 'queue')
+    await settle()
+    const total = dropped.reduce((a, b) => a + b, 0)
+    const last = dropped[dropped.length - 1] ?? 0
+    // The old coalescer restarted a timer holding only the latest `n`, so a burst of 1 + 1 + 1
+    // announced "skipped 1" — under-reporting the loss in the one message whose job is to size it.
+    expect(total).toBeGreaterThan(last)
+    expect(provider.synthesized.join(' ')).toContain(`Skipped ${numberToWords(total)} older repl`)
+  })
+
+  it('says nothing about drops when nothing was dropped', async () => {
+    // The control case. An indicator that never changes is a broken indicator: this proves the
+    // assertion above can distinguish "announced" from "always announces".
+    const provider = new RecordingProvider()
+    const s = new SpeechService({ provider, sink: new FakeSink(), maxQueued: 8, announceDelayMs: 5 })
+    s.speak('just one reply', 'queue')
+    await settle()
+    expect(provider.synthesized.join(' ')).not.toContain('Skipped')
+  })
+
+  it("announce('next') never interrupts, and is heard before what is queued behind it", async () => {
+    const provider = new RecordingProvider()
+    const s = new SpeechService({ provider, sink: new FakeSink() })
+    s.speak('first reply here', 'queue')
+    s.speak('second reply here', 'queue')
+    s.announce('Two agents are active.')
+    await settle()
+    const order = provider.synthesized.join(' ')
+    expect(order).toContain('first reply here')
+    expect(order).toContain('second reply here')
+    expect(order.indexOf('Two agents')).toBeGreaterThan(order.indexOf('first reply'))
+    expect(order.indexOf('Two agents')).toBeLessThan(order.indexOf('second reply'))
+  })
+
+  it('an announcement is never trimmed away by the overflow it is reporting', async () => {
+    const provider = new RecordingProvider()
+    const s = new SpeechService({ provider, sink: new FakeSink(), maxQueued: 1, announceDelayMs: 1 })
+    s.speak('reply alpha', 'queue')
+    s.announce('Speech is degraded on this machine.')
+    for (let i = 0; i < 10; i++) s.speak(`flood number ${i}`, 'queue')
+    await settle()
+    expect(provider.synthesized.join(' ')).toContain('Speech is degraded on this machine')
   })
 })

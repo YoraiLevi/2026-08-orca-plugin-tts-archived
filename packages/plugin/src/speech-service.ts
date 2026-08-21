@@ -13,6 +13,24 @@ import type { SynthesizeOptions, TtsProvider } from '@orca-tts/core'
 
 export type SpeakMode = 'replace' | 'queue'
 
+/**
+ * How urgently an announcement reaches the listener.
+ *
+ * An announcement that interrupts is itself a harm — the listener loses the sentence they were
+ * following — so this is deliberately a choice, not a default.
+ *
+ *  - 'next' — spoken as soon as the current utterance ends, ahead of everything queued behind it.
+ *    Nothing is lost. This is the right answer for every *loss* and *degradation* notice, because
+ *    those describe something that has already happened; a second of delay costs nothing.
+ *  - 'now'  — abandons the current utterance and speaks immediately, preserving the queue. Only
+ *    for something the listener just asked for (status) or something that invalidates what they
+ *    are hearing right now (a session switch).
+ *
+ * There is deliberately no 'interrupt and clear' urgency. Announcements never destroy the queue:
+ * that is the fault this class of message exists to report.
+ */
+export type AnnounceUrgency = 'now' | 'next'
+
 export interface SpeechServiceDeps {
   readonly provider: TtsProvider
   readonly sink: PlaybackSink
@@ -35,20 +53,44 @@ export interface SpeechServiceDeps {
   readonly normalizeOptions?: NormalizeOptions
   /** Cap on queued utterances; beyond this the OLDEST are dropped (never the newest). */
   readonly maxQueued?: number
-  /** Called when the queue overflows, so the user can be told rather than left guessing. */
+  /**
+   * Supplementary hook for queue overflow — a desktop notification, a log line. The PRIMARY report
+   * is spoken by this class itself; this exists so a second channel can also carry it.
+   *
+   * It used to be the only report, and it terminated in `notifications.show`, whose delivery
+   * receipt is discarded. For a listener who does not look at the notification tray that is the
+   * same as no report at all (006 section 16: of 55 silent-failure sites, the number reaching the
+   * audio stream was zero).
+   */
   readonly onDropped?: (count: number) => void
+  /**
+   * How long overflow announcements are coalesced before being spoken. A burst must produce ONE
+   * sentence naming the total, not a burst of sentences — announcing each drop separately would
+   * itself flood the only channel the listener has. Default 500 ms; tests lower it.
+   */
+  readonly announceDelayMs?: number
 }
 
 const DEFAULT_MAX_QUEUED = 20
+const DEFAULT_ANNOUNCE_DELAY_MS = 500
+
+interface PendingUtterance {
+  text: string
+  label?: string
+  /** Announcements are exempt from overflow trimming: the report must outlive what it reports. */
+  announcement?: true
+}
 
 export class SpeechService {
   readonly #deps: SpeechServiceDeps
   readonly #playback: PlaybackQueue
-  #pending: Array<{ text: string; label?: string }> = []
+  #pending: PendingUtterance[] = []
   #draining = false
   #cancelled = false
   #skip = false
   #current: string | null = null
+  #droppedPendingAnnounce = 0
+  #dropTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(deps: SpeechServiceDeps) {
     this.#deps = deps
@@ -73,29 +115,92 @@ export class SpeechService {
     await this.#playback.bargeIn()
   }
 
+  /**
+   * Say something ABOUT the speech system, in the speech system. The listener cannot read a log
+   * and does not watch the notification tray, so this is the only channel a loss or a degradation
+   * can honestly be reported through (buzz's rule, recorded in our own research and never adopted:
+   * every omission is announced in the audio stream itself).
+   *
+   * Never clears the queue. See AnnounceUrgency for what each urgency costs.
+   */
+  announce(text: string, urgency: AnnounceUrgency = 'next'): void {
+    if (text.trim().length === 0) return
+    if (urgency === 'now') {
+      // Abandon the current utterance only. #pending survives, deliberately: an announcement that
+      // deleted the queue would be the C5 fault ("asking what is happening destroys what is
+      // happening") wearing the uniform of the fix for it.
+      this.#skip = true
+      void this.#playback.bargeIn()
+    }
+    // Ahead of queued replies, behind any announcement already waiting, so a run of announcements
+    // is heard in the order it was generated.
+    let at = 0
+    while (this.#pending[at]?.announcement === true) at++
+    this.#pending.splice(at, 0, { text, announcement: true })
+    this.#cancelled = false
+    void this.#drain()
+  }
+
   /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */
   speak(text: string, mode: SpeakMode = 'replace', label?: string): void {
     if (mode === 'replace') {
-      this.#pending = []
+      // 'replace' means "you asked for THIS text now" — but the things it silently deleted were
+      // agent replies the listener was waiting for. Report the loss before speaking over it.
+      const discarded = this.#pending.filter((p) => p.announcement !== true).length
+      this.#pending = this.#pending.filter((p) => p.announcement === true)
       void this.#playback.bargeIn()
+      if (discarded > 0) this.#noteDropped(discarded)
     }
     this.#pending.push(label === undefined ? { text } : { text, label })
     const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED
-    if (this.#pending.length > max) {
-      const dropped = this.#pending.length - max
-      this.#pending = this.#pending.slice(-max)   // keep the newest; never block the agent
-      // Never silently. Losing a reply you were waiting for, with no signal, is the worst outcome.
+    const replies = this.#pending.filter((p) => p.announcement !== true)
+    if (replies.length > max) {
+      const dropped = replies.length - max
+      // Keep the newest replies; never block the agent. Announcements are never trimmed.
+      const keep = new Set(replies.slice(-max))
+      this.#pending = this.#pending.filter((p) => p.announcement === true || keep.has(p))
       this.#deps.log?.(`speech queue full, dropped ${dropped} older utterance(s)`)
-      this.#deps.onDropped?.(dropped)
+      this.#noteDropped(dropped)
     }
     this.#cancelled = false
     void this.#drain()
   }
 
-  /** Two-sided stop: cancels synthesis, flushes audio, and clears anything waiting (R022). */
+  /**
+   * Coalesce a burst of drops into one spoken sentence naming the TOTAL.
+   *
+   * The count accumulates. The previous implementation restarted a timer holding only the latest
+   * `n`, so a burst that dropped 1 + 1 + 1 announced "skipped 1" — under-reporting the loss in the
+   * one message whose entire job is to size it.
+   */
+  #noteDropped(count: number): void {
+    this.#deps.onDropped?.(count)
+    this.#droppedPendingAnnounce += count
+    if (this.#dropTimer !== null) clearTimeout(this.#dropTimer)
+    this.#dropTimer = setTimeout(() => {
+      const n = this.#droppedPendingAnnounce
+      this.#droppedPendingAnnounce = 0
+      this.#dropTimer = null
+      if (n > 0) this.announce(`Skipped ${n} older repl${n === 1 ? 'y' : 'ies'} to keep up.`, 'next')
+    }, this.#deps.announceDelayMs ?? DEFAULT_ANNOUNCE_DELAY_MS)
+    if (typeof this.#dropTimer === 'object' && this.#dropTimer !== null) {
+      // Never hold the worker alive just to say "I skipped something".
+      (this.#dropTimer as unknown as { unref?: () => void }).unref?.()
+    }
+  }
+
+  /**
+   * Two-sided stop: cancels synthesis, flushes audio, and clears anything waiting (R022).
+   *
+   * Deliberately does NOT announce what it discarded. Stop is the listener's own explicit command
+   * for silence; a control that answers "stop" with more speech is the helplessness P22 recorded,
+   * not a fix for it. Every OTHER path that clears the queue does announce.
+   */
   async stop(): Promise<void> {
     this.#cancelled = true
     this.#pending = []
+    if (this.#dropTimer !== null) { clearTimeout(this.#dropTimer); this.#dropTimer = null }
+    this.#droppedPendingAnnounce = 0
     await this.#playback.bargeIn()
   }
 

@@ -19,15 +19,40 @@ export default function activate(orca: OrcaApi): void {
   host.log('read-aloud: activating')
 
   const registry = new ProviderRegistry()
+
+  const sink = new SubprocessSink({ log: host.log })
+  let speech: SpeechService | null = null
+  let engineError: string | null = null
+  /**
+   * Announcements generated before the engine finishes resolving. The Linux-floor degradation
+   * notice fires from inside `prepare()`, which is BEFORE `speech` exists — so without this buffer
+   * the one message that explains why the voice sounds wrong is the one message that can never be
+   * spoken.
+   */
+  const deferredAnnouncements: string[] = []
+
+  /**
+   * The single user-facing channel. Ordered deliberately: the AUDIO STREAM is the destination and
+   * the desktop notification is a supplement, not the other way round.
+   *
+   * Before this, every "never fail silently" path in the plugin — queue overflow, the two-agents
+   * ambiguity, the Linux-floor degradation, engine failure — terminated in `notifications.show`,
+   * whose `{ delivered }` result is discarded (`adapter/index.ts:63`). This user is dyslexic and
+   * voice-first and does not read the notification tray, so the project's central safety principle
+   * was wired to a channel they do not have (006 section 16: 55 silent-failure sites, zero of them
+   * reaching audio).
+   */
+  const announce = (message: string, urgency: 'now' | 'next' = 'next'): void => {
+    host.log(`read-aloud: ${message}`)
+    host.notify('Read Aloud', message)
+    if (speech !== null) speech.announce(message, urgency)
+    else deferredAnnouncements.push(message)
+  }
+
   // The provider talks to the user directly for detection failures and degraded rungs: on Linux
   // the interesting failure ("espeak-ng is not installed") happens inside prepare(), far from any
   // command the user pressed.
-  registry.register(new OsSynthProvider({ notify: (m) => { host.notify('Read Aloud', m) } }), { preferred: true })
-
-  const sink = new SubprocessSink({ log: host.log })
-  let droppedNotice: NodeJS.Timeout | null = null
-  let speech: SpeechService | null = null
-  let engineError: string | null = null
+  registry.register(new OsSynthProvider({ notify: (m) => { announce(m) } }), { preferred: true })
 
   // Resolve the engine in the background: activate() must return promptly so command registration
   // is never delayed behind a process spawn.
@@ -36,8 +61,10 @@ export default function activate(orca: OrcaApi): void {
       const why = registry.lastFailure ?? 'no speech engine is available on this system'
       engineError = why
       host.log(`read-aloud: ${why}`)
-      // Never fail silently: a plugin that makes no sound and says nothing is indistinguishable
-      // from a plugin that is not installed.
+      // The ONE announcement that genuinely cannot be spoken: there is no engine to speak it with.
+      // Stated here so the next reader does not mistake it for an oversight. A spoken engine-failure
+      // notice needs a second, independent sound path (an earcon from a bundled asset) and that is
+      // a design, not a line of code.
       host.notify('Read Aloud', why)
       return
     }
@@ -46,20 +73,21 @@ export default function activate(orca: OrcaApi): void {
       sink,
       log: host.log,
       maxQueued: 8,
+      // Supplement only. The spoken sentence naming the count comes from SpeechService itself, so
+      // it cannot be lost by a notification channel that is muted, denied, or simply not looked at.
       onDropped: (n) => {
-        // Coalesce: a burst must not produce a burst of notifications.
-        if (droppedNotice !== null) clearTimeout(droppedNotice)
-        droppedNotice = setTimeout(() => {
-          host.notify('Read Aloud', `Skipped ${n} older repl${n === 1 ? 'y' : 'ies'} to keep up`)
-        }, 500)
+        host.notify('Read Aloud', `Skipped ${n} older repl${n === 1 ? 'y' : 'ies'} to keep up`)
       }
     })
     host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`)
+    // Anything that happened while the engine was still resolving now has a voice to be said in.
+    for (const m of deferredAnnouncements.splice(0)) speech.announce(m, 'next')
     // R015: degrade loudly. Never let a worse engine pass unmentioned.
-    if (resolved.status.reason !== undefined) host.notify('Read Aloud', resolved.status.reason)
+    if (resolved.status.reason !== undefined) announce(resolved.status.reason)
   }).catch((err: unknown) => {
     engineError = String(err)
     host.log(`read-aloud: engine resolution failed: ${engineError}`)
+    host.notify('Read Aloud', `speech engine failed to start: ${engineError}`)
   })
 
   /** Principle I: never fail silently. Every path either speaks or says why it did not. */
@@ -103,7 +131,10 @@ export default function activate(orca: OrcaApi): void {
       stop: async () => { await speech?.stop() }
     },
     log: host.log,
-    notify: (m: string) => { host.notify('Read Aloud', m) },
+    // The two-agents ambiguity notice and the session-switch notice both come through here. Both
+    // are about WHOSE WORDS the listener is hearing — provenance, the thing 006 ranks S1 — so both
+    // belong in the audio stream, not the notification tray.
+    notify: (m: string) => { announce(m) },
     store: { get: host.storageGet, set: host.storageSet }
   })
 
