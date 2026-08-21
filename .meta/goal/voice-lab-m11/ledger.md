@@ -55,3 +55,31 @@ audit trail that explains the whole session after the fact.
 - note: `code-heavy` and `hostile` SHRINK (code and emoji removed); the other four GROW
   (paths, tables and units expand). Both directions are expected and are a cheap sanity
   check for anyone re-running this.
+
+### J02 `spike1` — done
+- did: `scripts/spikes/spike1-macos-firstbuffer.swift` (+ committed, unrun Windows and
+  Linux probes), `docs/.research/spike1-resident-synth.md`.
+- evidence, **re-run by the architect rather than read from the report** —
+  `swiftc -O ... && /tmp/spike1-verify --n 10 --json`:
+  ```
+  SPIKE1_VERDICT=PASS medianFirstAudible=17.5 medianFirstBuffer=17.5 pass<=150 falsifier>350
+  SPIKE1_COLD_PENALTY_MS=348.5     SPIKE1_SSML_MINUS_PLAIN_P50_MS=-0.2
+  SPIKE1_IDLE_RSS_AFTER_MB=9.7     SPIKE1_IDLE_CPU_PERCENT=0.056
+  ```
+  Two independent runs agree: the agent measured p50 17.7/17.1, the architect 17.5.
+- **The finding that redirects a milestone.** 010 section 8.2's pass condition was
+  median first-buffer <= 150 ms, falsifier > 350 ms. Measured **17.5 ms — 8.5x inside
+  the gate, 20x below the falsifier.** So residency alone buys R4.2 on the synthesis
+  side of macOS and **the neural engine is not on the latency critical path.** M9 is
+  "hold the audio device open", not "build the thing that makes latency acceptable".
+- Three sub-findings worth as much as the headline:
+  - **Cold start costs 348-366 ms**, i.e. the entire benefit is residency. A service
+    that is respawned per utterance gains nothing.
+  - **SSML is free**: -0.2 ms against plain text. 010 wanted it in the seam and it is
+    the only route to pitch on Windows; it costs nothing to adopt.
+  - **Idle cost is 9.7 MB RSS and 0.056 % CPU** — cross-review B-03 asked for this
+    figure and nobody had it. A resident service is affordable to keep warm.
+- Scope, stated honestly: **macOS measured; Windows and Linux are `[claimed]`.** Their
+  probes are committed and runnable in one command. R1 says the three ship together, so
+  this verdict is one third of an answer.
+- audited_before: no. tested_after: yes — reproduced independently by the architect.
