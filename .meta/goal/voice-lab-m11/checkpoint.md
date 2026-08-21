@@ -24,5 +24,5 @@ chat — that is P23, and it is why this goal exists.
 
 ## Immediately next
 
-Wave 1 J10 `fixtures` — it depends on nothing and unblocks the server. Dispatch it
+Wave 1 J13 `page` dispatched with its dependency on J11 deliberately relaxed (see ledger). J11 still waits for J03.
 without waiting for Wave 0.
