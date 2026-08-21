@@ -90,3 +90,52 @@ jobs:
 
       - name: Smoke test — activate() registers every command the manifest declares
         run: node scripts/smoke-activate.mjs
+
+  # ------------------------------------------------------------------------------------------
+  # M11 Voice Lab — the normalize side, on all three platforms, with the audio side proved ABSENT.
+  #
+  # A SEPARATE JOB FROM `test`, DELIBERATELY, AND IT INSTALLS NO SYNTHESIZER ON LINUX.
+  # The `test` job above installs espeak-ng so the OS-synth contract suite is meaningful there.
+  # This job must not: PITFALLS P25 says a stock Ubuntu desktop ships the espeak-ng LIBRARY and
+  # not the espeak-ng COMMAND, which is the rung most Linux users actually land on. Installing a
+  # synthesizer here would buy a green tick on a machine no user has, and would delete the only
+  # place we assert the CORRECT FAILURE — a 503 carrying the provider's own words and its install
+  # remedy, or the named `spoke-elsewhere` outcome.
+  #
+  # NOTHING HERE OPENS AN AUDIO DEVICE OR SPAWNS A PLAYER (spec FR-006, FR-106; PITFALLS P31).
+  # That is not asserted by grepping a log the server wrote about itself — `child_process` is
+  # wrapped from outside the process under test, and the step below it proves the wrapper can go
+  # red by spawning a real player in a scratch run.
+  voice-lab:
+    name: voice lab ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.24.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The gate that checks THIS gate. It spawns a real player (always on a file that does not
+      # exist, so it exits before reaching the audio device — P32) and requires the audit to go
+      # red; then requires it to stay GREEN on the five spawns the provider legitimately makes.
+      # A guard nobody has seen fail is a guard nobody can trust, and a guard that reddens on
+      # everything is just as useless. Run before the harness, so a broken guard fails loudly
+      # rather than silently blessing the run after it.
+      - name: The no-audio guard must be able to fail
+        run: node scripts/ci/voice-lab-ci.mjs --prove-guard
+
+      # normalize parity against the LIBRARY (never against the server's own output), the stage
+      # ladder DERIVED from packages/core/src/normalizer/index.ts (never a hardcoded 15), the
+      # source-not-dist proof plus its negative control, the 127.0.0.1-not-0.0.0.0 bind, the
+      # platform's correct /speak outcome, and the no-audio verdict. Every probe CI cannot run is
+      # reported by name with its reason and lands in the job summary (spec FR-107).
+      - name: Voice Lab — headless assertions, and zero audio-device opens
+        run: node scripts/ci/voice-lab-ci.mjs
