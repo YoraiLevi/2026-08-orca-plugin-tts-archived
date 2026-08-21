@@ -46,6 +46,10 @@
         "title": "Read Aloud: skip this reply"
       },
       {
+        "id": "read-aloud.follow",
+        "title": "Read Aloud: follow this session"
+      },
+      {
         "id": "read-aloud.unfollow",
         "title": "Read Aloud: stop following this session"
       }
@@ -84,6 +88,11 @@
       {
         "command": "read-aloud.unfollow",
         "key": "mod+shift+l",
+        "when": "global"
+      },
+      {
+        "command": "read-aloud.follow",
+        "key": "mod+shift+p",
         "when": "global"
       }
     ]

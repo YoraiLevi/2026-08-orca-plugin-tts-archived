@@ -97,6 +97,8 @@ export class HuddleController {
   #highWater = new Map<string, number>()
   /** Set when huddle is switched on, so the next attach re-primes instead of trusting a stale mark. */
   #reprime = false
+  /** The worktree the last agent event came from — the only correlation handle a plugin gets. */
+  #lastWorktree: string | null = null
   #warnedUnreadable = new Set<string>()   // per FILE: say "cannot read this" once, not per change
 
   constructor(deps: HuddleDeps) { this.#deps = deps }
@@ -140,17 +142,47 @@ export class HuddleController {
 
   /** The event is a hint: start (or extend) watching the transcript for this worktree. */
   onAgentStatus(status: AgentStatusChanged, worktreePath: string | null): void {
+    // Recorded even when huddle is off: `followNewest()` is reachable from a command, which has no
+    // event payload of its own.
+    if (worktreePath !== null) this.#lastWorktree = worktreePath
     if (!this.#enabled) return
     void this.#ensureWatching(worktreePath)
   }
 
   dispose(): void { this.#stopWatching() }
 
-  /** Follow a different session, announcing the switch so the listener is never disoriented. */
+  /**
+   * Follow a different session, announcing the switch so the listener is never disoriented.
+   *
+   * This is P22's recorded remedy — "announce switches aloud" — and until `read-aloud.follow`
+   * existed it had NO caller anywhere in the source tree: one grep hit, the declaration itself.
+   * An unreachable implementation reads to the next agent as a shipped feature (006 TT6, P26).
+   *
+   * One announcement, not two. It used to `notify` AND `speak(..., 'replace')`, which both
+   * duplicated the message and cleared the queue; `notify` now routes into the audio stream, so
+   * the switch is heard once and queued replies survive.
+   */
   switchTo(file: string): void {
     this.#locked = file
-    this.#deps.notify(`Now reading: ${sessionLabel(file)}`)
-    this.#deps.speech.speak(`Now reading from ${sessionLabel(file)}.`, 'replace')
+    this.#stopWatching()
+    this.#deps.notify(`Now reading from ${sessionLabel(file)}.`)
+    void this.#ensureWatching(this.#lastWorktree)
+  }
+
+  /**
+   * Lock onto the most recently active transcript for this worktree, announcing the switch.
+   *
+   * The command behind this exists because `unfollow` shipped without a counterpart: the listener
+   * could stop following a session and had no way to pick one back up except by waiting for the
+   * next `agent.status.changed` to silently re-pick "whatever was touched last" (006 TT7).
+   *
+   * Returns the file now followed, or null when there is nothing to follow.
+   */
+  async followNewest(): Promise<string | null> {
+    const file = await this.#newestTranscript(this.#lastWorktree)
+    if (file === null) return null
+    this.switchTo(file)
+    return file
   }
 
   /** Stop following any session; huddle stays on but silent until you pick one. */

@@ -36,6 +36,7 @@ plugin root. `dist/plugin` is three files and nothing else.
 | Say status | `Mod+Shift+U` | says what is playing, which session, how many queued |
 | Skip this reply | `Mod+Shift+K` | abandon the current reply, move to the next |
 | Stop following | `Mod+Shift+L` | huddle stays on but goes quiet until a session is picked |
+| Follow this session | `Mod+Shift+P` | lock onto the newest agent transcript here, announced aloud |
 
 Shortcuts are rebindable in the manifest.
 
@@ -49,6 +50,7 @@ audio mid-reply.
 - `Mod+Shift+U` says which session it is following and what is queued.
 - `Mod+Shift+K` skips the current reply.
 - `Mod+Shift+L` stops following, so huddle goes quiet until a session speaks again.
+- `Mod+Shift+P` picks a session back up, and says which one it switched to.
 
 Enabling huddle never reads history — everything already on disk when a session is first seen is
 marked as heard, so only what arrives next is spoken.

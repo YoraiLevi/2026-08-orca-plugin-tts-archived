@@ -14,6 +14,9 @@ var CAPABILITIES = {
   cloning: false,
   sampleRate: 22050
 };
+function neutralizeInBandCommands(text) {
+  return text.replace(/\[\[/g, "[ [");
+}
 var OsSynthUnavailableError = class extends Error {
   constructor(platform, tried) {
     super(`No OS speech synthesizer found on ${platform}. Tried: ${tried.join(", ")}`);
@@ -26,25 +29,71 @@ var OsSynthTimeoutError = class extends Error {
     this.name = "OsSynthTimeoutError";
   }
 };
+var LINUX_BACKENDS = ["espeak-ng", "espeak", "spd-say"];
+var LINUX_WAV_BACKENDS = ["espeak-ng", "espeak"];
+var LINUX_INSTALL_HINT = "Install one with:  sudo apt install espeak-ng   (or, for the speech-dispatcher floor:  sudo apt install speech-dispatcher speech-dispatcher-espeak-ng). Note: a stock Ubuntu desktop ships the espeak-ng LIBRARY but not the espeak-ng command.";
+var LinuxSpeechUnavailableError = class extends Error {
+  tried;
+  constructor(tried = LINUX_BACKENDS) {
+    super(`No Linux speech synthesizer found. Tried: ${tried.join(", ")}. ${LINUX_INSTALL_HINT}`);
+    this.name = "LinuxSpeechUnavailableError";
+    this.tried = tried;
+  }
+};
+var ESPEAK_BASE_WPM = 175;
+var clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+function linuxCommand(backend, rawText, outFile, opts) {
+  const text = neutralizeInBandCommands(rawText);
+  if (backend === "spd-say") {
+    const args2 = ["--wait"];
+    if (opts.voice !== void 0) args2.push("-y", opts.voice);
+    if (opts.rate !== void 0) args2.push("-r", String(clamp(Math.round((opts.rate - 1) * 100), -100, 100)));
+    args2.push("--", text);
+    return { cmd: "spd-say", args: args2 };
+  }
+  const args = ["-w", outFile];
+  if (opts.voice !== void 0) args.push("-v", opts.voice);
+  if (opts.rate !== void 0) args.push("-s", String(clamp(Math.round(opts.rate * ESPEAK_BASE_WPM), 80, 450)));
+  args.push("--", text);
+  return { cmd: backend, args };
+}
 var OsSynthProvider = class {
   id = "os-synth";
   displayName = "System voice";
   capabilities = CAPABILITIES;
   #platform;
   #timeoutMs;
+  #notify;
   #warm = false;
   #child = null;
   #cancelled = false;
+  #linuxBackend = void 0;
+  #announcedFloor = false;
+  #unavailableReason = null;
   constructor(opts = {}) {
     this.#platform = opts.platform ?? process.platform;
     this.#timeoutMs = opts.timeoutMs ?? DEFAULT_SPAWN_TIMEOUT_MS;
+    this.#notify = opts.notify ?? (() => {
+    });
   }
   get isWarm() {
     return this.#warm;
   }
+  /**
+   * Why the last detection failed, in words a user can act on. `null` once something works.
+   * Read by the host so the reason reaches a notification instead of dying in a catch block.
+   */
+  get unavailableReason() {
+    return this.#unavailableReason;
+  }
+  /** Which Linux binary is actually driving speech, once detected. `null` on other platforms. */
+  get linuxBackend() {
+    return this.#linuxBackend ?? null;
+  }
   async prepare() {
     if (this.#warm) return;
-    await this.listVoices();
+    if (this.#platform === "linux") await this.#resolveLinuxBackend();
+    else await this.listVoices();
     this.#warm = true;
   }
   cancel() {
@@ -52,6 +101,40 @@ var OsSynthProvider = class {
     const c = this.#child;
     this.#child = null;
     if (c !== null && c.exitCode === null) c.kill("SIGKILL");
+    if (this.#linuxBackend === "spd-say") {
+      try {
+        spawn("spd-say", ["--cancel"], { stdio: "ignore" }).on("error", () => {
+        });
+      } catch {
+      }
+    }
+  }
+  /**
+   * Detect once, cache, and FAIL LOUDLY. Returns the winning backend or throws
+   * `LinuxSpeechUnavailableError` naming every binary tried and the install command.
+   */
+  async #resolveLinuxBackend() {
+    if (this.#linuxBackend !== void 0 && this.#linuxBackend !== null) return this.#linuxBackend;
+    const tried = [];
+    for (const backend of LINUX_BACKENDS) {
+      tried.push(backend);
+      const ok = await this.#capture(backend, ["--version"]).then(() => true, () => false);
+      if (!ok) continue;
+      this.#linuxBackend = backend;
+      this.#unavailableReason = null;
+      if (!LINUX_WAV_BACKENDS.includes(backend) && !this.#announcedFloor) {
+        this.#announcedFloor = true;
+        this.#notify(
+          `Read Aloud: espeak-ng is not installed, so speech is going through speech-dispatcher (spd-say). Quality and interruption are limited. ${LINUX_INSTALL_HINT}`
+        );
+      }
+      return backend;
+    }
+    this.#linuxBackend = null;
+    const err = new LinuxSpeechUnavailableError(tried);
+    this.#unavailableReason = err.message;
+    this.#notify(`Read Aloud: ${err.message}`);
+    throw err;
   }
   async listVoices() {
     try {
@@ -68,17 +151,25 @@ var OsSynthProvider = class {
         case "linux": {
           const out = await this.#capture("spd-say", ["--list-synthesis-voices"]).catch(() => "");
           if (out.length > 0) return out.split("\n").map((l) => l.trim()).filter((v) => v.length > 0);
-          await this.#capture("espeak-ng", ["--version"]);
+          await this.#resolveLinuxBackend();
           return ["default"];
         }
       }
-    } catch {
+    } catch (err) {
+      this.#unavailableReason = err instanceof Error ? err.message : String(err);
       return [];
     }
   }
   async *generate(text, opts = {}) {
     this.#cancelled = false;
     if (text.trim().length === 0) return;
+    if (this.#platform === "linux") {
+      const backend = await this.#resolveLinuxBackend();
+      if (!LINUX_WAV_BACKENDS.includes(backend)) {
+        await this.#speakDirect(text, opts);
+        return;
+      }
+    }
     const dir = await mkdtemp(join(tmpdir(), "orca-tts-"));
     const wav = join(dir, "out.wav");
     try {
@@ -96,7 +187,8 @@ var OsSynthProvider = class {
       await rm(dir, { recursive: true, force: true }).catch(() => void 0);
     }
   }
-  #command(text, outFile, opts) {
+  #command(rawText, outFile, opts) {
+    const text = neutralizeInBandCommands(rawText);
     switch (this.#platform) {
       case "darwin": {
         const args = ["-o", outFile, "--data-format=LEI16@22050"];
@@ -113,10 +205,7 @@ var OsSynthProvider = class {
         return { cmd: "powershell", args: ["-NoProfile", "-NonInteractive", "-STA", "-Command", ps] };
       }
       case "linux": {
-        const args = ["-w", outFile];
-        if (opts.voice !== void 0) args.push("-v", opts.voice);
-        args.push(text);
-        return { cmd: "espeak-ng", args };
+        return linuxCommand(this.#linuxBackend ?? "espeak-ng", text, outFile, opts);
       }
     }
   }
@@ -147,6 +236,19 @@ var OsSynthProvider = class {
       }));
       opts.signal?.addEventListener("abort", () => this.cancel(), { once: true });
     });
+  }
+  /**
+   * Linux floor: hand the text to speech-dispatcher and wait for it to finish speaking.
+   * We produce NO audio here — the daemon plays it. This is the one place a provider does not
+   * emit PCM, and it exists only because on a stock Ubuntu desktop the alternative is silence.
+   */
+  async #speakDirect(text, opts) {
+    try {
+      await this.#synthesizeToFile(text, "", opts);
+    } catch (err) {
+      if (err instanceof OsSynthTimeoutError) return;
+      throw err;
+    }
   }
   #capture(cmd, args) {
     return new Promise((resolve, reject) => {
@@ -182,12 +284,20 @@ var OsSynthProvider = class {
 var ProviderRegistry = class {
   #providers = /* @__PURE__ */ new Map();
   #preferredId = null;
+  #lastFailure = null;
   register(p, opts = {}) {
     this.#providers.set(p.id, p);
     if (opts.preferred === true) this.#preferredId = p.id;
   }
   get(id) {
     return this.#providers.get(id);
+  }
+  /**
+   * Why the last `resolve()` could not use a provider. Kept because discarding it is how a
+   * missing Linux binary turned into "no speech engine is available" with no way to act on it.
+   */
+  get lastFailure() {
+    return this.#lastFailure;
   }
   list() {
     return [...this.#providers.values()];
@@ -202,6 +312,7 @@ var ProviderRegistry = class {
       this.#preferredId ?? void 0,
       ...this.list().filter((p) => p.capabilities.offline).map((p) => p.id)
     ].filter((x) => typeof x === "string");
+    this.#lastFailure = null;
     const seen = /* @__PURE__ */ new Set();
     let rung = "preferred";
     for (const id of tryOrder) {
@@ -216,7 +327,7 @@ var ProviderRegistry = class {
         await p.prepare();
       } catch (err) {
         rung = "fallback";
-        void err;
+        this.#lastFailure = err instanceof Error ? err.message : String(err);
         continue;
       }
       const reason = rung === "preferred" ? void 0 : `${requestedId ?? this.#preferredId ?? "preferred engine"} was unavailable; using ${p.displayName}`;
@@ -439,7 +550,7 @@ function normalize(md, opts = {}) {
   s = expandMarkdownLinks(s);
   s = stripUrls(s);
   s = headingsToPauses(s);
-  s = listItemsToSentences(s);
+  s = listItemsToSentences(s, opts.orderedLists ?? "numeral");
   s = tablesToRows(s);
   if (pathStyle !== "verbatim") s = speakFilePaths(s, pathStyle, opts.extensionStyle ?? "word-last");
   s = stripMarkdownMarkers(s);
@@ -568,18 +679,49 @@ function headingsToPauses(src) {
     return endWithStop(t.slice(k + 1));
   }).join("\n");
 }
-function listMarkerLength(t) {
-  if (t.startsWith("- ") || t.startsWith("* ") || t.startsWith("+ ")) return 2;
+var ORDINAL_WORDS = [
+  "first",
+  "second",
+  "third",
+  "fourth",
+  "fifth",
+  "sixth",
+  "seventh",
+  "eighth",
+  "ninth",
+  "tenth",
+  "eleventh",
+  "twelfth",
+  "thirteenth",
+  "fourteenth",
+  "fifteenth",
+  "sixteenth",
+  "seventeenth",
+  "eighteenth",
+  "nineteenth",
+  "twentieth"
+];
+function ordinalWord(n) {
+  return ORDINAL_WORDS[n - 1] ?? `number ${n}`;
+}
+function listMarker(t) {
+  if (t.startsWith("- ") || t.startsWith("* ") || t.startsWith("+ ")) return { length: 2, ordinal: null };
   let k = 0;
   while (k < t.length && t[k] >= "0" && t[k] <= "9") k++;
-  if (k > 0 && t[k] === "." && t[k + 1] === " ") return k + 2;
-  return 0;
+  if (k > 0 && t[k] === "." && t[k + 1] === " ") {
+    return { length: k + 2, ordinal: Number.parseInt(t.slice(0, k), 10) };
+  }
+  return { length: 0, ordinal: null };
 }
-function listItemsToSentences(src) {
+function listItemsToSentences(src, ordered) {
   return src.split("\n").map((line) => {
     const t = line.trimStart();
-    const n = listMarkerLength(t);
-    return n === 0 ? line : endWithStop(t.slice(n));
+    const { length, ordinal } = listMarker(t);
+    if (length === 0) return line;
+    const body = t.slice(length);
+    if (ordinal === null || ordered === "drop") return endWithStop(body);
+    const lead = ordered === "word" ? ordinalWord(ordinal) : String(ordinal);
+    return endWithStop(`${lead}, ${body}`);
   }).join("\n");
 }
 function isTableSeparator(cells) {
@@ -1114,6 +1256,7 @@ var PlaybackQueue = class {
 
 // packages/plugin/src/speech-service.ts
 var DEFAULT_MAX_QUEUED = 20;
+var DEFAULT_ANNOUNCE_DELAY_MS = 500;
 var SpeechService = class {
   #deps;
   #playback;
@@ -1122,6 +1265,8 @@ var SpeechService = class {
   #cancelled = false;
   #skip = false;
   #current = null;
+  #droppedPendingAnnounce = 0;
+  #dropTimer = null;
   constructor(deps) {
     this.#deps = deps;
     this.#playback = new PlaybackQueue({
@@ -1146,27 +1291,83 @@ var SpeechService = class {
     this.#skip = true;
     await this.#playback.bargeIn();
   }
+  /**
+   * Say something ABOUT the speech system, in the speech system. The listener cannot read a log
+   * and does not watch the notification tray, so this is the only channel a loss or a degradation
+   * can honestly be reported through (buzz's rule, recorded in our own research and never adopted:
+   * every omission is announced in the audio stream itself).
+   *
+   * Never clears the queue. See AnnounceUrgency for what each urgency costs.
+   */
+  announce(text, urgency = "next") {
+    if (text.trim().length === 0) return;
+    if (urgency === "now") {
+      this.#skip = true;
+      void this.#playback.bargeIn();
+    }
+    let at = 0;
+    while (this.#pending[at]?.announcement === true) at++;
+    this.#pending.splice(at, 0, { text, announcement: true });
+    this.#cancelled = false;
+    void this.#drain();
+  }
   /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */
   speak(text, mode = "replace", label) {
     if (mode === "replace") {
-      this.#pending = [];
+      const discarded = this.#pending.filter((p) => p.announcement !== true).length;
+      this.#pending = this.#pending.filter((p) => p.announcement === true);
       void this.#playback.bargeIn();
+      if (discarded > 0) this.#noteDropped(discarded);
     }
     this.#pending.push(label === void 0 ? { text } : { text, label });
     const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED;
-    if (this.#pending.length > max) {
-      const dropped = this.#pending.length - max;
-      this.#pending = this.#pending.slice(-max);
+    const replies = this.#pending.filter((p) => p.announcement !== true);
+    if (replies.length > max) {
+      const dropped = replies.length - max;
+      const keep = new Set(replies.slice(-max));
+      this.#pending = this.#pending.filter((p) => p.announcement === true || keep.has(p));
       this.#deps.log?.(`speech queue full, dropped ${dropped} older utterance(s)`);
-      this.#deps.onDropped?.(dropped);
+      this.#noteDropped(dropped);
     }
     this.#cancelled = false;
     void this.#drain();
   }
-  /** Two-sided stop: cancels synthesis, flushes audio, and clears anything waiting (R022). */
+  /**
+   * Coalesce a burst of drops into one spoken sentence naming the TOTAL.
+   *
+   * The count accumulates. The previous implementation restarted a timer holding only the latest
+   * `n`, so a burst that dropped 1 + 1 + 1 announced "skipped 1" — under-reporting the loss in the
+   * one message whose entire job is to size it.
+   */
+  #noteDropped(count) {
+    this.#deps.onDropped?.(count);
+    this.#droppedPendingAnnounce += count;
+    if (this.#dropTimer !== null) clearTimeout(this.#dropTimer);
+    this.#dropTimer = setTimeout(() => {
+      const n = this.#droppedPendingAnnounce;
+      this.#droppedPendingAnnounce = 0;
+      this.#dropTimer = null;
+      if (n > 0) this.announce(`Skipped ${n} older repl${n === 1 ? "y" : "ies"} to keep up.`, "next");
+    }, this.#deps.announceDelayMs ?? DEFAULT_ANNOUNCE_DELAY_MS);
+    if (typeof this.#dropTimer === "object" && this.#dropTimer !== null) {
+      this.#dropTimer.unref?.();
+    }
+  }
+  /**
+   * Two-sided stop: cancels synthesis, flushes audio, and clears anything waiting (R022).
+   *
+   * Deliberately does NOT announce what it discarded. Stop is the listener's own explicit command
+   * for silence; a control that answers "stop" with more speech is the helplessness P22 recorded,
+   * not a fix for it. Every OTHER path that clears the queue does announce.
+   */
   async stop() {
     this.#cancelled = true;
     this.#pending = [];
+    if (this.#dropTimer !== null) {
+      clearTimeout(this.#dropTimer);
+      this.#dropTimer = null;
+    }
+    this.#droppedPendingAnnounce = 0;
     await this.#playback.bargeIn();
   }
   async #drain() {
@@ -1186,6 +1387,19 @@ var SpeechService = class {
       this.#draining = false;
     }
   }
+  /**
+   * Voice and rate are the two settings every user asks for first, and until this existed no
+   * caller could reach them: `generate(chunk.text)` was called with no options at all, while
+   * `SynthesizeOptions.voice`/`.rate` and the provider's implementations of both sat unused (H24).
+   * Built fresh per utterance and omitting undefined fields, so "nothing passed" stays byte-for-
+   * byte the request the provider received before.
+   */
+  #synthesizeOptions() {
+    const opts = {};
+    if (this.#deps.voice !== void 0) opts.voice = this.#deps.voice;
+    if (this.#deps.rate !== void 0) opts.rate = this.#deps.rate;
+    return opts;
+  }
   async #speakOne(text) {
     const spoken = normalize(text, this.#deps.normalizeOptions ?? {});
     if (spoken.length === 0) {
@@ -1194,13 +1408,16 @@ var SpeechService = class {
     }
     const chunkerOpts = {};
     if (this.#deps.maxUnits !== void 0) chunkerOpts.maxUnits = this.#deps.maxUnits;
+    if (this.#deps.isolateFirstSentence !== void 0) {
+      chunkerOpts.isolateFirstSentence = this.#deps.isolateFirstSentence;
+    }
     const chunker = new Chunker(chunkerOpts);
     const chunks = [...chunker.addText(spoken), ...chunker.finish()];
     const generation = this.#playback.begin();
     for (const chunk of chunks) {
       if (this.#cancelled || this.#skip || generation !== this.#playback.generation) return;
       try {
-        for await (const audio of this.#deps.provider.generate(chunk.text)) {
+        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
           if (!this.#playback.push(generation, audio)) return;
         }
       } catch (err) {
@@ -1298,6 +1515,17 @@ import { homedir } from "node:os";
 import { join as join3 } from "node:path";
 
 // packages/plugin/src/huddle/decoders.ts
+var UNSUPPORTED_AGENTS = [
+  "gemini",
+  "cursor",
+  "copilot",
+  "amp",
+  "droid",
+  "devin",
+  "aider",
+  "continue",
+  "cline"
+];
 var isRecord = (v) => typeof v === "object" && v !== null;
 function decodeClaudeLine(line) {
   let rec;
@@ -1326,11 +1554,59 @@ function decodeClaudeLine(line) {
   const id = typeof rec["uuid"] === "string" ? rec["uuid"] : `${Date.now()}-${parts.length}`;
   return { id, text };
 }
+function decodeGenericLine(line) {
+  let rec;
+  try {
+    rec = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!isRecord(rec)) return null;
+  const role = rec["role"] ?? rec["type"];
+  if (role !== "assistant") return null;
+  if (rec["thinking"] === true || rec["reasoning"] === true) return null;
+  const content = rec["content"] ?? rec["text"];
+  if (typeof content !== "string" || content.trim().length === 0) return null;
+  const id = typeof rec["id"] === "string" ? rec["id"] : `${Date.now()}`;
+  return { id, text: content.trim() };
+}
+function decoderFor(agent) {
+  return agent === "claude" || agent === "openclaude" ? decodeClaudeLine : decodeGenericLine;
+}
+function detectTranscriptFormat(raw, maxLines = 200) {
+  let sawGeneric = false;
+  let n = 0;
+  for (const line of raw.split("\n")) {
+    if (line.trim().length === 0) continue;
+    if (++n > maxLines) break;
+    let rec;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isRecord(rec)) continue;
+    if (isRecord(rec["message"]) && Array.isArray(rec["message"]["content"])) {
+      return "claude";
+    }
+    if ((typeof rec["role"] === "string" || typeof rec["type"] === "string") && (typeof rec["content"] === "string" || typeof rec["text"] === "string")) {
+      sawGeneric = true;
+    }
+  }
+  return sawGeneric ? "generic" : "unknown";
+}
+function unreadableTranscriptMessage(file) {
+  const segments = file.toLowerCase().split(/[/\\.]+/);
+  const named = UNSUPPORTED_AGENTS.find((a) => segments.includes(a));
+  return named === void 0 ? "Huddle cannot read this agent's transcript, so its replies will not be spoken." : `Huddle cannot read ${named}'s transcript, so its replies will not be spoken.`;
+}
 
 // packages/plugin/src/huddle/index.ts
 var HUDDLE_STATE_KEY = "huddle.enabled";
 var HUDDLE_SPOKEN_KEY = "huddle.spokenIds";
+var HUDDLE_HIGH_WATER_KEY = "huddle.highWater";
 var MAX_REMEMBERED_IDS = 300;
+var MAX_TRACKED_FILES = 50;
 var WATCH_WINDOW_MS = 2e4;
 var DEBOUNCE_MS = 250;
 function sessionLabel(file) {
@@ -1353,6 +1629,27 @@ var HuddleController = class {
   #debounce = null;
   #primed = /* @__PURE__ */ new Set();
   // per FILE: a new session must be primed too, or it dumps its backlog
+  /**
+   * Per FILE: how many decoded replies have already been accounted for.
+   *
+   * This, not the id set, is what makes dedup correct. `MAX_REMEMBERED_IDS = 300` trimmed `#spoken`
+   * to the last 300, so on reply 301 the oldest ids fell out of the set while their lines were
+   * still on disk — and the next whole-file re-read found them "fresh" and read them out again.
+   * That is P22's "it read out the whole history" with a new cause (cross-review B-01).
+   *
+   * An id set is the wrong data structure for a monotonic append-only log: it is unordered, so it
+   * cannot express "everything before here is done", which is the only fact we actually need. A
+   * high-water mark is O(1) per session, cannot be evicted into a re-speak, and shrinks the storage
+   * cost from 300 uuids to one integer. The id set is kept as a secondary filter for duplicates
+   * WITHIN one read; it is no longer the gate.
+   */
+  #highWater = /* @__PURE__ */ new Map();
+  /** Set when huddle is switched on, so the next attach re-primes instead of trusting a stale mark. */
+  #reprime = false;
+  /** The worktree the last agent event came from — the only correlation handle a plugin gets. */
+  #lastWorktree = null;
+  #warnedUnreadable = /* @__PURE__ */ new Set();
+  // per FILE: say "cannot read this" once, not per change
   constructor(deps) {
     this.#deps = deps;
   }
@@ -1363,6 +1660,12 @@ var HuddleController = class {
     this.#enabled = await this.#deps.store?.get(HUDDLE_STATE_KEY) === true;
     const ids = await this.#deps.store?.get(HUDDLE_SPOKEN_KEY);
     if (Array.isArray(ids)) this.#spoken = new Set(ids.filter((x) => typeof x === "string"));
+    const marks = await this.#deps.store?.get(HUDDLE_HIGH_WATER_KEY);
+    if (typeof marks === "object" && marks !== null && !Array.isArray(marks)) {
+      for (const [file, n] of Object.entries(marks)) {
+        if (typeof n === "number" && Number.isFinite(n) && n >= 0) this.#highWater.set(file, n);
+      }
+    }
     return this.#enabled;
   }
   toggle() {
@@ -1370,6 +1673,7 @@ var HuddleController = class {
     void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled);
     if (this.#enabled) {
       this.#primed.clear();
+      this.#reprime = true;
       this.#locked = null;
     } else {
       this.#stopWatching();
@@ -1386,17 +1690,44 @@ var HuddleController = class {
   }
   /** The event is a hint: start (or extend) watching the transcript for this worktree. */
   onAgentStatus(status, worktreePath) {
+    if (worktreePath !== null) this.#lastWorktree = worktreePath;
     if (!this.#enabled) return;
     void this.#ensureWatching(worktreePath);
   }
   dispose() {
     this.#stopWatching();
   }
-  /** Follow a different session, announcing the switch so the listener is never disoriented. */
+  /**
+   * Follow a different session, announcing the switch so the listener is never disoriented.
+   *
+   * This is P22's recorded remedy — "announce switches aloud" — and until `read-aloud.follow`
+   * existed it had NO caller anywhere in the source tree: one grep hit, the declaration itself.
+   * An unreachable implementation reads to the next agent as a shipped feature (006 TT6, P26).
+   *
+   * One announcement, not two. It used to `notify` AND `speak(..., 'replace')`, which both
+   * duplicated the message and cleared the queue; `notify` now routes into the audio stream, so
+   * the switch is heard once and queued replies survive.
+   */
   switchTo(file) {
     this.#locked = file;
-    this.#deps.notify(`Now reading: ${sessionLabel(file)}`);
-    this.#deps.speech.speak(`Now reading from ${sessionLabel(file)}.`, "replace");
+    this.#stopWatching();
+    this.#deps.notify(`Now reading from ${sessionLabel(file)}.`);
+    void this.#ensureWatching(this.#lastWorktree);
+  }
+  /**
+   * Lock onto the most recently active transcript for this worktree, announcing the switch.
+   *
+   * The command behind this exists because `unfollow` shipped without a counterpart: the listener
+   * could stop following a session and had no way to pick one back up except by waiting for the
+   * next `agent.status.changed` to silently re-pick "whatever was touched last" (006 TT7).
+   *
+   * Returns the file now followed, or null when there is nothing to follow.
+   */
+  async followNewest() {
+    const file = await this.#newestTranscript(this.#lastWorktree);
+    if (file === null) return null;
+    this.switchTo(file);
+    return file;
   }
   /** Stop following any session; huddle stays on but silent until you pick one. */
   unlock() {
@@ -1417,7 +1748,11 @@ var HuddleController = class {
       this.#stopWatching();
       this.#watching = file;
       if (!this.#primed.has(file)) {
-        for (const r of await this.#readReplies(file)) this.#spoken.add(r.id);
+        const replies = await this.#readReplies(file);
+        for (const r of replies) this.#spoken.add(r.id);
+        const persisted = this.#highWater.get(file);
+        this.#setHighWater(file, this.#reprime || persisted === void 0 ? replies.length : persisted);
+        this.#reprime = false;
         this.#primed.add(file);
         await this.#persistSpoken();
       }
@@ -1444,9 +1779,27 @@ var HuddleController = class {
   }
   async #speakNew(file) {
     if (!this.#enabled) return;
-    const replies = await this.#readReplies(file);
-    const fresh = replies.filter((r) => !this.#spoken.has(r.id));
-    if (fresh.length === 0) return;
+    const { replies, format } = await this.#read(file);
+    if (format === "unknown") {
+      if (!this.#warnedUnreadable.has(file)) {
+        this.#warnedUnreadable.add(file);
+        this.#deps.notify(unreadableTranscriptMessage(file));
+      }
+      return;
+    }
+    const mark = this.#highWater.get(file) ?? 0;
+    if (replies.length < mark) {
+      this.#setHighWater(file, replies.length);
+      this.#deps.log(`read-aloud: transcript shrank, re-anchoring at ${replies.length}`);
+      await this.#persistSpoken();
+      return;
+    }
+    const fresh = replies.slice(mark).filter((r) => !this.#spoken.has(r.id));
+    this.#setHighWater(file, replies.length);
+    if (fresh.length === 0) {
+      await this.#persistSpoken();
+      return;
+    }
     for (const r of fresh) {
       this.#spoken.add(r.id);
       this.#lastReply = r.text;
@@ -1455,10 +1808,21 @@ var HuddleController = class {
     this.#deps.log(`read-aloud: spoke ${fresh.length} new repl${fresh.length === 1 ? "y" : "ies"}`);
     await this.#persistSpoken();
   }
+  /** Record a mark and keep the map bounded, oldest-touched first. */
+  #setHighWater(file, n) {
+    this.#highWater.delete(file);
+    this.#highWater.set(file, n);
+    while (this.#highWater.size > MAX_TRACKED_FILES) {
+      const oldest = this.#highWater.keys().next();
+      if (oldest.done === true) break;
+      this.#highWater.delete(oldest.value);
+    }
+  }
   async #persistSpoken() {
     const ids = [...this.#spoken].slice(-MAX_REMEMBERED_IDS);
     this.#spoken = new Set(ids);
     await this.#deps.store?.set(HUDDLE_SPOKEN_KEY, ids);
+    await this.#deps.store?.set(HUDDLE_HIGH_WATER_KEY, Object.fromEntries(this.#highWater));
   }
   #stopWatching() {
     this.#watcher?.close();
@@ -1517,36 +1881,64 @@ var HuddleController = class {
     return first?.path ?? null;
   }
   async #readReplies(file) {
+    return (await this.#read(file)).replies;
+  }
+  /**
+   * Read a transcript with the decoder its own records call for.
+   *
+   * This used to call `decodeClaudeLine` unconditionally, so every non-Claude agent produced total
+   * silence while the plugin reported itself healthy and the panel claimed the format was
+   * supported (006 DC1). `format` is returned rather than swallowed so the caller can SAY that it
+   * could not read the file — "unreadable" and "nothing new" were previously the same empty array.
+   */
+  async #read(file) {
     let raw;
     try {
       raw = await readFile2(file, "utf8");
     } catch {
-      return [];
+      return { replies: [], format: "unknown" };
     }
-    const out = [];
+    const format = detectTranscriptFormat(raw);
+    if (format === "unknown") return { replies: [], format };
+    const decode = decoderFor(format === "claude" ? "claude" : "codex");
+    const replies = [];
     for (const line of raw.split("\n")) {
       if (line.trim().length === 0) continue;
-      const decoded = decodeClaudeLine(line);
-      if (decoded !== null) out.push(decoded);
+      const decoded = decode(line);
+      if (decoded !== null) replies.push(decoded);
     }
-    return out;
+    return { replies, format };
   }
 };
 
 // packages/plugin/src/main.ts
-function activate(orca) {
+var EXPECTED_COMMANDS = 8;
+function activate(orca, options = {}) {
   const host = makeHost(orca);
   host.log("read-aloud: activating");
   const registry = new ProviderRegistry();
-  registry.register(new OsSynthProvider(), { preferred: true });
-  const sink = new SubprocessSink({ log: host.log });
-  let droppedNotice = null;
+  const sink = options.sink ?? new SubprocessSink({ log: host.log });
   let speech = null;
   let engineError = null;
+  const deferredAnnouncements = [];
+  const announce = (message, urgency = "next") => {
+    host.log(`read-aloud: ${message}`);
+    host.notify("Read Aloud", message);
+    if (speech !== null) speech.announce(message, urgency);
+    else deferredAnnouncements.push(message);
+  };
+  registry.register(
+    options.provider ?? new OsSynthProvider({ notify: (m) => {
+      announce(m);
+    } }),
+    { preferred: true }
+  );
   void registry.resolve().then((resolved) => {
     if (resolved === null) {
-      engineError = "no speech engine is available on this system";
-      host.log(`read-aloud: ${engineError}`);
+      const why = registry.lastFailure ?? "no speech engine is available on this system";
+      engineError = why;
+      host.log(`read-aloud: ${why}`);
+      host.notify("Read Aloud", why);
       return;
     }
     speech = new SpeechService({
@@ -1554,18 +1946,20 @@ function activate(orca) {
       sink,
       log: host.log,
       maxQueued: 8,
+      ...options.announceDelayMs === void 0 ? {} : { announceDelayMs: options.announceDelayMs },
+      // Supplement only. The spoken sentence naming the count comes from SpeechService itself, so
+      // it cannot be lost by a notification channel that is muted, denied, or simply not looked at.
       onDropped: (n2) => {
-        if (droppedNotice !== null) clearTimeout(droppedNotice);
-        droppedNotice = setTimeout(() => {
-          host.notify("Read Aloud", `Skipped ${n2} older repl${n2 === 1 ? "y" : "ies"} to keep up`);
-        }, 500);
+        host.notify("Read Aloud", `Skipped ${n2} older repl${n2 === 1 ? "y" : "ies"} to keep up`);
       }
     });
     host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`);
-    if (resolved.status.reason !== void 0) host.notify("Read Aloud", resolved.status.reason);
+    for (const m of deferredAnnouncements.splice(0)) speech.announce(m, "next");
+    if (resolved.status.reason !== void 0) announce(resolved.status.reason);
   }).catch((err) => {
     engineError = String(err);
     host.log(`read-aloud: engine resolution failed: ${engineError}`);
+    host.notify("Read Aloud", `speech engine failed to start: ${engineError}`);
   });
   const withSpeech = async (fn) => {
     if (speech === null) {
@@ -1609,18 +2003,21 @@ function activate(orca) {
       }
     },
     log: host.log,
+    // The two-agents ambiguity notice and the session-switch notice both come through here. Both
+    // are about WHOSE WORDS the listener is hearing — provenance, the thing 006 ranks S1 — so both
+    // belong in the audio stream, not the notification tray.
     notify: (m) => {
-      host.notify("Read Aloud", m);
+      announce(m);
     },
-    store: { get: host.storageGet, set: host.storageSet }
+    store: { get: host.storageGet, set: host.storageSet },
+    ...options.projectsDir === void 0 ? {} : { projectsDir: options.projectsDir }
   });
   void huddle.restore().then((on) => {
     host.log(`read-aloud: huddle mode restored to ${on ? "on" : "off"}`);
   });
   host.registerCommand("read-aloud.toggle-huddle", () => {
     const on = huddle.toggle();
-    host.notify("Read Aloud", `Huddle mode ${on ? "ON" : "OFF"}`);
-    if (speech !== null) speech.speak(on ? "Huddle mode on." : "Huddle mode off.", "replace");
+    announce(`Huddle mode ${on ? "on" : "off"}.`, "now");
   });
   host.registerCommand("read-aloud.status", async () => {
     await withSpeech((s) => {
@@ -1632,7 +2029,7 @@ function activate(orca) {
       if (now !== null) parts.push(`Now reading ${now}.`);
       if (s.queued > 0) parts.push(`${s.queued} more waiting.`);
       else if (now === null) parts.push("Nothing is being read.");
-      s.speak(parts.join(" "), "replace");
+      s.announce(parts.join(" "), "now");
     });
   });
   host.registerCommand("read-aloud.skip", async () => {
@@ -1642,8 +2039,15 @@ function activate(orca) {
   });
   host.registerCommand("read-aloud.unfollow", () => {
     huddle.unlock();
-    host.notify("Read Aloud", "No longer following any session");
-    speech?.speak("Stopped following that session.", "replace");
+    announce("Stopped following that session.", "now");
+  });
+  host.registerCommand("read-aloud.follow", async () => {
+    const file = await huddle.followNewest();
+    if (file === null) {
+      announce("No agent transcript to follow in this worktree yet.", "now");
+      return;
+    }
+    if (!huddle.enabled) announce("Huddle mode is off, so replies will not be spoken yet.", "next");
   });
   host.registerCommand("read-aloud.speak-last-reply", async () => {
     await withSpeech(async (s) => {
@@ -1661,7 +2065,9 @@ function activate(orca) {
     huddle.onAgentStatus(status, worktreePathFrom(status.worktreeId));
   });
   const n = host.registeredCommands();
-  if (n < 4) host.log(`read-aloud: WARNING only ${n}/4 commands registered \u2014 host API mismatch?`);
+  if (n < EXPECTED_COMMANDS) {
+    host.log(`read-aloud: WARNING only ${n}/${EXPECTED_COMMANDS} commands registered \u2014 host API mismatch?`);
+  }
   host.log(`read-aloud: ready (${n} commands)`);
 }
 export {

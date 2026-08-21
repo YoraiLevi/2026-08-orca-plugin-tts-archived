@@ -276,3 +276,53 @@ describe('DC1 huddle reads non-Claude transcripts, or says it cannot', () => {
     expect(spoken.match(/cannot read/gi)?.length).toBe(1)
   })
 })
+
+/**
+ * 006 TT6 / P26 — `switchTo` was implemented, commented, and unreachable.
+ *
+ * It implements P22's recorded remedy ("announce switches aloud") and had exactly one grep hit in
+ * the whole source tree: its own declaration. The manifest had `unfollow` and no counterpart, so
+ * the only way back to a session was to wait for the next agent event to silently re-pick whatever
+ * was touched last. An unreachable implementation reads to the next agent as a shipped feature.
+ *
+ * This is a reachability test in P26's exact shape: the outermost object a caller constructs
+ * (`activate(orca)`, as ORCA calls it) driven through a real registered command, asserting what
+ * the innermost consumer — the synthesizer — was actually handed.
+ */
+describe('TT6 read-aloud.follow reaches switchTo end to end', () => {
+  it('announces the session it switched to, in the audio stream', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-main-'))
+    const worktree = join(root, 'wt')
+    const project = worktree.replace(/[/\\:]/g, '-')
+    await writeTranscript(root, project, 'sessionalpha', ['some earlier reply'])
+    const h = await boot(root)
+
+    await h.run('read-aloud.toggle-huddle')
+    h.agentDone(worktree)            // gives the controller a worktree to resolve against
+    await settle(20)
+    h.provider.synthesized.length = 0
+
+    await h.run('read-aloud.follow')
+    await settle(40)
+
+    const spoken = h.spoken()
+    expect(spoken, 'the switch was never announced aloud').toMatch(/Now reading from/i)
+    // sessionLabel() names the session, so the listener learns WHOSE words are coming.
+    // (Deliberately an alphabetic id here: a real session id is hex, and `expandNumbers` turns
+    // "abcdef12" into "abcdeftwelve". That is a live audible defect, unrelated to this fix, and
+    // it belongs to Voice Lab and to HANDOFF's standing rule "never speak hex".)
+    expect(spoken).toContain('sessiona')
+  })
+
+  it('says so when there is nothing to follow, rather than doing nothing', async () => {
+    // The control case: an empty projects root must produce a DIFFERENT sentence, so the assertion
+    // above is shown to distinguish outcomes rather than matching whatever was said.
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-main-'))
+    const h = await boot(root)
+    await h.run('read-aloud.follow')
+    await settle(40)
+    const spoken = h.spoken()
+    expect(spoken).toMatch(/No agent transcript to follow/i)
+    expect(spoken).not.toMatch(/Now reading from/i)
+  })
+})

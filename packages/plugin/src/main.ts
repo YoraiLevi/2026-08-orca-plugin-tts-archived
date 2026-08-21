@@ -32,6 +32,9 @@ export interface ActivateOptions {
   readonly announceDelayMs?: number
 }
 
+/** How many commands `orca-plugin.json` declares. Pinned by main.test.ts, not by memory. */
+const EXPECTED_COMMANDS = 8
+
 export default function activate(orca: OrcaApi, options: ActivateOptions = {}): void {
   const host = makeHost(orca)
   host.log('read-aloud: activating')
@@ -207,6 +210,18 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     announce('Stopped following that session.', 'now')
   })
 
+  // Pick a session back up. `unfollow` shipped without a counterpart, so the only route back was to
+  // wait for the next agent event to silently re-pick "whatever was touched last" — and
+  // `switchTo`, which implements P22's "announce switches aloud", had no caller at all (006 TT6).
+  host.registerCommand('read-aloud.follow', async () => {
+    const file = await huddle.followNewest()
+    if (file === null) {
+      announce('No agent transcript to follow in this worktree yet.', 'now')
+      return
+    }
+    if (!huddle.enabled) announce('Huddle mode is off, so replies will not be spoken yet.', 'next')
+  })
+
   host.registerCommand('read-aloud.speak-last-reply', async () => {
     await withSpeech(async (s) => {
       const text = await huddle.lastReply()
@@ -223,7 +238,12 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
 
   // Verify by effect: if the host API shape changed under us, every registration silently no-ops
   // and the only symptom is "Could not run the plugin command" (PITFALLS P18). Say so loudly.
+  // Guard drift: this used to read `n < 4` against a manifest declaring seven commands, so a
+  // partial host-API mismatch registering 4-6 of them passed silently (006 site 28). The number is
+  // pinned to the manifest by main.test.ts, which asserts every declared command id is registered.
   const n = host.registeredCommands()
-  if (n < 4) host.log(`read-aloud: WARNING only ${n}/4 commands registered — host API mismatch?`)
+  if (n < EXPECTED_COMMANDS) {
+    host.log(`read-aloud: WARNING only ${n}/${EXPECTED_COMMANDS} commands registered — host API mismatch?`)
+  }
   host.log(`read-aloud: ready (${n} commands)`)
 }
