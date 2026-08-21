@@ -7,7 +7,7 @@ import { normalize } from './index.js'
  * T110 — the Voice Lab fixture corpus.
  *
  * These tests assert that every fixture SURVIVES the pipeline and that the corpus as a whole
- * still exercises all 15 normalizer stages. They deliberately assert NOTHING about *what* the
+ * still exercises all 16 normalizer stages. They deliberately assert NOTHING about *what* the
  * spoken text says: that is taste, it belongs to the listener, and arguing it here is exactly
  * the loop PITFALLS P23 says does not converge.
  *
@@ -52,6 +52,27 @@ const COVERAGE: Coverage[] = [
       expect(out).not.toContain('```')
       // The policy is reachable and observable on this fixture.
       expect(normalize(raw, { codeBlocks: 'announce' })).not.toBe(normalize(raw, { codeBlocks: 'drop' }))
+    }
+  },
+  {
+    /**
+     * J21 bug 1. Every fixture in this corpus opens with a provenance comment, and before stage 2
+     * existed the listener's FIRST audio from each was the chunk `"<!"`, followed by the comment
+     * read aloud as though it were the answer. The phrases below are restated here rather than
+     * derived from the fixture, so that editing the fixture cannot quietly make this vacuous (P36).
+     */
+    stage: 'stripHtmlComments',
+    fixture: 'short.md',
+    check: (raw, out) => {
+      expect(raw).toContain('<!--')
+      expect(raw).toContain('a two-sentence answer')
+      expect(out).not.toContain('<!')
+      expect(out).not.toContain('-->')
+      expect(out).not.toContain('a two-sentence answer')
+      expect(out).not.toContain('T110e')
+      // And the prose the comment was hiding IS still spoken — an over-eager strip would be
+      // just as wrong, and a "does not contain" assertion alone cannot tell the two apart.
+      expect(out).toContain('the first sentence is synthesized')
     }
   },
   {
@@ -206,7 +227,7 @@ describe('T110 fixture corpus — the coverage claim', () => {
     const body = src.slice(start, src.indexOf('\n}', start))
     const stages = [...body.matchAll(/\bs = (\w+)\(/g)].map((m) => m[1] as string)
     // A floor, so a guard that quietly stops matching goes red instead of passing vacuously (P33).
-    expect(stages.length).toBeGreaterThanOrEqual(15)
+    expect(stages.length).toBeGreaterThanOrEqual(16)
     expect([...new Set(stages)].toSorted()).toEqual([...new Set(COVERAGE.map((c) => c.stage))].toSorted())
   })
 

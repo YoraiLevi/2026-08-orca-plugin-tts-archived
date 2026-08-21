@@ -91,6 +91,37 @@ function fenceRanges(raw: string): Range[] {
   return ranges
 }
 
+/**
+ * HTML comment spans, mirroring `stripHtmlComments`' scan. Restated here rather than imported for
+ * the same reason as the glyph and unit tables below: a range function imported from the code
+ * under test agrees with it by construction and cannot contradict it.
+ *
+ * The unterminated case matches the STAGE's decision — only the four marker characters are a
+ * removal; everything after a stray `<!--` is still spoken and must still be accounted for as
+ * spoken. If the stage is ever changed to swallow to end-of-document, this function will disagree
+ * with it and the fixtures will report the swallowed prose as unaccounted, which is the point.
+ */
+function commentRanges(raw: string): Range[] {
+  const ranges: Range[] = []
+  let i = 0
+  while (i < raw.length) {
+    const open = raw.indexOf('<!--', i)
+    if (open === -1) break
+    const close = raw.indexOf('-->', open + 4)
+    if (close === -1) { ranges.push([open, open + 4]); break }
+    ranges.push([open, close + 3])
+    i = close + 3
+  }
+  return ranges
+}
+
+/** The source with every comment span replaced by spaces — offsets and line numbers preserved. */
+function blankComments(raw: string): string {
+  let out = raw
+  for (const [a, b] of commentRanges(raw)) out = out.slice(0, a) + ' '.repeat(b - a) + out.slice(b)
+  return out
+}
+
 interface Url { readonly range: Range; readonly host: string }
 
 /** Mirrors `stripUrls`' scan, so the ranges are the ones the pipeline really consumes. */
@@ -193,6 +224,13 @@ const POLICY: Record<string, string> = {
     'reaches the engine unchanged. Asserted rather than assumed: if a future stage starts ' +
     'stripping box drawing (design 002 wants exactly that), this rule goes red and forces the ' +
     'announcement to be designed rather than defaulted.',
+  'removed:html-comment':
+    'The token is inside an HTML comment and every one of its occurrences is. A comment is markup ' +
+    'the author wrote for a reader of the SOURCE, and the listener is not that reader; speaking it ' +
+    'was J21 bug 1, where all six fixtures opened by reading their own provenance note aloud after ' +
+    'a first utterance of the two characters "<!". Removed with no announcement, on the same ' +
+    'judgement as glyph:removed: nothing propositional was withheld from the listener, and ' +
+    '"a comment was omitted" on every reply would be narration.',
   'allow-list':
     'An explicit token in REMOVED_TOKENS, with its own written reason.'
 }
@@ -200,7 +238,8 @@ const POLICY: Record<string, string> = {
 /** Frozen. Growing this list is a review, not an edit. */
 const REVIEWED_POLICY_IDS = [
   'allow-list', 'announced:code-block', 'announced:url', 'glyph:passthrough', 'glyph:removed',
-  'glyph:spoken-word', 'spoken', 'transformed:extension', 'transformed:number', 'transformed:unit'
+  'glyph:spoken-word', 'removed:html-comment', 'spoken', 'transformed:extension',
+  'transformed:number', 'transformed:unit'
 ]
 
 /**
@@ -284,10 +323,22 @@ function accountGlyph(ch: string, count: number, raw: string, out: string): Glyp
 
 interface Verdict { readonly rule: string; readonly ok: boolean; readonly why?: string }
 
-function account(tok: string, occ: readonly Occurrence[], raw: string, out: string,
-                 spoken: Set<string>, fences: readonly Range[], links: readonly Url[]): Verdict {
+function account(tok: string, mentions: readonly Occurrence[], raw: string, out: string,
+                 spoken: Set<string>, fences: readonly Range[], links: readonly Url[],
+                 comments: readonly Range[]): Verdict {
   // 1. spoken verbatim
   if (spoken.has(tok)) return { rule: 'spoken', ok: true }
+
+  /**
+   * 1b. REMOVED — stage 2 deletes HTML comments, so occurrences inside one are gone before any
+   * later stage sees them. Filter them out FIRST and then ask what happened to what is left. A
+   * token can live in both places at once: `code-heavy.md` writes `speak` twice inside its
+   * provenance comment and once as a fence info string, and neither "all of it was a comment" nor
+   * "all of it was code" is true of it. Subtracting the comment occurrences makes the remaining
+   * question the right one, and lets the fence rule answer it.
+   */
+  const occ = mentions.filter((o) => !inAny(o.at, comments))
+  if (occ.length === 0) return { rule: 'removed:html-comment', ok: true }
 
   // 2a. TRANSFORMED — an integer spoken as words.
   if (/^[0-9]+$/.test(tok)) {
@@ -336,6 +387,7 @@ describe('token conservation — every written word is spoken, announced, or all
       const spoken = spokenTokens(out)
       const fences = fenceRanges(raw)
       const links = urls(raw)
+      const comments = commentRanges(raw)
 
       const byToken = new Map<string, Occurrence[]>()
       for (const o of tokensOf(raw)) {
@@ -345,7 +397,7 @@ describe('token conservation — every written word is spoken, announced, or all
 
       const unaccounted: string[] = []
       for (const [tok, occ] of byToken) {
-        const v = account(tok, occ, raw, out, spoken, fences, links)
+        const v = account(tok, occ, raw, out, spoken, fences, links, comments)
         used.add(v.rule)
         if (!v.ok) unaccounted.push(`${tok} — ${v.rule}: ${v.why ?? ''}`)
       }
@@ -353,8 +405,11 @@ describe('token conservation — every written word is spoken, announced, or all
     })
 
     it(`${name} loses no glyph without a reason`, () => {
-      const raw = read(name)
-      const out = normalize(raw)
+      // Comments are blanked FIRST. A glyph inside a comment is not content, and neither is a
+      // WORD inside one — `hostile.md`'s comment says "right-to-left text", and counting that
+      // "left" as an expected spoken word would demand the arrow glyph produce it twice.
+      const raw = blankComments(read(name))
+      const out = normalize(read(name))
       const unaccounted: string[] = []
       for (const [ch, count] of glyphsOf(raw)) {
         const v = accountGlyph(ch, count, raw, out)
@@ -370,7 +425,7 @@ describe('token conservation — every written word is spoken, announced, or all
 
   it('every rule the corpus actually used is a reviewed rule with a written reason', () => {
     // A floor, so a classifier that quietly stops matching cannot pass vacuously (P33).
-    expect(used.size).toBeGreaterThanOrEqual(6)
+    expect(used.size).toBeGreaterThanOrEqual(7)
     expect([...used].filter((r) => POLICY[r] === undefined), 'rules used with no written reason').toEqual([])
   })
 })

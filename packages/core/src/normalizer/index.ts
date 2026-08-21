@@ -8,6 +8,12 @@
  * Stage order is load-bearing. Block constructs (fences, headings, lists, tables) are handled
  * while line structure still exists; whitespace is collapsed last.
  *
+ * `normalize()` composes SIXTEEN stages, and the banner comments below number them by CALL order,
+ * which is not this file's physical order — `speakKeyGlyphs` (11) and `tidyPunctuation` (16) sit
+ * beside the number helpers because that is where they were written. The call list in
+ * `normalize()` is the authority; `scripts/voice-lab.mjs` re-derives the ladder from these bytes
+ * and refuses to start if the two disagree.
+ *
  * Ported from block/buzz `preprocess_for_tts` (docs/.research/prior-art-buzz.md), plus the four
  * constructs buzz does not handle: headings, lists, tables, file paths.
  */
@@ -131,6 +137,7 @@ export function normalize(md: string, opts: NormalizeOptions = {}): string {
   const doNumbers = opts.expandNumbers ?? true
 
   let s = stripFencedCode(md, codeBlocks)
+  s = stripHtmlComments(s)
   s = stripInlineCode(s)
   s = expandMarkdownLinks(s)
   s = stripUrls(s)
@@ -189,6 +196,79 @@ function stripFencedCode(src: string, policy: CodeBlockPolicy): string {
 
 /* ---------------------------------------------------------------- stage 2 */
 
+/**
+ * `<!-- ... -->` is removed outright. It is markup the author wrote FOR A READER OF THE SOURCE,
+ * and a listener is not that reader.
+ *
+ * Today, with no such stage, every one of the six committed fixtures opens by speaking its own
+ * provenance comment — and worse than speaking it, mangling it: the chunker's first utterance is
+ * the two characters `"<!"`, because `stripMarkdownMarkers` has already eaten the `--` as a
+ * strikethrough-adjacent run and the sentence splitter falls into the wreckage. The listener's
+ * first audio of a reply is a stray glyph.
+ *
+ * WHY POSITION 2 — after `stripFencedCode`, before everything else. Two constraints pin it:
+ *
+ *  1. **After stage 1.** A fenced code block may legitimately CONTAIN `<!--` as its subject —
+ *     any reply that shows someone how to write an HTML comment does exactly that. Running here
+ *     means stage 1 has already replaced that fence with its placeholder, so the `<!--` inside it
+ *     no longer exists and cannot be matched. Running BEFORE stage 1 would reach into the fence
+ *     and delete from inside it, and — far worse — an unterminated `<!--` inside a code sample
+ *     would consume the fence's own closing ``` and merge the code block with the prose after it.
+ *     Ordering does the work here that a special case would otherwise have to.
+ *
+ *  2. **Before `stripMarkdownMarkers` (now stage 10) and before the chunker.** `--` inside a
+ *     comment must never be offered to the marker stripper, and `<!` must never reach the
+ *     chunker — that pair is what produced the two-character first utterance.
+ *
+ *  Position 2 is then simply the EARLIEST slot that satisfies both, and earliest is what you want
+ *  for a delete-everything stage: every later stage gets to assume comments are already gone.
+ *
+ *  ONE CLAIM DELIBERATELY NOT MADE. It is tempting to argue this must also precede
+ *  `stripInlineCode` (stage 3), because `fixtures/code-heavy.md` writes backticks inside its
+ *  opening comment and stage 3 pairs backticks positionally. That argument is WRONG and is
+ *  recorded here so nobody re-derives it: stage 3 UNWRAPS, it never deletes — a mispaired span
+ *  still emits its content, and its unclosed branch emits the remainder verbatim. Both orders were
+ *  run against the six fixtures and against probes built to break them, and they produce identical
+ *  text. `normalize.test.ts` keeps a labelled CONTROL for that, not a proof.
+ *
+ * WHAT AN UNTERMINATED `<!--` DOES — it drops the four marker characters and SPEAKS THE REST.
+ * It does not swallow to end-of-document, and it is not announced.
+ *
+ * That is deliberately the OPPOSITE of `stripFencedCode`'s unclosed-fence rule, and the asymmetry
+ * is the argument. An unclosed fence has an announcement already in flight ("a code block is
+ * omitted"), and its content is code, which policy says is not spoken anyway — so the honest move
+ * there is to widen the announcement. Here the content after a stray `<!--` is ORDINARY PROSE that
+ * was going to be spoken, and `<!--` is a sequence that occurs in innocent prose about markup (it
+ * occurs in this repository's own documentation). Losing an entire reply to one stray token is the
+ * catastrophic failure for a listener who cannot see what went missing; losing a four-character
+ * marker is not a loss at all. Nothing is announced because nothing was omitted — an announcement
+ * on every truncated reply would be narration, and R030's "never fail silently" is about content
+ * the listener LOST, not about characters that were never content.
+ *
+ * Removal preserves the comment's LINE COUNT — a multi-line comment becomes its own newlines, a
+ * single-line comment becomes one space. Stages 6, 7 and 8 (`headingsToPauses`,
+ * `listItemsToSentences`, `tablesToRows`) are line-oriented and run after this one, so collapsing
+ * `text <!-- c\n--> ## Heading` to one line would silently destroy a heading. A space, not the
+ * empty string, for the single-line case: `a<!--x-->b` must not become the word `ab`.
+ */
+function stripHtmlComments(src: string): string {
+  let out = ''
+  let i = 0
+  while (i < src.length) {
+    const open = src.indexOf('<!--', i)
+    if (open === -1) { out += src.slice(i); break }
+    out += src.slice(i, open)
+    const close = src.indexOf('-->', open + 4)
+    if (close === -1) { out += src.slice(open + 4); break }   // unterminated: keep the prose
+    const newlines = src.slice(open, close + 3).split('\n').length - 1
+    out += newlines > 0 ? '\n'.repeat(newlines) : ' '
+    i = close + 3
+  }
+  return out
+}
+
+/* ---------------------------------------------------------------- stage 3 */
+
 function stripInlineCode(src: string): string {
   let out = ''
   let i = 0
@@ -207,7 +287,7 @@ function stripInlineCode(src: string): string {
   return out
 }
 
-/* ---------------------------------------------------------------- stage 3 */
+/* ---------------------------------------------------------------- stages 4-5 */
 
 /**
  * `[label](url)` -> `label`, plus the destination when the label does not already give it away.
@@ -290,7 +370,7 @@ function stripUrls(src: string): string {
   return out
 }
 
-/* ---------------------------------------------------------------- stages 4-6 */
+/* ---------------------------------------------------------------- stages 6-8 */
 
 const TERMINAL = new Set(['.', '!', '?'])
 
@@ -395,7 +475,7 @@ function tablesToRows(src: string): string {
   return out.join('\n')
 }
 
-/* ---------------------------------------------------------------- stage 7 */
+/* ---------------------------------------------------------------- stage 9 */
 
 const WORD_BREAK = new Set([' ', '\n', '\t'])
 
@@ -468,7 +548,7 @@ function speakFilePaths(src: string, style: PathStyle, extStyle: ExtensionStyle)
   }).join('')
 }
 
-/* ---------------------------------------------------------------- stage 8 */
+/* ---------------------------------------------------------------- stage 10 */
 
 function isBoundaryBefore(prev: string | undefined): boolean {
   return prev === undefined || WORD_BREAK.has(prev) || prev === '(' || prev === '"'
@@ -521,7 +601,7 @@ function stripMarkdownMarkers(src: string): string {
   return chars.filter((_, i) => !drop.has(i)).join('')
 }
 
-/* ---------------------------------------------------------------- stage 9 */
+/* ---------------------------------------------------------------- stage 12 */
 
 function isEmoji(cp: number): boolean {
   return (
@@ -544,7 +624,7 @@ function stripEmoji(src: string): string {
   return out
 }
 
-/* ---------------------------------------------------------------- stage 10 */
+/* ---------------------------------------------------------------- stages 13-14 */
 
 const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
   'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
@@ -599,7 +679,33 @@ function expandNumbers(src: string): string {
 
     let j = i
     while (isDigit(src[j])) j++
-    const digits = src.slice(i, j)
+
+    /**
+     * THOUSANDS SEPARATORS. `1,112` is ONE number, and reading it as two destroyed it twice over:
+     * the digit scanner stopped at the comma, so the listener heard "one, one hundred twelve" —
+     * and `2,017` was worse, because `Number('017')` is 17, so the group's leading zero vanished
+     * and it was spoken as "two, seventeen". Neither is recoverable by ear. This is
+     * `docs/.research/latency-measurements.md`'s own bracket, `p50 1,112-2,017 ms`, spoken back
+     * to the author as nonsense.
+     *
+     * Only a WELL-FORMED group run is joined: 1-3 leading digits, then one or more groups of
+     * EXACTLY three, and the run must not be followed by a further digit. That last condition is
+     * what keeps the rule from mangling a comma-separated LIST of numbers — `1,1234` is not a
+     * grouped number and stays two tokens, and so does `port 8080,1000` read as `8080` then
+     * `1000`... which is exactly why the leading run is capped at three digits too: `8080,123`
+     * must not become "eight million eighty thousand one hundred twenty three".
+     */
+    if (j - i <= 3) {
+      let k = j
+      while (
+        src[k] === ',' && isDigit(src[k + 1]) && isDigit(src[k + 2]) && isDigit(src[k + 3]) &&
+        !isDigit(src[k + 4])
+      ) k += 4
+      j = k
+    }
+
+    const raw = src.slice(i, j)
+    const digits = raw.split(',').join('')
 
     // HH:MM
     if (src[j] === ':' && isDigit(src[j + 1])) {
@@ -622,7 +728,7 @@ function expandNumbers(src: string): string {
     }
 
     // "#42" is a reference, not a quantity. Speak the numerals.
-    if (src[i - 1] === '#') { out += digits; i = j; continue }
+    if (src[i - 1] === '#') { out += raw; i = j; continue }
 
     /**
      * A digit run GLUED TO A LETTER is a label, not a quantity: `p50`, `T110d`, `P22`, `M9`,
@@ -632,10 +738,10 @@ function expandNumbers(src: string): string {
      * written. 006 section 19 rank 5, found by `token-conservation.test.ts` against the committed
      * fixtures. Same judgement as the `#42` rule immediately above.
      */
-    if (isLetter(src[i - 1])) { out += digits; i = j; continue }
+    if (isLetter(src[i - 1])) { out += raw; i = j; continue }
 
     const value = Number(digits)
-    if (value >= 1_000_000 || digits.length > 6) { out += digits; i = j; continue }
+    if (value >= 1_000_000 || digits.length > 6) { out += raw; i = j; continue }
 
     out += numberToWords(value)
     i = j
@@ -675,6 +781,8 @@ function expandUnits(src: string): string {
   return out
 }
 
+/* ---------------------------------------------------------------- stage 11 */
+
 /** `⌘⇧S` -> `command shift S`. Otherwise the glyphs reach the engine as garbage. */
 function speakKeyGlyphs(src: string): string {
   let out = ''
@@ -684,6 +792,8 @@ function speakKeyGlyphs(src: string): string {
   }
   return out
 }
+
+/* ---------------------------------------------------------------- stage 16 */
 
 /**
  * The lead-in placeholders start with a sentence break so the engine pauses before them. When the
@@ -701,7 +811,7 @@ function tidyPunctuation(src: string): string {
   return out.trim()
 }
 
-/* ---------------------------------------------------------------- stage 11 */
+/* ---------------------------------------------------------------- stage 15 */
 
 function collapseWhitespace(src: string): string {
   let out = ''

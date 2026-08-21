@@ -358,3 +358,127 @@ describe('006 site 50 — a check mark is a verdict, not decoration', () => {
     expect(out, 'narrating a party popper is the harm on the other side').not.toMatch(/omit|emoji/i)
   })
 })
+
+/**
+ * J21 bug 1 — HTML comments reached the listener.
+ *
+ * All six committed fixtures open with a `<!-- ... -->` provenance comment, and with no stage to
+ * remove them the FIRST THING the listener heard from every one was the chunk `"<!"` — because
+ * `stripMarkdownMarkers` had already eaten the `--` and the sentence splitter fell into the
+ * wreckage. Then the comment body was read aloud as if it were the answer.
+ *
+ * These are effect assertions on both halves: what must vanish, and what must survive.
+ */
+describe('J21-1 HTML comments are not spoken', () => {
+  run([
+    { name: 'a leading comment is gone and the prose after it is intact',
+      input: '<!-- T110e provenance -->\n\nYes, it works.',
+      expect: 'Yes, it works.' },
+    { name: 'a multi-line comment is gone',
+      input: '<!-- line one\n     line two\n     line three -->\nThe answer.',
+      expect: 'The answer.' },
+    { name: 'an inline comment leaves a word boundary rather than fusing its neighbours',
+      input: 'alpha<!--hidden-->beta',
+      expect: 'alpha beta' },
+    { name: 'a comment between sentences does not merge them',
+      input: 'One. <!-- aside --> Two.',
+      expect: 'One. Two.' },
+    // The `<!` / `--` wreckage, asserted as the artefact it actually was.
+    { name: 'no fragment of the marker survives to the engine',
+      input: '<!-- T110a — fenced blocks, `speak`, dunders -->\nI traced it.',
+      expect: 'I traced it.' }
+  ])
+
+  /**
+   * ORDERING, asserted rather than described.
+   *
+   * Stage 1 has already removed the fence body, so a `<!--` written INSIDE a code sample never
+   * reaches stage 2 — including an unterminated one, which if seen would have consumed the
+   * fence's own closing delimiter and merged the code block into the prose after it.
+   */
+  it('a comment marker inside a fenced code block cannot reach stage 2', () => {
+    // The mutation this is written against is moving stage 2 in front of stage 1. An `<!--` in a
+    // code SAMPLE would then pair with a `-->` written in the PROSE much later, and everything
+    // between them — the fence's own closing delimiter included — would be deleted, leaving an
+    // unclosed fence that swallows the rest of the reply. Fence-first, the code block is already
+    // gone and there is nothing to pair with.
+    expect(normalize(
+      'Before\n```html\n<!-- an example comment\n```\nAfter the block, the arrow --> is spoken.'
+    )).toBe('Before. Here, a code block is omitted. After the block, the arrow --> is spoken.')
+  })
+
+  /**
+   * CONTROL, labelled as one. This does NOT prove an ordering: `stripInlineCode` unwraps rather
+   * than deletes, so swapping stages 2 and 3 produces byte-identical output here and on all six
+   * fixtures — measured, not assumed. What it pins is the outcome the listener gets when a comment
+   * carries an odd backtick, which is the shape `fixtures/code-heavy.md` actually has.
+   */
+  it('CONTROL: a stray backtick inside a comment does not eat the prose after it', () => {
+    expect(normalize('see <!-- a `q --> and `real code` here'))
+      .toBe('see and real code here')
+  })
+
+  /**
+   * THE UNTERMINATED CASE, and it is deliberately the opposite of the unclosed-FENCE rule above.
+   *
+   * A stray `<!--` must not swallow the remainder of a reply. The content after it is ordinary
+   * prose that was going to be spoken, and `<!--` occurs in innocent writing about markup. For a
+   * listener who cannot see what went missing, losing the whole answer to one token is the
+   * catastrophic failure; losing four marker characters is not a loss at all — so nothing is
+   * announced either.
+   */
+  it('an unterminated comment drops the marker and still speaks the rest of the reply', () => {
+    expect(normalize('The answer is ready. <!-- note to self, and the reply was cut off here'))
+      .toBe('The answer is ready. note to self, and the reply was cut off here')
+  })
+
+  it('an unterminated comment is NOT announced as an omission, because nothing was omitted', () => {
+    expect(normalize('Text <!-- cut')).not.toContain('omitted')
+  })
+
+  /**
+   * Line structure survives the removal. Stages 6-8 are line-oriented and run after stage 2, so a
+   * multi-line comment must leave its newlines behind or a heading on the line after it is lost.
+   */
+  it('removing a multi-line comment does not destroy the heading on the line after it', () => {
+    expect(normalize('intro <!-- a\nb\n-->\n## Real Heading\n\nBody.'))
+      .toBe('intro Real Heading. Body.')
+  })
+})
+
+/**
+ * J21 bug 2 — thousands separators.
+ *
+ * `p50 1,112-2,017 ms` was spoken "p50 one,one hundred twelve-two,seventeen milliseconds": the
+ * digit scanner stopped at each comma, and `Number('017')` is 17, so the second group even lost
+ * its leading zero. That string is this repo's own measured latency bracket, read back to the
+ * author as nonsense.
+ */
+describe('J21-2 thousands separators are one number', () => {
+  run([
+    { name: 'the measured latency bracket reads as a range of two numbers',
+      input: 'p50 1,112-2,017 ms',
+      expect: 'p50 one thousand one hundred twelve-two thousand seventeen milliseconds' },
+    { name: 'a leading zero inside a group is not dropped',
+      input: 'took 2,017 ms',
+      expect: 'took two thousand seventeen milliseconds' },
+    { name: 'a round thousand',
+      input: '1,000 files', expect: 'one thousand files' },
+    { name: 'a three-digit leading group',
+      input: '123,456 rows', expect: 'one hundred twenty three thousand four hundred fifty six rows' },
+    // Above the expansion ceiling the numeral goes to the engine — WITH its commas, which is how
+    // an engine reads a large number correctly. Joining the digits here would have been a
+    // regression dressed as a fix.
+    { name: 'a number past the expansion ceiling keeps its separators',
+      input: 'x 12,345,678 y', expect: 'x 12,345,678 y' },
+    // The guards that were already there must still hold once a run can span commas.
+    { name: 'a reference keeps its numerals and its separators',
+      input: 'see #1,000 now', expect: 'see #1,000 now' },
+    // Not a grouped number: the run after the comma is four digits, so it is two tokens.
+    { name: 'a malformed group is not joined',
+      input: '1,1234 total', expect: 'one,one thousand two hundred thirty four total' },
+    // Nor is a comma-separated list of numbers: the leading run is four digits.
+    { name: 'a comma-separated list of numbers is not fused into one',
+      input: 'ports 8080,1000 open', expect: 'ports eight thousand eighty,one thousand open' }
+  ])
+})
