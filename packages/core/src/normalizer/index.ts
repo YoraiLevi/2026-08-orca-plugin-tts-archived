@@ -664,11 +664,40 @@ function under1000(n: number): string {
  * Separators make no difference to `say` at all, which is why they are preserved on the way out
  * rather than stripped: above the ceiling the engine is the better reader either way.
  *
- * WINDOWS SAPI AND espeak-ng ARE `[claimed]` — NOT measured, and I do not know. espeak-ng is not
- * installed on the machine this was written on. If espeak-ng spells a bare `1234567` digit by
- * digit, this ceiling is a Linux-only defect hiding behind a macOS-only probe, and the same
- * `-o file` comparison above is what would show it. Run it on the Linux CI leg before trusting
- * this on Linux.
+ * ESPEAK-NG IS NOW `[measured-here]` TOO — the paragraph above used to end by saying it was
+ * `[claimed]` and that the same `-o file` comparison would settle it. It has been run, n=3,
+ * byte-stable across runs, in a `node:24-bookworm` container with `espeak-ng` 1.51 installed
+ * (aarch64; the CI runners are x86_64, and the probe now runs there too — `.github/workflows/ci.yml`,
+ * "The million ceiling must hold on THIS platform's synthesizer"). The script is
+ * `scripts/ci/number-ceiling-probe.mjs`; `pnpm probe:numbers` re-runs it.
+ *
+ *   `1234567` and `1,234,567` render to BYTE-IDENTICAL audio, 190,398 B `[measured-here]` (n=3),
+ *   against 184,976 B for the spelled-out words and 100,974 B for digit-by-digit — so espeak-ng
+ *   reads it as a NUMBER, not as seven digits. `espeak-ng -q -x` says so directly rather than by
+ *   inference from a byte count:
+ *     "1234567" → w'0n m'Ili@n_! t'u:h'VndrI2d@n T'3:ti f'o@ T'aUz@nd_! f'aIvh'VndrI2d@n s'Iksti s'Ev@n
+ *   which is "one million, two hundred-and thirty four thousand, five hundred-and sixty seven" —
+ *   the same number as ours, worded with British "and" and two phrase breaks. `1000000`,
+ *   `1,000,000` and the literal `one million` all render to checksum `1488ab98` `[measured-here]`,
+ *   with the control `one million and one` at `39922fc3`, so the comparison is not vacuous.
+ *
+ * **The ceiling is therefore NOT a Linux-only defect.** Both shipped engines read a bare numeral
+ * above the ceiling as a number, and handing it over untouched is the right call on both.
+ *
+ * WINDOWS SAPI REMAINS `[claimed]` — no Windows machine was available to the agent that ran this,
+ * and an x86_64 Windows container cannot be run on an aarch64 macOS host. The CI step above will
+ * measure it on the `windows-latest` leg the first time the workflow runs; until that run exists,
+ * nobody has measured SAPI and this comment must not say otherwise.
+ *
+ * Note on checksums, because the two macOS numbers in this comment DISAGREE. The paragraph above
+ * records `e0dc2573` for `one million`; re-running it with the probe script gives `7d2c5386` at
+ * `--data-format=LEI16@22050` and `f9784f29` at `say`'s default AIFF, n=3 each `[measured-here]`.
+ * Neither reproduces `e0dc2573`, so the older sum was taken over something this script does not
+ * reproduce — a different format, a different digest, or a different truncation; the run that
+ * produced it was not recorded well enough to say which, and guessing would be worse than saying
+ * so. **The VERDICT is unaffected** — it never depended on any absolute sum, only on which
+ * renders match each other within one run — but treat a checksum here as meaningful only against
+ * other sums from the same engine, format and digest.
  */
 export function numberToWords(n: number): string {
   if (n < 1000) return under1000(n)
