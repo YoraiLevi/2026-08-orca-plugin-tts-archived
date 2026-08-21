@@ -91,6 +91,29 @@ jobs:
       - name: Smoke test — activate() registers every command the manifest declares
         run: node scripts/smoke-activate.mjs
 
+      # The gate that checks the next gate. The probe below concludes from a CONTROL string
+      # rendering differently from the string under test; this substitutes a stub engine that
+      # renders every string to identical bytes and requires the probe to refuse to give a
+      # verdict (exit 3). Needs no synthesizer, so it runs on all three legs — a control nobody
+      # has watched fail is a control nobody can trust.
+      - name: The million-ceiling probe's control must be able to fail
+        run: node scripts/ci/number-ceiling-probe.mjs --prove-control || test $? -eq 3
+        shell: bash
+
+      # packages/core/src/normalizer/index.ts expands numbers to words only BELOW 1,000,000; at
+      # or above the ceiling the numeral is handed to the engine untouched. That was measured on
+      # macOS `say` and merely CLAIMED on espeak-ng and SAPI — and if an engine spelled a bare
+      # `1234567` digit by digit, the ceiling would be a platform-specific defect hiding behind a
+      # macOS-only probe. This runs the same `-o file` comparison on whichever synthesizer the
+      # runner has, so the claim is measured on all three rather than asserted on one.
+      #
+      # It renders to files only (P31 — never the audio device) and reports a missing espeak-ng
+      # COMMAND distinctly from a missing library (P25) rather than skipping quietly, because a
+      # silent skip on a missing binary is the failure P25 records, not a way of avoiding it.
+      # The Linux leg installs espeak-ng above, so ABSENT here means that install regressed.
+      - name: The million ceiling must hold on THIS platform's synthesizer
+        run: node scripts/ci/number-ceiling-probe.mjs
+
   # ------------------------------------------------------------------------------------------
   # M11 Voice Lab — the normalize side, on all three platforms, with the audio side proved ABSENT.
   #
