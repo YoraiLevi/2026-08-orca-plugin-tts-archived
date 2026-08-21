@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalize } from './index.js'
+import { normalize } from './index.ts'
 
 /**
  * Table-driven. One named case per markdown construct.

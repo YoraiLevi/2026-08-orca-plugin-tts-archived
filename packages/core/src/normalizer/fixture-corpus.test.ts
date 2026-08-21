@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { normalize } from './index.js'
+import { normalize } from './index.ts'
 
 /**
  * T110 — the Voice Lab fixture corpus.

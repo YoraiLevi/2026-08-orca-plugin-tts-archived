@@ -6,9 +6,9 @@
  * FAILS TO COMPILE. This module only gathers them, so the test iterates one table.
  */
 
-import { NORMALIZE_OPTION_KEYS } from '../normalizer/index.js'
-import { CHUNKER_OPTION_KEYS, CHUNKER_OPTION_KEYS_EXCLUDED } from '../chunker/index.js'
-import { SYNTHESIZE_OPTION_KEYS, SYNTHESIZE_OPTION_KEYS_EXCLUDED } from '../types/index.js'
+import { NORMALIZE_OPTION_KEYS } from '../normalizer/index.ts'
+import { CHUNKER_OPTION_KEYS, CHUNKER_OPTION_KEYS_EXCLUDED } from '../chunker/index.ts'
+import { SYNTHESIZE_OPTION_KEYS, SYNTHESIZE_OPTION_KEYS_EXCLUDED } from '../types/index.ts'
 
 /** The owners whose fields become properties on a typed options object. */
 export const WIRED_OWNERS = ['normalize', 'chunk', 'synthesize'] as const

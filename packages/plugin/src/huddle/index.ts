@@ -20,11 +20,11 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { watch, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { AgentStatusChanged } from '../adapter/index.js'
+import type { AgentStatusChanged } from '../adapter/index.ts'
 import {
   decoderFor, detectTranscriptFormat, unreadableTranscriptMessage,
   type DecodedReply, type TranscriptFormat
-} from './decoders.js'
+} from './decoders.ts'
 
 /**
  * Why there is no transcript to follow. 006 site 5: six causes — an unreadable projects root, an

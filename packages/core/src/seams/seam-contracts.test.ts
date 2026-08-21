@@ -31,8 +31,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-import { normalize } from '../normalizer/index.js'
-import { Chunker, type Chunk } from '../chunker/index.js'
+import { normalize } from '../normalizer/index.ts'
+import { Chunker, type Chunk } from '../chunker/index.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FIXTURES = join(HERE, '../../../../fixtures')

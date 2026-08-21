@@ -13,9 +13,9 @@ import { describe, expect, it } from 'vitest'
 import {
   parse, parseSettingsText, promote, toMirror, fromMirror, settingsReport, settingsReportSentence,
   reportDestination, SETTINGS_KIND, type SettingsSnapshot
-} from './parse.js'
-import { parseJsonc, stripJsonComments } from './jsonc.js'
-import { SCHEMA_VERSION, SETTINGS_SCHEMA, schemaDefaults, MIRROR_ENVELOPE_KEYS } from './schema.js'
+} from './parse.ts'
+import { parseJsonc, stripJsonComments } from './jsonc.ts'
+import { SCHEMA_VERSION, SETTINGS_SCHEMA, schemaDefaults, MIRROR_ENVELOPE_KEYS } from './schema.ts'
 
 const envelope = (settings: Record<string, unknown>, over: Record<string, unknown> = {}) => ({
   kind: SETTINGS_KIND, schemaVersion: SCHEMA_VERSION, revision: 5, settings, ...over

@@ -26,15 +26,15 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { normalize } from '../normalizer/index.js'
-import { Chunker } from '../chunker/index.js'
-import type { SynthesizeOptions } from '../types/index.js'
+import { normalize } from '../normalizer/index.ts'
+import { Chunker } from '../chunker/index.ts'
+import type { SynthesizeOptions } from '../types/index.ts'
 import {
   SETTINGS_SCHEMA, SCHEMA_VERSION, isFuture, isWired, isOptionWired, wireProperty, schemaDefaults, gapReport,
   formatGapReport, toNormalizeOptions, toChunkerOptions, toSynthesizeOptions
-} from './schema.js'
-import { OPTION_KEYS, EXCLUDED, EXCLUSION_REASONS, WIRED_OWNERS, excludedCount } from './option-surface.js'
-import { parse } from './parse.js'
+} from './schema.ts'
+import { OPTION_KEYS, EXCLUDED, EXCLUSION_REASONS, WIRED_OWNERS, excludedCount } from './option-surface.ts'
+import { parse } from './parse.ts'
 
 /** The options object a wire may name, per owner. Restated here, not imported (P36). */
 const OPTIONS_TYPE: Record<string, string> = {

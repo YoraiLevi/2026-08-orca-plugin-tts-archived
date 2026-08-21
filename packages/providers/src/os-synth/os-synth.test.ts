@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { OsSynthProvider, darwinCommand, linuxCommand, neutralizeInBandCommands, win32Command } from './index.js'
-import { runProviderContract, CANCEL_BUDGET_MS } from '../contract.js'  // test-only entry, never via the barrel
+import { OsSynthProvider, darwinCommand, linuxCommand, neutralizeInBandCommands, win32Command } from './index.ts'
+import { runProviderContract, CANCEL_BUDGET_MS } from '../contract.ts'  // test-only entry, never via the barrel
 
 // T045: the contract runs against the real OS synthesizer on whatever platform CI is on.
 runProviderContract('OsSynthProvider', () => new OsSynthProvider())

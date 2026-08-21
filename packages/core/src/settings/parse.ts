@@ -19,8 +19,8 @@
 import {
   SCHEMA_VERSION, SETTINGS_SCHEMA, MIRROR_ENVELOPE_KEYS, isFuture, schemaDefaults,
   type FieldDescriptor, type Settings
-} from './schema.js'
-import { parseJsonc } from './jsonc.js'
+} from './schema.ts'
+import { parseJsonc } from './jsonc.ts'
 
 export const SETTINGS_KIND = 'orca-tts-settings'
 

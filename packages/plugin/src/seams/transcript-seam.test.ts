@@ -25,7 +25,7 @@
  * counts only; these tests run on synthetic records shaped like the real ones.
  */
 import { describe, expect, it } from 'vitest'
-import { decodeClaudeLine, detectTranscriptFormat } from '../huddle/decoders.js'
+import { decodeClaudeLine, detectTranscriptFormat } from '../huddle/decoders.ts'
 
 const rec = (o: unknown): string => JSON.stringify(o)
 

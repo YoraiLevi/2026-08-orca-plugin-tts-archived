@@ -335,11 +335,45 @@ describe('SC-14 — every module the Lab loads, loads under the resolver that sh
     expect(r.ok, 'the probe reports success for a module that does not exist').toBe(false)
   })
 
-  for (const mod of [
+  /**
+   * RESTATED HERE, not imported from `voice-lab.mjs` (P36): a list read out of the file under test
+   * cannot go red when that file changes. `packages/core/src/index.ts` is NOT one of the Lab's own
+   * imports -- it is the workspace barrel, kept in this list because R10-06's measurement was taken
+   * on it and because every consumer of `@orca-tts/core` reaches it. Widened, never narrowed.
+   */
+  const LAB_MODULES = [
     'packages/core/src/normalizer/index.ts',
     'packages/core/src/chunker/index.ts',
+    'packages/providers/src/os-synth/index.ts',
     'packages/core/src/index.ts'
-  ]) {
+  ]
+
+  /**
+   * THE COVERAGE FLOOR. The list above is a hand-written claim about what the Lab loads, and a
+   * hand-written claim goes stale the moment somebody adds a fourth `await import()` to
+   * `voice-lab.mjs`. Then every row above passes and the new module is unchecked -- the row's own
+   * words ("EVERY module the Lab loads") quietly stop being true, with nothing red.
+   *
+   * This does NOT source the expectations from `voice-lab.mjs`; it only refuses to let the
+   * independent list be a SUBSET of what the Lab really imports. Same shape as
+   * `budget-claims.test.ts`'s `claimsSeen >= 9` (P33): a guard that has quietly stopped matching is
+   * the same failure wearing the uniform of the fix.
+   *
+   * It was measured, when written, that this really did catch something:
+   * `packages/providers/src/os-synth/index.ts` is loaded by the Lab at boot and was absent from the
+   * row as committed.
+   */
+  it('the restated list covers every source module scripts/voice-lab.mjs imports', () => {
+    const lab = readFileSync(join(REPO, 'scripts/voice-lab.mjs'), 'utf8')
+    const imported = [...lab.matchAll(/join\(REPO_ROOT,\s*'(packages\/[^']+\.ts)'\)/g)].map((m) => m[1])
+    expect(imported.length, 'no source imports were found in voice-lab.mjs; this guard has ' +
+      'stopped matching and can no longer detect an uncovered module').toBeGreaterThanOrEqual(3)
+    const uncovered = imported.filter((m) => !LAB_MODULES.includes(m))
+    expect(uncovered, 'the Lab imports these and SC-14 never loads them under the shipping ' +
+      'resolver, so the row no longer means what it says').toEqual([])
+  })
+
+  for (const mod of LAB_MODULES) {
     it(`${mod} loads under plain node, which is how pnpm voice-lab runs`, () => {
       const r = loadsUnderPlainNode(mod)
       expect(r.ok, `${mod} does not load under plain node: ${r.why}\n` +

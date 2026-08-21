@@ -31,7 +31,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { normalize, Chunker } from '@orca-tts/core'
-import { darwinCommand, win32Command, linuxCommand } from '../os-synth/index.js'
+import { darwinCommand, win32Command, linuxCommand } from '../os-synth/index.ts'
 
 /**
  * Inputs whose FIRST CHUNK begins with a character an argv parser reads as an option, plus the

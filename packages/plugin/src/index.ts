@@ -1,1 +1,1 @@
-export { default as activate } from "./main.js"
+export { default as activate } from "./main.ts"

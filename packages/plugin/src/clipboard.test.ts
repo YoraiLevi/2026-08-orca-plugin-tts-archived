@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readClipboard, capText, ClipboardUnavailableError, DEFAULT_MAX_CHARS } from './clipboard.js'
+import { readClipboard, capText, ClipboardUnavailableError, DEFAULT_MAX_CHARS } from './clipboard.ts'
 
 describe('T060 clipboard', () => {
   it('T060b an unsupported platform reports rather than returning silence', async () => {

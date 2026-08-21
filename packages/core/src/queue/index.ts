@@ -4,7 +4,7 @@
  * Barge-in clears the queue; a voice switch preserves it. Single-flight: a second speak request
  * never overlaps the first. Pure bookkeeping — no audio dependency, so it is fully testable.
  */
-import type { AudioChunk, PlaybackSink } from '../types/index.js'
+import type { AudioChunk, PlaybackSink } from '../types/index.ts'
 
 export interface QueueDeps {
   readonly sink: PlaybackSink

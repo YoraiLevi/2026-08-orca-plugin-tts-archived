@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { CANCEL_BUDGET_MS } from './contract.js'
+import { CANCEL_BUDGET_MS } from './contract.ts'
 
 /**
  * The guard for the defect this file was written after.

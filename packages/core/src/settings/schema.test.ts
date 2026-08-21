@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import {
   SCHEMA_VERSION, SETTINGS_SCHEMA, OWNERS, RESERVED_KEY_PREFIX, MIRROR_ENVELOPE_KEYS,
   fieldsByOwner, isFuture, schemaDefaults, type Owner
-} from './schema.js'
+} from './schema.ts'
 
 const ALL = Object.values(SETTINGS_SCHEMA)
 const SHIPPING = ALL.filter((f) => !isFuture(f))

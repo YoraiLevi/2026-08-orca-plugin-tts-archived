@@ -16,10 +16,6 @@
  * Invariant: `chunks.join('') === input`, exactly. Trailing whitespace travels with its chunk.
  */
 
-// `.ts`, not `.js`: the Voice Lab loads this module through plain
-// `node --experimental-strip-types`, which will not resolve a `.js` specifier onto a `.ts` file.
-// Vitest's resolver does, which is why the suite stayed green while `pnpm voice-lab` could not
-// boot at all. Verified by effect under both resolvers before changing it.
 export type BoundaryKind = 'sentence' | 'clause' | 'word' | 'scalar' | 'end'
 
 export interface Chunk {
@@ -59,22 +55,21 @@ void _chunkerKeysAreExhaustive
 /**
  * "Is there a glyph here a synthesizer can turn into sound?" — a letter or a digit, any script.
  *
- * A RESTATED LOCAL COPY, and this repo has now measured twice that it must be. There was briefly a
- * shared `packages/core/src/speakable.ts` that both this file and the normalizer imported. It
- * cannot survive here, because the two resolvers this code is loaded by disagree and BOTH of them
- * ship:
+ * A RESTATED LOCAL COPY. There was briefly a shared `packages/core/src/speakable.ts` that both this
+ * file and the normalizer imported, and it was removed after both spellings of the import were
+ * seen to fail: `'../speakable.js'` typechecked but left `pnpm voice-lab` unable to boot under
+ * plain node (SC-13, SC-14 / 019 R10-06), and `'../speakable.ts'` booted the Lab but broke
+ * `tsc -b` with TS5097.
  *
- *   `from '../speakable.js'`  -> `tsc -b` is fine; PLAIN NODE cannot resolve it, and plain node is
- *                                what `pnpm voice-lab` runs (SC-13, SC-14 / 019 R10-06)
- *   `from '../speakable.ts'`  -> plain node is fine; `tsc -b` refuses it with TS5097 unless
- *                                `allowImportingTsExtensions` is turned on, which the emitting
- *                                build cannot have
+ * **That dilemma is gone, and the reason it was believed is corrected here.** The claim that an
+ * emitting build cannot have `allowImportingTsExtensions` was true before TypeScript 5.7 and is
+ * false now: paired with `rewriteRelativeImportExtensions`, tsc accepts `.ts` specifiers in source
+ * AND rewrites them to `.js` on emit. Both are set in `tsconfig.base.json`, the whole repo names
+ * its specifiers `.ts`, and `tsc -b --force` exits 0 `[measured-here]`. A cross-directory import
+ * here would resolve today.
  *
- * Both were tried, in that order, and both were seen to fail. Until this repo settles a specifier
- * convention that satisfies both — its own Job, 34 files wide — a cross-directory import here is a
- * choice between a broken typecheck and an unlaunchable Voice Lab.
- *
- * So the predicate is stated three times: here, in `normalize()`, and a third time in
+ * **The local copy stays anyway, for the reason that never depended on the resolver.** The
+ * predicate is stated three times: here, in `normalize()`, and a third time in
  * `packages/core/src/seams/seam-contracts.test.ts`, which feeds this component's real output to
  * ITS copy. Two definitions that must agree is a check; one definition imported everywhere is not
  * (P36). If any of the three drifts, SC-1 or SC-2 goes red and someone has to decide which one is

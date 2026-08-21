@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { PlaybackQueue } from './index.js'
-import type { AudioChunk, PlaybackSink } from '../types/index.js'
+import { PlaybackQueue } from './index.ts'
+import type { AudioChunk, PlaybackSink } from '../types/index.ts'
 
 const chunk = (n: number): AudioChunk =>
   ({ data: new Uint8Array([n]), format: 'wav', sampleRate: 22050, channels: 1 })

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { normalize, numberToWords } from './index.js'
+import { normalize, numberToWords } from './index.ts'
 
 /**
  * TOKEN CONSERVATION — "are the words spoken the words that were written?"

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi, type StorageFailure } from './index.js'
+import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi, type StorageFailure } from './index.ts'
 
 const fakeOrca = (over: Partial<OrcaApi> = {}): OrcaApi => ({
   commands: { register: vi.fn() },

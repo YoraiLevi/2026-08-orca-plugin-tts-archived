@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { HuddleController, MAX_REMEMBERED_IDS, type HuddleStore } from './index.js'
+import { HuddleController, MAX_REMEMBERED_IDS, type HuddleStore } from './index.ts'
 
 const settle = async (ticks = 90): Promise<void> => {
   for (let i = 0; i < ticks; i++) await new Promise((r) => setTimeout(r, 5))
@@ -288,7 +288,7 @@ describe('006 C4 — the five-minute reap must not silently change which session
 
 describe('006 TT4/site 15 — a record with no uuid gets a STABLE id', () => {
   it('decodes to the same id every time the same line is read', async () => {
-    const { decodeClaudeLine, decodeGenericLine } = await import('./decoders.js')
+    const { decodeClaudeLine, decodeGenericLine } = await import('./decoders.ts')
     // No `uuid` key at all. The id was `${Date.now()}-${parts.length}` — a NEW id on every read, so
     // the id set could never match it. Round 4's high-water mark now gates dedup, which covers the
     // plain append case, so this asserts the defect WHERE IT LIVES rather than through a path that
@@ -309,7 +309,7 @@ describe('006 TT4/site 15 — a record with no uuid gets a STABLE id', () => {
   })
 
   it('CONTROL: a record that HAS a uuid still uses it', async () => {
-    const { decodeClaudeLine } = await import('./decoders.js')
+    const { decodeClaudeLine } = await import('./decoders.ts')
     const line = JSON.stringify({
       type: 'assistant', uuid: 'real-uuid-1', message: { content: [{ type: 'text', text: 'x' }] }
     })
@@ -317,7 +317,7 @@ describe('006 TT4/site 15 — a record with no uuid gets a STABLE id', () => {
   })
 
   it('CONTROL: two different texts do not collide onto one id', async () => {
-    const { decodeClaudeLine } = await import('./decoders.js')
+    const { decodeClaudeLine } = await import('./decoders.ts')
     const mk = (t: string): string => JSON.stringify({
       type: 'assistant', message: { content: [{ type: 'text', text: t }] }
     })

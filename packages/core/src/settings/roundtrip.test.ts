@@ -63,12 +63,12 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 
-import { parseSettingsText } from './parse.js'
-import { SETTINGS_SCHEMA, isFuture, schemaDefaults, toChunkerOptions, toNormalizeOptions } from './schema.js'
-import { normalize } from '../normalizer/index.js'
-import type { NormalizeOptions } from '../normalizer/index.js'
-import { Chunker } from '../chunker/index.js'
-import type { ChunkerOptions } from '../chunker/index.js'
+import { parseSettingsText } from './parse.ts'
+import { SETTINGS_SCHEMA, isFuture, schemaDefaults, toChunkerOptions, toNormalizeOptions } from './schema.ts'
+import { normalize } from '../normalizer/index.ts'
+import type { NormalizeOptions } from '../normalizer/index.ts'
+import { Chunker } from '../chunker/index.ts'
+import type { ChunkerOptions } from '../chunker/index.ts'
 
 /* The lab is JavaScript with no type declarations, and it is not ours to change. The specifiers
  * are computed so `tsc` treats these as untyped rather than demanding `.d.ts` for voice-lab/. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ProviderRegistry } from './registry.js'
+import { ProviderRegistry } from './registry.ts'
 import type { AudioChunk, ProviderCapabilities, TtsProvider } from '@orca-tts/core'
 
 const caps = (over: Partial<ProviderCapabilities> = {}): ProviderCapabilities => ({

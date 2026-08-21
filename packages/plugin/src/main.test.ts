@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import activate from './main.js'
-import type { OrcaApi } from './adapter/index.js'
+import activate from './main.ts'
+import type { OrcaApi } from './adapter/index.ts'
 import type { AudioChunk, PlaybackSink, ProviderCapabilities, SynthesizeOptions, TtsProvider }
   from '@orca-tts/core'
 
@@ -20,6 +20,35 @@ class RecordingProvider implements TtsProvider {
   synthesized: string[] = []
   /** Non-zero gives the queue real depth, so "the queue survived" can actually be observed. */
   delayMs = 0
+  /**
+   * A gate the test OPENS, in place of a delay the test HOPES is long enough.
+   *
+   * `delayMs` arranged queue depth by out-running the drain: 150 ms per utterance against a
+   * `settle()` of nominally 350 ms. Under load a `setTimeout(5)` is not 5 ms, `settle()` spends
+   * seconds of wall clock, the queue drains before the control is invoked, and the test fails
+   * with its own message — "the queue had already drained; no depth to destroy" — for a reason
+   * that has nothing to do with the code it guards. Measured here: 8 of 10 runs at load average
+   * ~32.
+   *
+   * `#drain()` awaits `#speakOne()`, which awaits this generator. So blocking here stops the
+   * drain at utterance one and leaves every later utterance in `#pending`, for as long as the
+   * test wants and no longer. The precondition becomes a fact the test established rather than a
+   * race it won.
+   */
+  #gate: Promise<void> | null = null
+  #openGate: (() => void) | null = null
+  /** Hold the drain at the NEXT utterance to enter the engine. */
+  hold(): void {
+    if (this.#gate !== null) return
+    this.#gate = new Promise<void>((resolve) => { this.#openGate = resolve })
+  }
+  /** Let it go. Idempotent, so a test may release without knowing whether it held. */
+  release(): void {
+    const open = this.#openGate
+    this.#gate = null
+    this.#openGate = null
+    open?.()
+  }
   #warm = false
   capabilities: ProviderCapabilities = {
     streaming: true, offline: true, needsApiKey: false, needsModelDownload: 0,
@@ -30,7 +59,10 @@ class RecordingProvider implements TtsProvider {
   cancel(): void {}
   async listVoices(): Promise<readonly string[]> { return ['test'] }
   async *generate(text: string, _opts: SynthesizeOptions = {}): AsyncIterable<AudioChunk> {
+    // Recorded BEFORE the gate: "this utterance reached the engine" is what the test waits on,
+    // and it must be observable while the engine is still holding it.
     this.synthesized.push(text)
+    if (this.#gate !== null) await this.#gate
     if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs))
     yield { data: new Uint8Array([1]), format: 'wav', sampleRate: 22050, channels: 1 }
   }
@@ -47,6 +79,8 @@ interface Harness {
   readonly commands: Map<string, (args?: unknown) => unknown>
   readonly events: Map<string, (payload: unknown) => void>
   readonly notifications: string[]
+  /** Everything the plugin logged, so readiness can be OBSERVED rather than waited out. */
+  readonly logs: string[]
   readonly spoken: () => string
   run(id: string): Promise<void>
   /** Fire `agent.status.changed` the way ORCA does, for a worktree at `path`. */
@@ -57,11 +91,48 @@ const settle = async (ticks = 40): Promise<void> => {
   for (let i = 0; i < ticks; i++) await new Promise((r) => setTimeout(r, 5))
 }
 
+/**
+ * Wait for a CONDITION to become true, not for a duration to elapse.
+ *
+ * `settle(n)` is n scheduler turns of hope. It is safe when the thing waited for is bounded by a
+ * gate the test holds (waiting longer than needed costs only time), and unsound when it is racing
+ * the system (waiting less than needed is a red for no reason). Every `until()` below is paired
+ * with `provider.hold()`, so the condition cannot be satisfied early and cannot be missed late.
+ *
+ * `capMs` is a BACKSTOP, not a budget: it fires only when the condition will never be true, and
+ * it is deliberately far larger than any plausible slow-machine figure so that load alone can
+ * never reach it. If it ever does fire, the message names the condition rather than a duration.
+ */
+const until = async (
+  predicate: () => boolean, what: string, capMs = 30_000
+): Promise<void> => {
+  const started = Date.now()
+  while (!predicate()) {
+    if (Date.now() - started > capMs) {
+      throw new Error(`gave up waiting for: ${what} (${capMs} ms backstop — this is a HANG, not slowness)`)
+    }
+    await new Promise((r) => setTimeout(r, 2))
+  }
+}
+
+/**
+ * Huddle is watching the transcript and has marked the backlog as already-spoken.
+ *
+ * The `read-aloud: watching <file>` log line is emitted by HuddleController only after
+ * `#readReplies` has primed `#spoken` and `fs.watch` has been established — so it is the effect,
+ * not a proxy for it. `settle(20)` was the proxy, and on a quiet machine it could also be too
+ * SHORT.
+ */
+const watching = async (h: Harness): Promise<void> =>
+  until(() => h.logs.some((l) => l.startsWith('read-aloud: watching ')),
+    'huddle to prime the transcript and establish its watch')
+
 async function boot(projectsDir: string): Promise<Harness> {
   const provider = new RecordingProvider()
   const commands = new Map<string, (args?: unknown) => unknown>()
   const events = new Map<string, (payload: unknown) => void>()
   const notifications: string[] = []
+  const logs: string[] = []
   const orca: OrcaApi = {
     commands: { register: (id, fn) => { commands.set(id, fn) } },
     events: { on: (name, fn) => { events.set(name, fn) } },
@@ -72,12 +143,12 @@ async function boot(projectsDir: string): Promise<Harness> {
         return {}
       }
     },
-    log: () => {}
+    log: (m: string) => { logs.push(m) }
   }
   activate(orca, { provider, sink: new FakeSink(), projectsDir, announceDelayMs: 5 })
   await settle(10)   // let registry.resolve() finish so `speech` exists
   return {
-    provider, commands, events, notifications,
+    provider, commands, events, notifications, logs,
     spoken: () => provider.synthesized.join(' '),
     run: async (id) => {
       const fn = commands.get(id)
@@ -147,24 +218,32 @@ describe('C5 the status/toggle/unfollow controls do not delete the queue', () =>
     const project = worktree.replace(/[/\\:]/g, '-')
     const file = await writeTranscript(root, project, 'sess1', ['already heard, primed away'])
     const h = await boot(root)
-    h.provider.delayMs = 150      // give the queue real depth; otherwise nothing is proved
 
     await h.run('read-aloud.toggle-huddle')
     h.agentDone(worktree)
-    await settle(20)             // prime + watch established
+    await watching(h)
+    await until(() => h.spoken().includes('Huddle mode'), 'the huddle-on announcement to be spoken')
     h.provider.synthesized.length = 0
 
+    // Hold the engine on the FIRST reply. Everything behind it stays in `#pending` until this
+    // test says otherwise, so "the queue has depth when the control is invoked" is established,
+    // not raced.
+    h.provider.hold()
     await appendReplies(file, 'sess1', [
       'alpha reply one here', 'bravo reply two here', 'charlie reply three here'
     ])
-    await settle(70)             // past the 250 ms debounce: three replies are now queued
-    expect(h.spoken(), 'nothing was queued, so the test proves nothing').toContain('alpha reply')
+    await until(() => h.spoken().includes('alpha reply'),
+      'the first reply to reach the engine (past the 250 ms debounce)')
     expect(h.spoken(), 'the queue had already drained; no depth to destroy')
       .not.toContain('charlie reply')
 
+    // THE MOMENT UNDER TEST: two replies are provably still queued, right now.
     await h.run('read-aloud.status')
-    await settle(160)
 
+    h.provider.release()
+    await until(() => h.spoken().includes('more waiting') || h.spoken().includes('Huddle mode is on'),
+      'status to be spoken')
+    await settle(60)   // let anything status queued behind it drain too
     const spoken = h.spoken()
     expect(spoken, 'status did not answer').toMatch(/Huddle mode is on|Now reading|more waiting/)
     // The point of the fix: the answer must not have deleted its own subject.
@@ -179,20 +258,26 @@ describe('C5 the status/toggle/unfollow controls do not delete the queue', () =>
     const project = worktree.replace(/[/\\:]/g, '-')
     const file = await writeTranscript(root, project, 'sess1', ['primed'])
     const h = await boot(root)
-    h.provider.delayMs = 150
 
     await h.run('read-aloud.toggle-huddle')
     h.agentDone(worktree)
-    await settle(20)
+    await watching(h)
+    await until(() => h.spoken().includes('Huddle mode'), 'the huddle-on announcement to be spoken')
     h.provider.synthesized.length = 0
+
+    h.provider.hold()   // depth established by a gate, not by out-running the drain
     await appendReplies(file, 'sess1', ['delta reply one', 'echo reply two', 'foxtrot reply three'])
-    await settle(70)
-    expect(h.spoken(), 'nothing was queued, so the test proves nothing').toContain('delta reply one')
+    await until(() => h.spoken().includes('delta reply one'),
+      'the first reply to reach the engine (past the 250 ms debounce)')
     expect(h.spoken(), 'the queue had already drained; no depth to destroy')
       .not.toContain('foxtrot reply three')
 
     await h.run('read-aloud.unfollow')
-    await settle(160)
+
+    h.provider.release()
+    await until(() => h.spoken().includes('Stopped following that session'),
+      'the unfollow announcement to be spoken')
+    await settle(60)
     const spoken = h.spoken()
     expect(spoken).toContain('Stopped following that session')
     // Unfollow stops NEW replies arriving. Replies already queued are still replies the listener
@@ -249,7 +334,7 @@ describe('DC1 huddle reads non-Claude transcripts, or says it cannot', () => {
     // Verify by effect needs a case that proves the assertion is capable of failing. This is the
     // pre-fix behaviour, asserted directly against the decoder that used to be hardcoded.
     const { decodeClaudeLine, decodeGenericLine, detectTranscriptFormat } =
-      await import('./huddle/decoders.js')
+      await import('./huddle/decoders.ts')
     const line = JSON.stringify({ role: 'assistant', id: 'x', content: 'the codex agent replied here' })
     expect(decodeClaudeLine(line), 'the wrong decoder silently returns null — this is DC1')
       .toBeNull()
@@ -465,23 +550,28 @@ describe('006 rank 3 — provenance is wired end to end, not only unit-tested', 
     const h = await boot(root)
     await h.run('read-aloud.toggle-huddle')
     h.agentDone(worktree)
-    await settle(20)                  // prime + watch established
+    await watching(h)                 // prime + watch established, observed not waited out
+    await until(() => h.spoken().includes('Huddle mode'), 'the huddle-on announcement to be spoken')
     h.provider.synthesized.length = 0
-    h.provider.delayMs = 200          // hold the queue open, or there is nothing pending to check
 
+    // Same gate, same reason as C5: `delayMs = 200` was a bet that four utterances take longer to
+    // drain than `settle(70)` takes to return, and under load that bet loses.
+    h.provider.hold()
     await appendReplies(file, 'sess1', [
       'alpha reply one here', 'bravo reply two here', 'charlie reply three here',
       'delta reply four here'
     ])
-    await settle(70)                  // past the 250 ms debounce: four replies are now queued
-    expect(h.spoken(), 'nothing was queued, so this test proves nothing').toContain('alpha reply')
+    await until(() => h.spoken().includes('alpha reply'),
+      'the first reply to reach the engine (past the 250 ms debounce)')
     expect(h.spoken(), 'the queue drained already — there was no pending reply to re-check')
       .not.toContain('delta reply')
 
-    // The session ends while its second reply is still waiting to be spoken. That is C1's
+    // The session ends while its later replies are still waiting to be spoken. That is C1's
     // sequence, and until this round nothing in the system could notice it happened.
     await (await import('node:fs/promises')).rm(file)
-    await settle(300)
+    h.provider.release()
+    await until(() => h.spoken().includes('delta reply'),
+      'the last queued reply to reach the listener despite its session having ended')
 
     expect(h.spoken(), 'the queued reply must still reach the listener').toContain('delta reply')
     expect(h.spoken(), 'activate() never wired resolveLabel, so provenance is never re-checked')

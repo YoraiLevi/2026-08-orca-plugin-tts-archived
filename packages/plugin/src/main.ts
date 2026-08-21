@@ -10,11 +10,11 @@
 import { existsSync } from 'node:fs'
 import { OsSynthProvider, ProviderRegistry } from '@orca-tts/providers'
 import type { PlaybackSink, TtsProvider } from '@orca-tts/core'
-import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi } from './adapter/index.js'
-import { readClipboard, ClipboardUnavailableError } from './clipboard.js'
-import { SpeechService } from './speech-service.js'
-import { SubprocessSink } from './sinks/subprocess-sink.js'
-import { HuddleController, sessionLabel } from './huddle/index.js'
+import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi } from './adapter/index.ts'
+import { readClipboard, ClipboardUnavailableError } from './clipboard.ts'
+import { SpeechService } from './speech-service.ts'
+import { SubprocessSink } from './sinks/subprocess-sink.ts'
+import { HuddleController, sessionLabel } from './huddle/index.ts'
 
 /**
  * Test seam. ORCA calls `activate(orca)` and gets every real default; a test calls

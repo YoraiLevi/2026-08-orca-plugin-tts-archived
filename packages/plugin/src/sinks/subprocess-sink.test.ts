@@ -11,7 +11,7 @@
  * `afplay` would interrupt whoever is at the machine, which is how benchmarks get deleted.
  */
 import { describe, expect, it } from 'vitest'
-import { SubprocessSink, type PlaybackFailure, type Player } from './subprocess-sink.js'
+import { SubprocessSink, type PlaybackFailure, type Player } from './subprocess-sink.ts'
 import type { AudioChunk } from '@orca-tts/core'
 
 const chunk = (n = 8): AudioChunk => ({

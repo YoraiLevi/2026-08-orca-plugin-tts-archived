@@ -1,2 +1,2 @@
-export * from "./os-synth/index.js"
-export * from "./registry.js"
+export * from "./os-synth/index.ts"
+export * from "./registry.ts"

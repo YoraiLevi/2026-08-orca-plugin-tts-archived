@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SpeechService } from './speech-service.js'
+import { SpeechService } from './speech-service.ts'
 import { numberToWords } from '@orca-tts/core'
 import type {
   AudioChunk, PlaybackSink, ProviderCapabilities, SynthesizeOptions, TtsProvider

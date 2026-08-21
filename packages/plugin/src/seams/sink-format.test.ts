@@ -27,7 +27,7 @@
  * the documented test seam, and what is asserted is the FILE NAME the sink chose.
  */
 import { describe, it, expect } from 'vitest'
-import { SubprocessSink } from '../sinks/subprocess-sink.js'
+import { SubprocessSink } from '../sinks/subprocess-sink.ts'
 import type { AudioChunk } from '@orca-tts/core'
 
 /**

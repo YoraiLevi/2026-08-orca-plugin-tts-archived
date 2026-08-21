@@ -22,9 +22,9 @@
  * types, so it runs identically in a plugin worker, a browser page, a local server and a test.
  */
 
-import type { NormalizeOptions } from '../normalizer/index.js'
-import type { ChunkerOptions } from '../chunker/index.js'
-import type { SynthesizeOptions } from '../types/index.js'
+import type { NormalizeOptions } from '../normalizer/index.ts'
+import type { ChunkerOptions } from '../chunker/index.ts'
+import type { SynthesizeOptions } from '../types/index.ts'
 
 /**
  * 011 section 4.2: starts at 2, not 1. Version 1 is BURNED — 004 published `schemaVersion: 1`

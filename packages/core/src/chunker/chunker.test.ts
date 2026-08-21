@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Chunker, type Chunk } from './index.js'
+import { Chunker, type Chunk } from './index.ts'
 
 const joinAll = (chunks: Chunk[]) => chunks.map((c) => c.text).join('')
 
