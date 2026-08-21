@@ -39,8 +39,14 @@ export interface HuddleStore {
 
 export const HUDDLE_STATE_KEY = 'huddle.enabled'
 export const HUDDLE_SPOKEN_KEY = 'huddle.spokenIds'
+export const HUDDLE_HIGH_WATER_KEY = 'huddle.highWater'
 /** Bounded so plugin storage (256 KB per value) can never be blown by a long session. */
 export const MAX_REMEMBERED_IDS = 300
+/**
+ * Transcripts remembered by high-water mark. One small integer per file, so this bound is about
+ * storage tidiness, not correctness — unlike MAX_REMEMBERED_IDS, which used to be load-bearing.
+ */
+export const MAX_TRACKED_FILES = 50
 /** The transcript flush lags the done event; keep watching this long after it. */
 export const WATCH_WINDOW_MS = 20_000
 const DEBOUNCE_MS = 250
@@ -74,6 +80,23 @@ export class HuddleController {
   #stopTimer: NodeJS.Timeout | null = null
   #debounce: NodeJS.Timeout | null = null
   #primed = new Set<string>()   // per FILE: a new session must be primed too, or it dumps its backlog
+  /**
+   * Per FILE: how many decoded replies have already been accounted for.
+   *
+   * This, not the id set, is what makes dedup correct. `MAX_REMEMBERED_IDS = 300` trimmed `#spoken`
+   * to the last 300, so on reply 301 the oldest ids fell out of the set while their lines were
+   * still on disk — and the next whole-file re-read found them "fresh" and read them out again.
+   * That is P22's "it read out the whole history" with a new cause (cross-review B-01).
+   *
+   * An id set is the wrong data structure for a monotonic append-only log: it is unordered, so it
+   * cannot express "everything before here is done", which is the only fact we actually need. A
+   * high-water mark is O(1) per session, cannot be evicted into a re-speak, and shrinks the storage
+   * cost from 300 uuids to one integer. The id set is kept as a secondary filter for duplicates
+   * WITHIN one read; it is no longer the gate.
+   */
+  #highWater = new Map<string, number>()
+  /** Set when huddle is switched on, so the next attach re-primes instead of trusting a stale mark. */
+  #reprime = false
   #warnedUnreadable = new Set<string>()   // per FILE: say "cannot read this" once, not per change
 
   constructor(deps: HuddleDeps) { this.#deps = deps }
@@ -84,6 +107,12 @@ export class HuddleController {
     this.#enabled = (await this.#deps.store?.get(HUDDLE_STATE_KEY)) === true
     const ids = await this.#deps.store?.get(HUDDLE_SPOKEN_KEY)
     if (Array.isArray(ids)) this.#spoken = new Set(ids.filter((x): x is string => typeof x === 'string'))
+    const marks = await this.#deps.store?.get(HUDDLE_HIGH_WATER_KEY)
+    if (typeof marks === 'object' && marks !== null && !Array.isArray(marks)) {
+      for (const [file, n] of Object.entries(marks as Record<string, unknown>)) {
+        if (typeof n === 'number' && Number.isFinite(n) && n >= 0) this.#highWater.set(file, n)
+      }
+    }
     return this.#enabled
   }
 
@@ -92,6 +121,7 @@ export class HuddleController {
     void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled)
     if (this.#enabled) {
       this.#primed.clear()          // re-prime every session on enable; never dump a backlog
+      this.#reprime = true
       this.#locked = null
     } else {
       this.#stopWatching()
@@ -147,7 +177,16 @@ export class HuddleController {
       // Mark everything currently on disk as seen, so enabling mid-session speaks only what
       // arrives NEXT rather than replaying the backlog.
       if (!this.#primed.has(file)) {
-        for (const r of await this.#readReplies(file)) this.#spoken.add(r.id)
+        const replies = await this.#readReplies(file)
+        for (const r of replies) this.#spoken.add(r.id)
+        // A persisted mark survives the 5-minute worker reap, so a re-fork resumes where the
+        // previous worker stopped instead of marking everything now on disk as already spoken
+        // (006 TT10: the reply that arrived during the reap window used to vanish silently).
+        // Switching huddle ON is the one case that deliberately discards it: the listener asked to
+        // start listening now, not to be read the backlog.
+        const persisted = this.#highWater.get(file)
+        this.#setHighWater(file, this.#reprime || persisted === undefined ? replies.length : persisted)
+        this.#reprime = false
         this.#primed.add(file)
         await this.#persistSpoken()
       }
@@ -182,8 +221,21 @@ export class HuddleController {
       }
       return
     }
-    const fresh = replies.filter((r) => !this.#spoken.has(r.id))
-    if (fresh.length === 0) return
+    const mark = this.#highWater.get(file) ?? 0
+    if (replies.length < mark) {
+      // The file got SHORTER: a compaction, a --resume, or a log rotation rewrote it, and every
+      // record uuid changed. Re-reading it would read the whole session aloud again (006 C9).
+      // Clamp forward and stay quiet; a lost reply is recoverable, a replayed session is not.
+      this.#setHighWater(file, replies.length)
+      this.#deps.log(`read-aloud: transcript shrank, re-anchoring at ${replies.length}`)
+      await this.#persistSpoken()
+      return
+    }
+    // The high-water mark is the gate. The id set is only a secondary filter for duplicates within
+    // one read — it can be evicted, and an evicted id must never become a reason to speak again.
+    const fresh = replies.slice(mark).filter((r) => !this.#spoken.has(r.id))
+    this.#setHighWater(file, replies.length)
+    if (fresh.length === 0) { await this.#persistSpoken(); return }
     for (const r of fresh) {
       this.#spoken.add(r.id)
       this.#lastReply = r.text
@@ -194,10 +246,22 @@ export class HuddleController {
     await this.#persistSpoken()
   }
 
+  /** Record a mark and keep the map bounded, oldest-touched first. */
+  #setHighWater(file: string, n: number): void {
+    this.#highWater.delete(file)
+    this.#highWater.set(file, n)
+    while (this.#highWater.size > MAX_TRACKED_FILES) {
+      const oldest = this.#highWater.keys().next()
+      if (oldest.done === true) break
+      this.#highWater.delete(oldest.value)
+    }
+  }
+
   async #persistSpoken(): Promise<void> {
     const ids = [...this.#spoken].slice(-MAX_REMEMBERED_IDS)
     this.#spoken = new Set(ids)
     await this.#deps.store?.set(HUDDLE_SPOKEN_KEY, ids)
+    await this.#deps.store?.set(HUDDLE_HIGH_WATER_KEY, Object.fromEntries(this.#highWater))
   }
 
   #stopWatching(): void {
