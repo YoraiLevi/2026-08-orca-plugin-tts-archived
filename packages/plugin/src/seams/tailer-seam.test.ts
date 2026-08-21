@@ -90,10 +90,31 @@ describe('SC-15 — what fs.watch does to a watcher when the writer replaces the
       // BOTH platforms the append afterwards produces nothing. R11-01 holds identically; only
       // the event count differs. Asserting `toEqual([])` made a true finding fail on Linux,
       // which is a stricter assertion than the claim it exists to defend.
+      //
+      // WINDOWS IS DIFFERENT, and it makes R11-01 a two-platform finding rather than a universal
+      // one. Measured by CI run 32505473403 `[measured-here]`, one run per platform:
+      //
+      //     darwin  after rename: []           watch dies silently
+      //     linux   after rename: ["rename"]   watch dies silently
+      //     win32   after rename: ["change"]   WATCH SURVIVES the replace
+      //
+      // So the silent-death hazard is real on darwin and linux and does NOT occur on win32.
+      // Asserting it everywhere made a true finding fail on the platform where the news is good.
+      // The row still has teeth: on darwin/linux a surviving watch turns it red, and on win32 a
+      // DYING watch turns it red — each platform asserts the behaviour actually measured there,
+      // so neither branch can pass vacuously.
       const afterRename = events.slice(events.indexOf('rename') + 1)
-      expect(afterRename.filter((e) => e === 'change'),
-        'the watch survived the replace and delivered a change — re-check R11-01, it may be fixed')
-        .toEqual([])
+      const changes = afterRename.filter((e) => e === 'change')
+      if (process.platform === 'win32') {
+        expect(changes,
+          'win32 stopped delivering a change after the replace — the silent-death hazard now ' +
+          'reaches Windows too, and R11-01 must be widened rather than narrowed')
+          .not.toEqual([])
+      } else {
+        expect(changes,
+          'the watch survived the replace and delivered a change — re-check R11-01, it may be fixed')
+          .toEqual([])
+      }
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 

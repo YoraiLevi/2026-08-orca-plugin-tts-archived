@@ -33,7 +33,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 import { STAGES, computeStages, stageFns } from './voice-lab.mjs'
@@ -315,7 +315,12 @@ describe('SC-14 — every module the Lab loads, loads under the resolver that sh
   function loadsUnderPlainNode (relPath) {
     const r = spawnSync(process.execPath,
       ['--experimental-strip-types', '-e',
-       `import(${JSON.stringify(join(REPO, relPath))}).then(() => process.exit(0), (e) => { process.stderr.write(String(e.message)); process.exit(1) })`],
+       // pathToFileURL, not the raw path: on Windows an absolute path starts `D:\\`, and the ESM
+       // loader reads `d:` as an unsupported URL scheme. CI run 32505473403 failed here with
+       // "Received protocol 'd:'" -- and the probe's own guard said "the probe itself is broken,
+       // not the module", which is exactly the distinction that made this five minutes of work
+       // instead of a false finding about the module under test.
+       `import(${JSON.stringify(pathToFileURL(join(REPO, relPath)).href)}).then(() => process.exit(0), (e) => { process.stderr.write(String(e.message)); process.exit(1) })`],
       { cwd: REPO, encoding: 'utf8' })
     return { ok: r.status === 0, why: (r.stderr || '').split('\n')[0] }
   }
