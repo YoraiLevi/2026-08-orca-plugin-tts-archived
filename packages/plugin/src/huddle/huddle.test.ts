@@ -136,3 +136,176 @@ describe('B-01 an evicted id can never become a reason to speak again', () => {
       .toEqual(['after compaction 0', 'after compaction 1', 'after compaction 2'])
   })
 })
+
+/**
+ * 006 TT1 and sites 1–5, 6, 7, 13 — the failures that produce silence with no explanation, plus
+ * cascade C4, which reconstitutes all three of P22's faults through the five-minute worker reap.
+ *
+ * TT1's sentence is the reason this section exists: "They pressed Mod+Shift+H, heard 'Huddle mode
+ * on.', and then nothing, ever. The plugin is indistinguishable from a plugin that was never
+ * installed."
+ */
+describe('006 TT1/sites 1-7 — silence always has a spoken reason', () => {
+  const bootWith = (root: string, notify: string[]): { c: HuddleController; s: FakeSpeech } => {
+    const s = new FakeSpeech()
+    const c = new HuddleController({
+      speech: s, store: new MemoryStore(), projectsDir: root,
+      log: () => {}, notify: (m) => notify.push(m)
+    })
+    return { c, s }
+  }
+
+  it('says so when the projects root does not exist at all', async () => {
+    const notify: string[] = []
+    const { c } = bootWith(join(tmpdir(), 'orca-tts-does-not-exist-ever'), notify)
+    c.toggle()
+    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, '/tmp/wt')
+    await settle(10)
+    expect(notify.join(' '), 'the listener got silence with no reason at all')
+      .toMatch(/no agent transcripts on this machine/i)
+  })
+
+  it('distinguishes an UNREADABLE root from an empty one — different causes, different sentences', async () => {
+    const { chmod } = await import('node:fs/promises')
+    if (process.getuid?.() === 0) return   // root can read anything; the probe cannot fail
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-noperm-'))
+    await chmod(root, 0o000)
+    const notify: string[] = []
+    const { c } = bootWith(root, notify)
+    c.toggle()
+    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, '/tmp/wt')
+    await settle(10)
+    await chmod(root, 0o755)
+    expect(notify.join(' '), 'permissions and "nothing here yet" were the same silent return')
+      .toMatch(/permissions/i)
+  })
+
+  it('says it once per reason, not once per agent event — a tool that narrates polling is unusable', async () => {
+    const notify: string[] = []
+    const { c } = bootWith(join(tmpdir(), 'orca-tts-does-not-exist-ever'), notify)
+    c.toggle()
+    for (let i = 0; i < 12; i++) {
+      c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: i }, '/tmp/wt')
+    }
+    await settle(10)
+    expect(notify.length, 'twelve agent events must not produce twelve announcements').toBe(1)
+  })
+
+  it('CONTROL: when a transcript IS found, nothing is announced', async () => {
+    // Proves the assertions above can fail for the right reason: this is not an unconditional say.
+    const { root, worktree } = await scaffold()
+    const notify: string[] = []
+    const { c } = bootWith(root, notify)
+    c.toggle()
+    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(10)
+    expect(notify.join(' '), 'a working huddle must not report a fault').not.toMatch(/nothing to read|permissions/i)
+  })
+})
+
+describe('006 site 13 — the two-agents warning is not latched for the worker lifetime', () => {
+  it('warns again when a DIFFERENT pair of agents is ambiguous', async () => {
+    const { root, worktree } = await scaffold()
+    const project = worktree.replace(/[/\\:]/g, '-')
+    const notify: string[] = []
+    const c = new HuddleController({
+      speech: new FakeSpeech(), store: new MemoryStore(), projectsDir: root,
+      log: () => {}, notify: (m) => notify.push(m)
+    })
+    const write = async (name: string): Promise<void> => {
+      await writeFile(join(root, project, name), record(0) + '\n')
+    }
+    await write('a.jsonl'); await write('b.jsonl')
+    c.toggle()
+    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(10)
+    const afterFirst = notify.filter((n) => /two agents/i.test(n)).length
+    expect(afterFirst, 'the first ambiguity must be reported').toBe(1)
+
+    // A new pair. `#warnedAmbiguous` latched true for the worker's LIFETIME, so this second,
+    // genuinely different ambiguity produced nothing at all — forever.
+    c.unlock()
+    await write('c.jsonl'); await write('d.jsonl')
+    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 1 }, worktree)
+    await settle(10)
+    expect(notify.filter((n) => /two agents/i.test(n)).length,
+      'every ambiguity after the first was silent, forever').toBeGreaterThan(afterFirst)
+  })
+})
+
+describe('006 C4 — the five-minute reap must not silently change which session is followed', () => {
+  it('restores the lock, so a re-forked worker resumes the chosen session', async () => {
+    const { root, worktree } = await scaffold()
+    const project = worktree.replace(/[/\\:]/g, '-')
+    const store = new MemoryStore()
+    const chosen = join(root, project, 'chosen.jsonl')
+    await writeFile(chosen, record(0) + '\n')
+
+    const first = boot(root, store, new FakeSpeech())
+    first.toggle()
+    first.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(10)
+    expect(first.following, 'nothing was followed, so the test proves nothing').toBe(chosen)
+    first.dispose()
+
+    // The reap. A DIFFERENT session becomes the most recently modified one — which is exactly what
+    // five idle minutes produces, and exactly what P22 fault 1 is.
+    await new Promise((r) => setTimeout(r, 20))
+    await writeFile(join(root, project, 'someone-else.jsonl'), record(9) + '\n')
+
+    const reforked = boot(root, store, new FakeSpeech())
+    await reforked.restore()
+    reforked.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 1 }, worktree)
+    await settle(10)
+    expect(reforked.following, 'the reap silently moved the listener to another agent').toBe(chosen)
+    reforked.dispose()
+  })
+
+  it('re-announces whose session it is, because the listener cannot know a worker restarted', async () => {
+    const { root, worktree } = await scaffold()
+    const store = new MemoryStore()
+    const first = boot(root, store, new FakeSpeech())
+    first.toggle()
+    first.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(10)
+    first.dispose()
+
+    const reforked = boot(root, store, new FakeSpeech())
+    await reforked.restore()
+    expect(reforked.restoredAnnouncement(), 'provenance is the thing the listener cannot obtain any other way')
+      .toMatch(/still following/i)
+  })
+
+  it('CONTROL: with huddle off there is nothing to re-announce', async () => {
+    const store = new MemoryStore()
+    const { root } = await scaffold()
+    const c = boot(root, store, new FakeSpeech())
+    await c.restore()
+    expect(c.restoredAnnouncement(), 'a silent plugin must not announce a session on every activation')
+      .toBeNull()
+  })
+})
+
+describe('006 TT4/site 15 — a record with no uuid must not be re-spoken on every read', () => {
+  it('produces the same id for the same line, read twice', async () => {
+    const { root, worktree, file } = await scaffold()
+    const speech = new FakeSpeech()
+    const c = boot(root, new MemoryStore(), speech)
+    c.toggle()
+    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(10)
+    // No `uuid` key at all — the id used to be `${Date.now()}-${parts.length}`, i.e. a NEW id on
+    // every read, so dedup could never match and the paragraph came back every time the file was
+    // touched. This is P20's failure through a side door P20's fix does not close.
+    const line = JSON.stringify({
+      type: 'assistant', message: { content: [{ type: 'text', text: 'no uuid here' }] }
+    })
+    await appendFile(file, line + '\n')
+    await settle()          // past the 250 ms debounce
+    // Touch the file again without adding anything new.
+    await appendFile(file, '\n')
+    await settle()
+    expect(speech.spoken.filter((t) => t === 'no uuid here').length,
+      'the same paragraph was read aloud again on a re-read').toBe(1)
+  })
+})

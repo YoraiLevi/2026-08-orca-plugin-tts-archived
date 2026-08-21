@@ -107,3 +107,18 @@ audit trail that explains the whole session after the fact.
 - audited_before: no. tested_after: yes, by the architect, against an external oracle.
 - **C2 is NOT yet tickable**: it requires the page as well, and J13 is still running.
   The server half is verified; the criterion waits.
+
+### J17 `m9-rescope` — done
+- did: `docs/design/015-m9-rescope.md`; TASKS/STATE/HANDOFF updated; repo issue #3
+  commented (not closed, not renamed).
+- **It corrected the architect.** The dispatch brief quoted SPIKE-1 as *17.5 ms / 348-366
+  cold*, which was the architect's own n=10 re-run. The agent read the committed document
+  instead and reported **17.7 and 17.1 ms, n=20 per run over two runs**, flagging the
+  discrepancy rather than adopting the briefing. Both are consistent; the point is the
+  method. A subagent that trusts the brief over the artifact is how P32 happened.
+  **Rule reaffirmed: brief from the artifact, and let the subagent check the brief.**
+- M9's scope is now "hold the audio device open", not "swap the engine". Piper is argued
+  on voice quality, on its own schedule, behind the seam — not smuggled back in on latency.
+- audited_before: no. tested_after: partial — the architect verified the issue comment
+  landed and that 015 states its own precedence over 010. The doc-level merge of 015 into
+  010 is J20's, and until it happens **two documents describe M9**; 015 says which wins.
