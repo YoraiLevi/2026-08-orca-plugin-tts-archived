@@ -1674,7 +1674,13 @@ async function speak (text, { confirmation = false } = {}) {
   const t0 = performance.now()
 
   // The warm path first, and it never touches the network.
-  const cachedKeys = state.chunkKeysFor?.get(text)
+  //
+  // FR-023: keyed by `keyFor(text, synth)`, NOT by text. Keyed by text alone, changing
+  // `voice.rate` and pressing Play replayed audio synthesized at the OLD rate in 41 ms — fast,
+  // confident and wrong. The per-chunk buffer keys were always right; this map was the one place
+  // the same rule was not applied, so the stale keys it returned still resolved to real buffers.
+  // Reusing `keyFor` means KEYED_FIELDS stays the single definition of what changes the audio.
+  const cachedKeys = state.chunkKeysFor?.get(keyFor(text, synth))
   if (cachedKeys && cachedKeys.every((k) => buffers.has(k))) {
     if (!confirmation) earcon('control.play')
     const bufs = cachedKeys.map((k) => buffers.get(k))
@@ -1777,7 +1783,7 @@ async function speak (text, { confirmation = false } = {}) {
 
   finishSchedule(sched, () => onPlaybackEnd())
   state.chunkKeysFor ??= new Map()
-  state.chunkKeysFor.set(text, keys)
+  state.chunkKeysFor.set(keyFor(text, synth), keys)   // FR-023: same key discipline as the lookup
   state.lastPlayed = { text, synth, keys }
   markUtterance({ complete: true, delivered: sched.count, lost: end ? end.lost : 0 })
 
