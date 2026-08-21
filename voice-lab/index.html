@@ -783,7 +783,7 @@ function keyFor (chunkText, synth = {}) {
   // A stable, order-independent rendering: a key that changed when a caller reordered its object
   // literal would miss every cache hit and the gate would fail for an invisible reason.
   const parts = KEYED_FIELDS.map((f) => `${f}=${serializeField(synth[f])}`)
-  return hash(`${parts.join(' ')} text=${chunkText}`)
+  return hash(`${parts.join(' ')} text=${chunkText}`)
 }
 
 function serializeField (v) {
