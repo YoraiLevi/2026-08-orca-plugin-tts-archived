@@ -337,21 +337,45 @@ click stops it.
 The biggest quality change available. `block/buzz` does not read the reply; the agent chooses what
 is said aloud, which is why it can render an ASCII diagram and describe it in one sentence.
 
-- [ ] **T140** Design doc → `docs/.discussion/002-agent-spoken-channel.md`, with Options and a
-      Recommendation. **Do not code before this is settled.**
-  - [ ] T140a Option A: a marker convention in the reply (e.g. a fenced `speak` block) that the
-        plugin extracts and reads instead of the prose
-  - [ ] T140b Option B: an MCP tool the agent calls to speak, so speech is an explicit action
-  - [ ] T140c Option C: a hook/subagent that summarises the reply for the ear
-  - [ ] T140d Option D: heuristic — read the summary sentences, skip the artifact
-  - [ ] T140e How each degrades when the agent does not cooperate (most will not)
-  - [ ] T140f Whether the spoken channel replaces or supplements the full reply, and who chooses
-- [ ] **T141** Implement the chosen option behind the provider-agnostic seam
-- [ ] **T142** Fallback: when no spoken channel is present, today's behaviour is unchanged
-- [ ] **T143** Fixture: a reply with an ASCII diagram plus a one-line description — the motivating case
-- [ ] **T144** Test: the diagram is never spoken; the description always is
+> **Reordered 2026-08-21 (round 3 reconciliation), forced by 007 C6 / 008 X-08.** This phase
+> previously listed the marker convention **first** and the heuristic **last**, which inverts the
+> conclusion `002` actually reached: *"Option D is the product and Option A is an enhancement — not
+> the other way round, which is how the roadmap currently reads."* Options B and C are **closed
+> negative** (B: no MCP surface exists in ORCA's plugin system, Q1; C: fails R4.1, R4.2 and R3.4)
+> and are kept only as recorded rejections. The gate is split, because a gate that only passes with
+> a cooperating agent is a gate we cannot hold — the expected cooperation rate is near zero.
 
-**Gate M14:** the motivating fixture is spoken as one sentence, not as box-drawing characters.
+- [x] **T140** Design doc → `docs/.discussion/002-agent-spoken-channel.md`, with Options and a
+      Recommendation. **Settled: D is the floor and the deliverable; A is the enhancement.**
+  - [ ] T140a **Option D (FIRST): heuristic** — structural classifier; read the prose, skip the
+        artifact, and **announce every skip by name**. Serves 100 % of replies from every agent.
+  - [ ] T140b **Option A (SECOND): the marker convention** — a fenced `speak` block extracted in
+        `decoders.ts` before normalization, with the absence-case pinned as the identity function.
+  - [ ] T140c **Option E (THIRD): the listener-invoked recap** over `terminal.sendText`, behind the
+        four validation checks, `enter: true`, target resolved per `003` §2D.1. Never automatic.
+  - [ ] T140d Option B — **rejected, recorded**: no MCP surface exists (Q1).
+  - [ ] T140e Option C — **rejected, recorded**: a summarizer forfeits R4.1/R4.2 and needs a second
+        model (R3.4); its failure mode is a confidently wrong summary the listener cannot check.
+  - [ ] T140f How each degrades when the agent does not cooperate (most will not)
+  - [ ] T140g Whether the spoken channel replaces or supplements the full reply, and who chooses
+        — **four policies wired, default left to Voice Lab (Q8, taste)**
+- [ ] **T141** Implement **Option D** behind the provider-agnostic seam. Only then Option A.
+- [ ] **T142** Fallback: when no spoken channel is present, today's behaviour is unchanged —
+      pinned by the identity-function test over a marker-free corpus
+- [ ] **T143** Fixture: a reply with an ASCII diagram plus a one-line description — the motivating case
+- [ ] **T144a** Test: **with no marker present**, the diagram is never spoken and the omission is
+      announced by name
+- [ ] **T144b** Test: **with a marker present**, the description is spoken
+- [ ] **T145** The per-utterance **length cap** on the huddle path, announced aloud, remainder to
+      the replay buffer (`002` "The reply that does not fit"; the number is `input.huddleReplyCap`
+      in M11)
+- [ ] **T146** Wire the *"spoken channel used in N of M replies"* counter. It will read 0.
+
+**Gate M14a (the product, holdable without any agent's cooperation):** the motivating fixture is
+**not** spoken as box-drawing characters, and what was skipped is announced by name.
+
+**Gate M14b (the enhancement, requires a cooperating agent):** given the same fixture *with* a
+```speak block, the one-sentence description is what is spoken.
 
 ---
 

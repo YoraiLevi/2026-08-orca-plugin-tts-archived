@@ -3,9 +3,15 @@
 **Status:** open, pending the listener's taste calls (Q8) and four new empirical probes (Q43-Q46).
 **Raised:** 2026-08-21, after `docs/.research/q-round1-orca-api.md` and
 `docs/.research/q-round1-buzz-transcript.md` closed Q1-Q4.
-**Governs:** roadmap phase M14 (`docs/TASKS.md` "Phase M14", tasks T140-T144).
+**Governs:** roadmap phase M14 (`docs/TASKS.md` "Phase M14", tasks T140-T146 — reordered
+2026-08-21 so Option D is first, and gate M14 split into M14a / M14b).
 **Answers:** Q5, Q6, Q7 of `docs/.discussion/000-open-questions.md`. Designs but does **not** pick
 Q8 — that belongs to the listener, in Voice Lab (PITFALLS P23).
+
+> **Amended 2026-08-21 — round-3 reconciliation.** Findings from `docs/design/008-crossreview-round3.md`,
+> `docs/design/007-user-stories.md` §30 and `docs/design/006-fma.md` §15b were resolved **in this
+> document, in place**. Every amendment carries a dated note naming the finding that forced it.
+> Ledger of what changed and what was deferred: `docs/design/009-reconciliation.md`.
 
 ---
 
@@ -13,7 +19,7 @@ Q8 — that belongs to the listener, in Voice Lab (PITFALLS P23).
 
 Huddle mode speaks the **whole** assistant reply. `packages/plugin/src/huddle/index.ts:179` hands
 every decoded reply straight to `speak(text, 'queue', label)`, and
-`packages/core/src/normalizer/index.ts:77-98` normalizes whatever arrives. That is correct when the
+`packages/core/src/normalizer/index.ts:91-113` normalizes whatever arrives. That is correct when the
 reply is prose. It is wrong when the reply is an artifact: an ASCII diagram is spoken as
 box-drawing characters, a table is spoken cell by cell, a stack trace is spoken as punctuation.
 
@@ -31,7 +37,7 @@ Four results are settled. They are cited, not assumed, and this document does no
 | An agent-callable `speak` **tool** | **Impossible.** No MCP surface exists in the plugin system; `contributes` is `.strict()` with seven keys, none tool-shaped. | `orca/src/shared/plugins/plugin-capabilities.ts:15-23`, `plugin-manifest.ts:99-129`; grep for `mcp` across the plugin tree returns nothing (`q-round1-orca-api.md` Q1) |
 | **System-prompt injection** | **Impossible.** ORCA never builds a system prompt; `contributes.agents` is validated (`plugin-artifact-validation.ts:60-65`) and consumed by nothing (`plugin-content-pack-registry.ts:13-27`). Skills are hard-rejected (`plugin-marketplace.ts:14-25`). | `q-round1-orca-api.md` Q3 |
 | A **marker in the reply text** | **Mechanically viable.** A fence with info string `speak` survives byte-for-byte into `message.content[].text` in the raw JSONL; the info-string field is a passthrough (22 distinct strings observed across 4,192 transcripts). | `q-round1-buzz-transcript.md` Q2 |
-| The **only** plugin→agent channel | `terminal.sendText` — panel-callable, `mutation: true`, `text` 1..4096 chars, explicit `terminalId`, returns `{ accepted }`. Lands as a **user turn** in the agent's terminal and appears in the transcript. | `orca/src/shared/plugins/plugin-host-api.ts:45-51,133-142` |
+| The **only** plugin→agent channel | `terminal.sendText` — panel-callable, `mutation: true`, `text` 1..4096 chars, explicit `terminalId`, and an **`enter` flag that decides whether the text is characters in a buffer or a submitted user turn**. Returns `{ accepted }`, which is **always `true`**; every failure throws (E-02). With `enter: true` it lands as a user turn and appears in the transcript. | `orca/src/shared/plugins/plugin-host-api.ts:45-52,133-142`; `enter` → `\r` at `orca/src/main/runtime/orca-runtime.ts:39794-39810` |
 
 And the shape worth copying, from buzz: it uses **neither** a marker **nor** a tool. It makes the
 *destination* the channel — the agent posts an ordinary message to the huddle channel, and
@@ -44,9 +50,9 @@ substitute for one — but the *properties* are what we are copying, not the tra
 
 This is not a greenfield decision. There is a live wrong behaviour to fix.
 
-`packages/core/src/normalizer/index.ts:107-128` strips fenced code, and with the default policy
-`'announce'` (`:77`) it substitutes `CODE_PLACEHOLDER` — *" . Here, a code block is omitted. "*
-(`:73`). So **if an agent emitted a ```speak block into ORCA today, the listener would hear
+`packages/core/src/normalizer/index.ts:122-144` strips fenced code, and with the default policy
+`'announce'` (called at `:96`) it substitutes `CODE_PLACEHOLDER` — *" . Here, a code block is omitted. "*
+(`:88`). So **if an agent emitted a ```speak block into ORCA today, the listener would hear
 "Here, a code block is omitted."** and then the prose. The do-nothing baseline is already the
 disqualifying failure mode described in Q6. Whatever we choose, the `speak` info string must be
 stripped **silently and unconditionally**, independent of `codeBlocks` policy.
@@ -88,7 +94,7 @@ The worker talks to the resident service over loopback. Two boxes, one arrow.
   to the #6298 class of failure: buzz's bug was possible because the destination was carried in
   text; here the destination is "this same reply", which cannot be wrong.
 - **Cost to build:** a pure function in `packages/plugin/src/huddle/decoders.ts`. `decodeClaudeLine`
-  (`:31-58`) already returns the raw text; extraction is one more step on a string. Zero new
+  (`:29-58`) already returns the raw text; extraction is one more step on a string. Zero new
   capabilities, zero upstream dependency.
 
 ### Option B — a convention the USER pastes into their own `CLAUDE.md`
@@ -136,7 +142,7 @@ speakable parts, announcing what was skipped.
 
 This is **not hypothetical** — it is a strict extension of what
 `packages/core/src/normalizer/index.ts` already does. Stage 1 already drops fenced code and
-announces the omission (`:107-128`); the roadmap already commits to headings, lists, tables and
+announces the omission (`:122-144`); the roadmap already commits to headings, lists, tables and
 paths (`HANDOFF.md` "Settled findings"). Option D is that work carried to its conclusion: add a
 structural classifier for ASCII art, box-drawing runs, stack traces and wide tables, and give each
 skipped construct a *named* spoken announcement rather than a generic placeholder.
@@ -278,6 +284,56 @@ So the mechanism is:
 
 ---
 
+## The reply that does not fit — a cap on the huddle path
+
+> **Added 2026-08-21 (round 3 reconciliation), forced by B-05.** This document quotes buzz's
+> truncation rule three times as the model for announcing an omission, and **adopts only the
+> announcement, not the cap**. The cap is the mechanism; the announcement is what makes the cap
+> honest.
+
+**There is no length cap on the huddle path at all.** `packages/plugin/src/huddle/index.ts:179`
+hands the whole decoded reply to `speak(text, 'queue', label)`. The chunker splits at
+`DEFAULT_MAX_UNITS = 200` (`packages/core/src/chunker/index.ts:53`) and the queue caps at eight
+**replies, not chunks** (`packages/plugin/src/main.ts:48`). So **a single reply is never dropped by
+overflow, however long it is** — the overflow rule cannot help, because there is only one item.
+
+The arithmetic: 40,000 characters ≈ 200 chunks; at ~200 characters ≈ 30 words ≈ 10 s of speech,
+that is **~33 minutes of audio**, plus ~200 sink spawns at ~970 ms each on v1 macOS
+(`packages/plugin/src/sinks/subprocess-sink.ts:8-10`) — another ~3 minutes of silence distributed
+through it. Stop works (003), but the listener who wanted the last sentence must sit through the
+whole thing or lose all of it. That is P22's sentence — *"reading something you didn't ask for"* —
+reached by a route no design closed.
+
+The comparison is damning because the project already found the answer and declined to copy it.
+buzz caps at 8,096 characters and appends *"... message truncated."* **aloud**
+(`agent_tts_routing.rs:27-40`, cited by 003 §9 adoption 3). Our own clipboard path already does
+both — `DEFAULT_MAX_CHARS = 20_000`, truncation announced (`packages/plugin/src/clipboard.ts:63`).
+The huddle path, which takes **untrusted input from a model**, does neither.
+
+**The mechanism.**
+
+1. A **per-utterance character cap on the huddle path**, applied after the Option D classifier and
+   before chunking, so the cap counts *speakable* characters rather than box-drawing runs the
+   classifier was going to skip anyway.
+2. **The truncation is announced aloud**, in buzz's shape and in Option D's announcement vocabulary
+   (Q47) — *"that reply was long; I read the first two minutes."*
+3. **The remainder is retained**, in 003 §7's replay buffer, and the announcement says how to reach
+   it — *"press R for the rest."* Nothing is lost; it merely is not read unasked.
+4. Entering the replay buffer **marks the reply as seen** (003 §7.1), so a truncated reply cannot
+   come back through the B-01 door on the next re-fork.
+
+**The number is taste and belongs to the listener**, in Voice Lab's Panel F beside
+`input.clipboardCap` — which is the identical control for the other input. **The existence of the
+cap is correctness and is settled here.** A lab that ships without the control still ships with a
+cap; the control only changes where it sits.
+
+**Verify by effect.** Feed a 40,000-character reply through the huddle path and assert the sink
+produced fewer than N seconds of audio **and** that the truncation sentence is among the utterances.
+Run the same fixture with the cap disabled and assert the duration goes up — without that negative
+control the first assertion is a ritual.
+
+---
+
 ## Q6 — degradation when the agent does not cooperate
 
 **Assume the cooperation rate is near zero.** Section "Adoption reality" below argues it literally
@@ -286,7 +342,7 @@ is in month one.
 | Option | Non-cooperation mode | Verdict |
 |---|---|---|
 | A — ```speak fence | no fence → extractor is the identity function → today's behaviour | **Safe** |
-| A — *partial* fence (opened, never closed) | today: `stripFencedCode` swallows the remainder and announces a code block (`normalizer/index.ts:107-128`) — the listener loses the rest of the reply | **Must be fixed**: an unterminated `speak` fence extracts to end-of-message and is announced as truncated, never dropped |
+| A — *partial* fence (opened, never closed) | today: `stripFencedCode` swallows the remainder and announces a code block (`normalizer/index.ts:122-144`; the discarded `announced` flag is at `:141-142`) — the listener loses the rest of the reply | **Must be fixed**: an unterminated `speak` fence extracts to end-of-message and is announced as truncated, never dropped |
 | A — a *sigil* variant | the sigil is spoken aloud | **DISQUALIFIED.** An option whose non-cooperation mode reads a raw marker aloud is not a candidate. |
 | B — user config | not pasted → nothing happens | **Safe** |
 | C — summarizer | not applicable, but its *failure* mode is a confident wrong summary the listener cannot check | **Worst of the five** |
@@ -360,13 +416,18 @@ Four routes exist. All four are worse than buzz's. Here they are with their real
 
 **The conclusion the evidence forces:** route 4 is what actually happens, route 1 is what we hope
 for, route 3 is the escape hatch, route 2 is a trap. Therefore **Option D is the product and Option
-A is an enhancement** — not the other way round, which is how the roadmap currently reads
-(`docs/TASKS.md` "Phase M14" lists T140a marker first and T140d heuristic last).
+A is an enhancement** — not the other way round, which is how the roadmap used to read.
 
-**Gate M14 must be satisfiable by Option D alone.** The gate as written — *"the motivating fixture
-is spoken as one sentence, not as box-drawing characters"* — is currently ambiguous about which
-option satisfies it. It should be split: D must make the diagram not-spoken; A must make the
-description spoken. A gate that only passes with a cooperating agent is a gate we cannot hold.
+**Gate M14 must be satisfiable by Option D alone.**
+
+> **Resolved 2026-08-21 (round 3 reconciliation), forced by 007 C6.** `docs/TASKS.md` "Phase M14"
+> listed T140a (the marker) first and the heuristic last, inverting this document's conclusion.
+> **It has been reordered**: Option D is now T140a, Option A is T140b, Option E is T140c, and B and
+> C are recorded as closed-negative rather than as open options. **The gate is split**, exactly as
+> this paragraph asked: **M14a** — with no marker present, the diagram is not spoken and the
+> omission is announced by name (holdable with zero agent cooperation); **M14b** — with a marker
+> present, the one-sentence description is what is spoken. A gate that only passes with a
+> cooperating agent is a gate we cannot hold.
 
 ---
 
@@ -426,22 +487,47 @@ did share `/Users/m5air/source/orca-plugin-tts`.
 
 So Option E ships with four checks, and is refused rather than guessed when any fails:
 
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-01 and E-02 / C-06.** Check 2 was
+> written as a refusal, and it was correct — but as written it fires in *every* real configuration,
+> because a worktree that runs an agent and a control pane always has more than one terminal.
+> `docs/.discussion/003-panel-and-control-channel.md` §2D.1 now supplies the **positive** resolution
+> that makes check 2 discriminating instead of merely safe. And check 3 was **wrong**: it told the
+> implementer to watch a value that can never change.
+
 1. **Resolve, never assume.** `terminalId` comes from `workspace.readContext` on every send. The API
    itself refuses "the active terminal" by design (`plugin-host-api.ts:46-47`); we must not
    reintroduce that concept with a cached id.
-2. **Refuse on ambiguity.** If the focused worktree has more than one terminal and we cannot
-   distinguish them, **do not send** — say aloud which session we would have asked and let the
-   listener confirm. Silence plus a question beats a message in a stranger's terminal.
-3. **Check the acknowledgement.** `terminal.sendText` returns `{ accepted: boolean }`
-   (`plugin-host-api.ts:52`). Treating a call as fire-and-forget recreates P18 exactly: a wrong name
-   wrapped in a defensive fallback became a silent success. Log the `false`, and say it.
+2. **Resolve the ambiguity, and refuse only when it cannot be resolved.** Use the nonce handshake
+   of 003 §2D.1 — a probe sent to every terminal in the worktree with **`enter: false`**, answered
+   by whichever one is running `orca-tts control`. Option E's recap request then goes to the
+   terminal the *listener's agent* is in, which is the one the handshake did **not** claim, and only
+   when exactly one such candidate remains. If two or more remain, **do not send** — say aloud
+   which session we would have asked and let the listener confirm. Silence plus a question beats a
+   message in a stranger's terminal.
+3. **Catch and name the throw. Do not read the acknowledgement.**
+   `terminal.sendText` returns `{ accepted: boolean }` (`plugin-host-api.ts:52`) and **`false` is
+   never constructed anywhere in ORCA's tree** — `sendTerminal`
+   (`orca/src/main/runtime/orca-runtime.ts:18559-18614`) has two success returns, both hard-coded
+   `accepted: true`, and every other path throws (`terminal_not_writable`, `invalid_terminal_send`,
+   `TERMINAL_INPUT_TOO_LARGE_ERROR`), as does the binding
+   (`orca/src/main/plugins/plugin-host-method-bindings.ts:99-106`). So *"log the `false`, and say
+   it"* was an instruction to watch a permanently-green light — the exact anti-pattern this project
+   names as **an indicator that never changes is a broken indicator**. Wrap the call, branch on the
+   thrown error's code, and **say the reason**. The throw is strictly better than the boolean it
+   replaces, because it carries one.
 4. **Verify by effect, with a before/after probe.** After a send, the *expected* consequence is a
    new user turn in the transcript we are watching, carrying our own text. If it does not appear
    within a bounded window, the message went somewhere else — announce that, do not retry blindly.
    This is the project's standing rule: watch a named value move, and an after-only reading proves
    nothing.
 
-Check 4 is the one that would have caught #6298.
+Check 4 is the one that would have caught #6298. Check 3, as originally written, would have caught
+nothing at all.
+
+**One flag, stated because it is the whole safety boundary.** Option E's recap request is the
+**only** send in this project that uses `enter: true`, and it uses it because a recap request *is*
+deliberately a user turn that the listener asked for. Every other send — every probe, every control
+envelope — is `enter: false`. 003 §2D.3 holds that rule; this document conforms to it.
 
 ---
 
@@ -481,7 +567,7 @@ flowchart TD
 
 **Immediate correctness fix, independent of everything above:** the `speak` info string must be
 stripped silently regardless of the `codeBlocks` policy
-(`packages/core/src/normalizer/index.ts:73,77,107-128`). Today it would be announced as *"Here, a
+(`packages/core/src/normalizer/index.ts:88` `CODE_PLACEHOLDER`, called at `:96`, `stripFencedCode` at `:122-144`). Today it would be announced as *"Here, a
 code block is omitted."* — which is the disqualifying failure mode arriving through the front door.
 
 ---
@@ -497,7 +583,7 @@ code block is omitted."* — which is the disqualifying failure mode arriving th
 >    avoidable; do not build on a guess (P0).
 > 2. Implement **Option D only**. Extend `packages/core/src/normalizer/index.ts` with a structural
 >    classifier for box-drawing runs, ASCII art, stack traces and wide tables. Every skip gets a
->    *named* spoken announcement, not the generic `CODE_PLACEHOLDER` at `:73`. Build T143's fixture
+>    *named* spoken announcement, not the generic `CODE_PLACEHOLDER` at `:88`. Build T143's fixture
 >    first (a reply with an ASCII diagram plus a one-line description) and make T144 pass with **no
 >    marker present**.
 > 3. Only then implement **Option A**: `extractSpeak(text)` in
@@ -524,7 +610,7 @@ For cataloguing in `docs/.discussion/000-open-questions.md`.
 
 | # | Kind | Question | Exact probe / note |
 |---|---|---|---|
-| Q43 | E | Can a plugin join a `workspace.readContext` `terminals[].id` to an agent `sessionId` or transcript path? Without it, Option E cannot prove its target. | The entry carries only `id` (`plugin-host-api.ts:33-38`). Probe: open two terminals in one worktree, call `workspace.readContext` from the panel, and try to distinguish them by any means. If none exists, file it upstream alongside [#15639](https://github.com/stablyai/orca/issues/15639). |
+| Q43 | E | Can a plugin join a `workspace.readContext` `terminals[].id` to an agent `sessionId` or transcript path? Without it, Option E cannot prove its target. | The entry carries only `id` (`plugin-host-api.ts:32-39`; the `id` field is `:36`). Probe: open two terminals in one worktree, call `workspace.readContext` from the panel, and try to distinguish them by any means. If none exists, file it upstream alongside [#15639](https://github.com/stablyai/orca/issues/15639). |
 | Q44 | E | When `terminal.sendText` writes into a terminal whose agent is **mid-turn**, what happens — queued as the next user turn, interleaved into the running turn, or dropped? Option E's safety depends on the answer. | Send with `enter: true` while an agent is visibly working; read the resulting transcript records and their ordering. |
 | Q45 | E | Does an HTML comment (`<!-- speak: ... -->`) survive verbatim into the JSONL **and** render invisibly in the agent CLI's TUI? If both, Q7's tax on the sighted reader largely disappears. | Two halves. JSONL half: rerun the Q2 probe shape with a comment instead of a fence. TUI half: emit one in a live session and look. |
 | Q46 | E | Does the ```` ```speak ```` fence survive equally in the **non-Claude** transcript formats `decodeGenericLine` handles (`decoders.ts:60-71`)? Q2 proved it only for Claude JSONL. | Run the Q2 probe through a codex / grok / omp session in ORCA and read the raw record. |

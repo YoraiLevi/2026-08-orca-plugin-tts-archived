@@ -6,6 +6,11 @@ Frames Q34 without answering it (kind **T** — the listener decides). Consumes 
 **Primary input:** `docs/.research/q-round1-platform.md`.
 **Gate M15:** *with two agents running, you can tell who is speaking without being told.*
 
+> **Amended 2026-08-21 — round-3 reconciliation.** Findings from `docs/design/008-crossreview-round3.md`,
+> `docs/design/007-user-stories.md` §30 and `docs/design/006-fma.md` §15b were resolved **in this
+> document, in place**. Every amendment carries a dated note naming the finding that forced it.
+> Ledger of what changed and what was deferred: `docs/design/009-reconciliation.md`.
+
 ---
 
 ## 1. The verdict, before the reasoning
@@ -47,17 +52,34 @@ enumerating it costs ~450 ms against a ~500 ms first-audio budget (9.1).
 
 All rows MEASURED or DOCUMENTED in `docs/.research/q-round1-platform.md`; none are recollection.
 
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-07.** One row of this table was
+> **not** measured or documented — it was inherited. **H24 was already closed when this document
+> was written**, by `6b776d4`, two commits before the commit that published this file. §16
+> prerequisite 1 recorded it as *open* and called it *"M15's first task"*; `004` Panel E called the
+> same non-existent gap *"the single largest gap found in the audit"*. Both are corrected. The
+> lesson is the one PITFALLS **P0** already states and this round proves twice over: a `path:line`
+> inherited from a research round is not evidence at HEAD. Cite a **symbol plus the line**, and
+> re-derive.
+>
+> Two further caveats this table should have carried and did not, both from `008` §E-05/E-07:
+> **Windows = 2 is DOCUMENTED, never run** — the chain is a Microsoft `GetInstalledVoices` doc page,
+> a StackOverflow answer, and a `dotnet/runtime` source read, and `q-round1-platform.md`'s own
+> residual **U1** says the probe needs a Windows box that nobody has used. §1's verdict table prints
+> `66 / 6 / 0–2 / 1` with **no labels at all**, and a reader takes `2` for a measurement. Fold U1
+> and U3 into the same Windows trip that Q43 already funds; the design does not change, the
+> confidence label does.
+
 | Fact | Consequence for M15 |
 |---|---|
 | macOS 26.5: 41 distinct English voices, 24 of 24 verified distinct by md5 | voice-rich; **not** the design target |
-| Windows 11 stock: 2 (`Microsoft David Desktop`, `Microsoft Zira Desktop`) under Windows PowerShell 5.1, which is what we spawn (`packages/providers/src/os-synth/index.ts:174-179`) | the binding number |
+| Windows 11 stock: 2 (`Microsoft David Desktop`, `Microsoft Zira Desktop`) under Windows PowerShell 5.1, which is what we spawn (`packages/providers/src/os-synth/index.ts:247-253`, the spawn at `:251`) | the binding number |
 | Stock Ubuntu 24.04.3 desktop: no `/usr/bin/espeak-ng`; only the shared library plus `speech-dispatcher` | a ladder, not a voice list |
 | **Zero voice-name overlap** across the three namespaces | assignment is an **index into the host's runtime list**; a name is never portable data |
 | `say -v NotAVoiceAtAll` exits 0 and writes byte-identical audio to the default voice | a wrong index is a **silent wrong-voice lie** — the P18 shape |
 | `SelectVoice(name)` is a case-sensitive **substring** match | a short name can bind the wrong voice with no error |
 | Rate exists everywhere; pitch and volume exist everywhere but through three different surfaces | the tuple is `(voice, pitch, rate)`, reachable unevenly |
-| H24: no caller passes `voice` or `rate` — `speech-service.ts:121` calls `generate(chunk.text)` | **M15's first task is the wire, not the algorithm** |
-| H25: rate was dropped on Linux — now fixed by `linuxCommand()` (`os-synth/index.ts:117-133`) | prerequisite, closed |
+| H24 — **CLOSED before this document was written** (`6b776d4`). `speech-service.ts:257` calls `generate(chunk.text, this.#synthesizeOptions())`, built at `:232` from `SpeechServiceDeps.voice` / `.rate` (`:57-58`); PITFALLS **P26** pins it with a reachability test | **M15's first task is the algorithm. The wire exists.** See the amendment note below |
+| H25: rate was dropped on Linux — now fixed by `linuxCommand()` (`os-synth/index.ts:175`, called at `:374`) | prerequisite, closed |
 | H26: `rate*175` wpm on macOS vs a −10…+10 clamp on Windows | one number does not mean one thing — see section 8 |
 | Q27: `~/.claude/sessions/<pid>.json` is a live registry carrying `sessionId`, `name`, `cwd`, `pid` | the concurrent roster collision avoidance needs, **and a human-chosen name for free** |
 
@@ -147,9 +169,9 @@ speaker in the first second without effort:
 |---|---:|---:|---:|---:|---:|---|
 | macOS, OS-synth, prose-quality only | 22 | 3 | 3 | **66** | 198 | 6 compact locale + 16 Eloquence |
 | macOS, OS-synth, incl. novelty voices | 41 | 3 | 3 | 123 | 369 | 19 MacinTalk voices; several unintelligible for prose — do **not** count them |
-| Windows 11 stock, **as shipped today** | 2 | 1 | 3 | **2** | 6 | `$s.Speak` has no pitch; `#command():225-237` |
+| Windows 11 stock, **as shipped today** | 2 | 1 | 3 | **2** | 6 | `$s.Speak` has no pitch; `#command()` `:346-372` |
 | Windows 11 stock, **with `SpeakSsml`** | 2 | 3 | 3 | **6** | 18 | requires switching to `SpeakSsml` + XML escaping |
-| Ubuntu stock, `spd-say` floor | 1 | 1 | 1 | **1** | 1 | `spd-say` cannot write a WAV; we do not own playback there (`os-synth/index.ts:69-76`) |
+| Ubuntu stock, `spd-say` floor | 1 | 1 | 1 | **1** | 1 | `spd-say` cannot write a WAV; we do not own playback there (`os-synth/index.ts:111-117`) |
 | Ubuntu + `espeak-ng` installed | 13 | 3 | 3 | **39** | 117 | `m1`–`m8` + `f1`–`f5` within one language file; 104 variants × 8 en files exist but are not all distinct-in-prose |
 | Windows-on-ARM | 2 | 3 | 3 | 6 | 18 | no sherpa build (P7) — OS-synth is the *only* path, so this row is the product, not the floor |
 | **Any platform, Piper (default engine)** | = voices cached | 1 | 3 | = cached × 3 | | identical everywhere; this is the R1 answer |
@@ -293,7 +315,7 @@ flowchart TD
 
 The listener tunes one number in the Voice Lab. That number is a **multiplier of a reference rate**,
 and the reference is `RATE_REF_WPM = 175` — which is simultaneously espeak-ng's documented default
-speed and the base the provider already uses on macOS (`os-synth/index.ts:109`, `ESPEAK_BASE_WPM`).
+speed and the base the provider already uses on macOS (`os-synth/index.ts:167`, `ESPEAK_BASE_WPM`, used at `:191`).
 
 `targetWpm = 175 × rate`
 
@@ -331,7 +353,7 @@ Rate  = round( 10 · ln(rate) / ln 3 )
 
 Check: `rate = 1.0 → 0`. `rate = 3.0 → 10 · ln3/ln3 = 10`. `rate = 1.5 → 10 · 0.4055/1.0986 = 3.69 → 4`.
 
-The shipped linear formula, `round((rate − 1) × 10)` (`os-synth/index.ts:227`), is wrong in both
+The shipped linear formula, `round((rate − 1) × 10)` (`os-synth/index.ts:366`), is wrong in both
 directions: it over-shoots in the middle (1.5 → 5 instead of 4) and **saturates at rate 2.0**, so
 every setting from 2.0 to 3.0 sounds identical on Windows while sounding progressively faster on
 the other two. That is an R1 parity defect of the same family as H25.
@@ -380,7 +402,7 @@ Arithmetic and its label:
 **Stated plainly: recommending `(voice, rate, pitch)` on Windows *is* recommending that the Windows
 provider move from `$s.Speak(...)` to `$s.SpeakSsml(...)`.** There is no other route.
 `SpeakSsml`/`SpeakSsmlAsync` with `<prosody pitch>` is the only pitch surface `System.Speech`
-exposes; the `Speak` path we ship today (`os-synth/index.ts:225-237`) cannot vary pitch at all
+exposes; the `Speak` path we ship today (`os-synth/index.ts:360-372`) cannot vary pitch at all
 (DOCUMENTED, `q-round1-platform.md` "Windows"). The three platforms are not symmetric here:
 
 | Platform | Pitch route | Is it SSML? | What changes in our code |
@@ -442,7 +464,7 @@ identity.assignments = {
 ```
 
 Bounded to 64 entries, LRU by last-spoken — the same discipline as `MAX_REMEMBERED_IDS = 300`
-(`packages/plugin/src/huddle/index.ts:40`), for the same reason (256 KB per stored value).
+(`packages/plugin/src/huddle/index.ts:44`), for the same reason (256 KB per stored value).
 
 **Authority rule.** `hostFingerprint` is the guard; `index` is authoritative; `voiceName` is a
 **checksum**. On restore, if the fingerprint matches but the name at that index no longer matches
@@ -457,7 +479,7 @@ index without checking the name (macOS would substitute silently).
 **MEASURED:** `say -v '?'` costs 456 / 439 / 451 / 460 / 442 ms over five runs. R4.2's first-audio
 budget is ~500 ms. **Enumerating the voice list once per utterance would spend the whole budget
 before synthesis starts**, and `prepare()` already pays it because it calls `listVoices()`
-(`os-synth/index.ts:153-158`). Per-agent assignment consults the list constantly, so the list must
+(`prepare()` at `os-synth/index.ts:228`, which calls `listVoices()` at `:232`/`:279`). Per-agent assignment consults the list constantly, so the list must
 be cached — not per utterance, not per session, **once per activation**.
 
 | Question | Answer |
@@ -483,7 +505,7 @@ Every row degrades to something **audible and named**. Never to silence, never t
 
 | # | Failure | Detection (by effect) | Degradation |
 |---|---|---|---|
-| F1 | Voice list empty — `listVoices()` returns `[]` (stock Ubuntu before the ladder; a broken PowerShell) | `voices.length === 0` at `prepare()` | Floor: one voice, no prosody, **call-sign mandatory every turn**. Speak once: *"System voices are unavailable on this machine, so agents will be named before each reply."* Plus the actionable hint already written at `os-synth/index.ts:90-93` |
+| F1 | Voice list empty — `listVoices()` returns `[]` (stock Ubuntu before the ladder; a broken PowerShell) | `voices.length === 0` at `prepare()` | Floor: one voice, no prosody, **call-sign mandatory every turn**. Speak once: *"System voices are unavailable on this machine, so agents will be named before each reply."* Plus the actionable hint already written at `os-synth/index.ts:148` (`LINUX_INSTALL_HINT`, used at `:160`, `:267`) |
 | F2 | Assigned index no longer exists — a voice was uninstalled, or one was **installed mid-session** and the cached list is stale (9.1) | host fingerprint mismatch on rescan; or a synthesis whose checksum equals the fallback baseline | Discard the map, recompute, and **say so**: *"Voices were reassigned after a system change."* Silent reassignment would present a new voice as the same agent. Rescan is user-triggered, never polled — a 450 ms poll for a twice-a-year event is not a check, it is a tax |
 | F2b | `SpeakSsml` throws on malformed SSML, turning a cosmetic pitch failure into **silence** (8.5) | the PowerShell call exits non-zero, or writes a zero-length WAV | `catch → $s.Speak(plainText)`: drop the pitch, **keep the words**, and record that this session fell to tier-0 prosody so the identity layer keeps speaking its call-sign. Pitch may fail; speech may not |
 | F3 | **macOS silent-fallback lie** — `say -v Bogus` exits 0 and emits the default voice's exact bytes | one-off **distinctness probe**: synthesize a 3-word phrase with each candidate and with no `-v`; any candidate whose md5 equals the no-voice baseline is **not a real voice** and is struck from the ranked list | The list shrinks; identities are recomputed on the smaller list. Never keep a voice that failed the probe |
@@ -491,7 +513,7 @@ Every row degrades to something **audible and named**. Never to silence, never t
 | F4 | **Windows substring binding** — `SelectVoice('David')` matching something unintended | pass the full `VoiceInfo.Name`, then **read `$s.Voice.Name` back** and compare | Mismatch → strike that voice from the list, log a WARNING, reassign. The read-back is the whole check; without it the failure is invisible |
 | F5 | **Two live sessions hold the same slot** — stale roster, two workers, a race | before speaking, re-read the roster; if two live sessions resolve to the same slot, both are in violation | Demote **both** to overflow: shared neutral voice, call-sign mandatory, announced. Two identical unnamed voices is precisely the P22 failure and must be impossible |
 | F6 | The session registry does not cover the agent CLI in use (Q27's unresolved sub-question — all five observed sessions were Claude Code) | registry lookup by `sessionId` returns nothing while a transcript is being read | Roster degrades to "transcripts modified within the last N minutes"; collision avoidance degrades to hash-only; **overflow behaviour becomes the default** (everyone named). Announce the degradation once |
-| F7 | **The enumerable path is not the synthesizable path** — Linux `listVoices()` returns `spd-say --list-synthesis-voices` output (`os-synth/index.ts:181-188`) while synthesis prefers `espeak-ng` (`LINUX_WAV_BACKENDS`, `:88`). Assigning one of those names produces the wrong voice or none | assign, synthesize the probe, compare checksums — F3's probe catches it | `listVoices()` must return only voices the **selected backend** accepts. Until it does, treat Linux as `V = 1` and rely on layers 0–1. This is a live defect, not a hypothetical |
+| F7 | **The enumerable path is not the synthesizable path** — Linux `listVoices()` returns `spd-say --list-synthesis-voices` output (`os-synth/index.ts:279`) while synthesis prefers `espeak-ng` (`LINUX_WAV_BACKENDS`, `:146`). Assigning one of those names produces the wrong voice or none | assign, synthesize the probe, compare checksums — F3's probe catches it | `listVoices()` must return only voices the **selected backend** accepts. Until it does, treat Linux as `V = 1` and rely on layers 0–1. This is a live defect, not a hypothetical |
 | F8 | The overflow announcement itself becomes noise — six agents, every reply prefixed | count of T3 sessions ≥ 3 | Escalate from prefix to **grouping**: batch a session's replies and name once per batch. Also the point at which the UI should offer "download more voices" (macOS Enhanced/Premium, Windows natural voices, `apt install espeak-ng`) |
 | F9 | Earcon inaudible — bad output device, gain too low, or the listener finds it grating | the listener says so; no automatic detection | Earcon is disableable. **Disabling it promotes the call-sign to mandatory**, because layer 1 was carrying differentiation |
 | F10 | Rate calibration not yet complete, or wrong | compare the measured wpm of a probe utterance against `targetWpm` | Fall back to the seed formula and show the discrepancy in the Voice Lab. Never let a mis-tuned rate be the only thing separating two agents — which is why rate is tier 2, behind a mandatory call-sign |
@@ -509,14 +531,100 @@ The same primitive solves our parity problem, because **we generate the samples 
 does not consult the host's voice registry, so its cardinality is identical on macOS, Windows and
 Linux — including the Linux box with no `espeak-ng`.
 
+> **This section is now the ONE earcon table for the whole project. Amended 2026-08-21 (round 3
+> reconciliation), forced by X-03.** Three documents were minting tones from one perceptual space
+> and this one allocated **all of it**: `earconId = h mod 30` used every ordered pair of the six-note
+> pentatonic set. Meanwhile `003` needed at least four more (Stop confirmation §10.2, Pause, the
+> 30-second paused heartbeat §8.7 rule 4, and a refusal earcon §3 R5 — where the refusal set is six
+> named codes) and `004` §8 rule 5 needed four again at a **different duration** (150 ms), with a
+> 300 ms A/B separator on top. Nothing reserved a band. With 30 of 30 allocated, **every control
+> earcon was by construction some live agent's identity**, and a listener who had learned "rising
+> G5-A5 is Cedar" would hear that exact motif as the confirmation of a Stop.
+>
+> This is worse than a naming clash. §11.1's own argument is that the earcon is *"the one that
+> actually satisfies R1"* precisely because it is host-independent — so on the guaranteed floor
+> (`V = 1`, everyone in overflow, §14.3 case A) the earcon carries **all** of the differentiation,
+> and that is exactly where it collided with the control vocabulary.
+>
+> **One owner: `packages/core/src/earcons/`.** `003` §3 R5 / §8.7 / §10.2 and `004` §8 rule 5 now
+> **cite this table** and mint nothing.
+
+### 11.1a The reserved bands
+
+Two axes are reserved, not one, so a collision is structurally impossible rather than merely
+avoided by bookkeeping:
+
+| | **Identity band** | **Control band** |
+|---|---|---|
+| **Note count** | exactly **2** | **1** or **3** — never 2 |
+| **Pitch set** | pentatonic C5 D5 E5 G5 A5 C6 | **disjoint**: C4, F4, A4 (low) and E6, G6 (high) |
+| **Envelope** | 60 ms per note, 20 ms gap, 5 ms raised-cosine fade | 150 ms total per earcon: one note of 150 ms, or three of 40 ms with 15 ms gaps |
+| **Gain** | 0.05, matching buzz | 0.05 |
+| **Total** | 140 ms | 150 ms |
+| **Who assigns** | `earconId = h mod 30`, probed against live sessions exactly as voices are | a fixed, named table — never hashed, because a control must sound the same every time |
+
+**Identity cardinality after the reservation: still 30.** `008` X-03 expected this number to
+shrink, and it does not — because the reservation takes its notes from **outside** the pentatonic
+set rather than taking pairs from inside it, and takes its shapes from outside the two-note form.
+The extra notes cost nothing: we synthesize them. So `earconMotifs × callSigns = 30 × 64 = 1,920`
+stands, and it stands for a stated reason rather than by omission.
+
+### 11.1b The control band, named
+
+| Id | Shape | Emitted by |
+|---|---|---|
+| `control.stop` | one note, C4 | `003` §10.2 — **on every Stop press, including stale ones** |
+| `control.pause` | one note, F4 | `003` §8.7 |
+| `control.heartbeat` | one note, A4, at reduced gain | `003` §8.7 rule 4, every 30 s while paused |
+| `control.refused` | three notes, descending E6 A4 C4 | `003` §3 R5 — one earcon for all six refusal codes; the *code* is spoken only when it matters |
+| `control.play` | one note, E6 | `004` §8 rule 5 |
+| `control.skip` | three notes, ascending C4 A4 E6 | `003` §8.7, `004` §8 rule 5 |
+| `control.error` | three notes, C4 C4 C4 | `004` §8 rule 5, and the `503` / `spoke-elsewhere` paths |
+| `control.compare` | one note, G6, **300 ms** — the one deliberate exception to the 150 ms rule, because it is a *separator* and needs to read as a gap | `004` §3 step 1 |
+
+### 11.1c The test that pins it
+
+```
+for every identity motif m in 0..29 and every control earcon c:
+    render(m) and render(c) as PCM
+    assert md5(render(m)) != md5(render(c))          # the byte-identity check X-03 asked for
+    assert noteCount(m) == 2 and noteCount(c) != 2   # the shape invariant
+    assert notes(m) ⊆ IDENTITY_SET and notes(c) ∩ IDENTITY_SET == ∅   # the pitch invariant
+```
+
+The negative control, without which the above is a ritual: **construct one deliberately illegal
+control earcon from two pentatonic notes and assert the test fails on it.** A pairwise-distinctness
+assertion over two sets that were built to be disjoint could not have failed otherwise.
+
+### 11.1d The acoustic spec
+
 | Property | Value |
 |---|---|
 | Form | two sine notes, 60 ms each, 20 ms gap, 5 ms raised-cosine fade in and out (no clicks) |
 | Gain | 0.05, matching buzz |
-| Pitch set | 6 notes, pentatonic: C5 D5 E5 G5 A5 C6 |
+| Pitch set | 6 notes, pentatonic: C5 D5 E5 G5 A5 C6 — **identity only** |
 | Cardinality | ordered pairs of distinct notes = 6 × 5 = **30** |
 | Sample rate | the provider's, 22050 — emitted as an `AudioChunk` prepended to the utterance |
-| Cost | ~140 ms, once per speaker-turn (not per chunk — Q47) |
+| Cost | **140 ms of tone, plus one sink spawn** — see below |
+
+**The cost, honestly.** This document originally costed the earcon at *"~140 ms, once per
+speaker-turn"*, and §13 options D and E carry that number. It omits the dominant term.
+`SubprocessSink` spawns **one player process per chunk** and its own header states the cost —
+*"one process per chunk gives a ~970 ms inter-sentence gap on macOS (`afplay`)"*
+(`packages/plugin/src/sinks/subprocess-sink.ts:8-10`). The earcon is an `AudioChunk` prepended to
+the utterance, so on v1 it costs **140 ms of tone plus one spawn (~970 ms on v1 macOS)**, inserted
+**before the first word** — directly into the path R4.2 budgets at 500 ms. Stated as a rule:
+**per-turn earcons are an M9-dependent feature.** Until M9 holds a player open, §13's options D and
+E are the *slowest* rows in that table, not the cheapest, and the table should be read that way.
+(The ~970 ms itself is **UNLABELLED** — it appears in a code comment and nowhere as a probe. It is
+load-bearing for M9, for `004`'s whole Q20 verdict and for this paragraph, and it should be
+measured once with a run count.)
+
+A second-order consequence: the earcon is generated PCM and `AudioChunk.format` is provider-chosen
+(`packages/core/src/types/index.ts:7`). A synthesized tone prepended to an `os-synth` `'wav'` stream
+is a **format-mixing** case nothing in the sink handles today. The earcon module must emit in the
+provider's declared format, which makes it the fourth uncoordinated extension to the provider seam
+that `008` C-05 counts — and an argument for making that one change once, before M11.
 
 Assignment: `earconId = h mod 30`, probed for collisions against live sessions exactly as voices
 are. It is layer 1 because it needs a little learning ("the falling one is the CI agent"), but it
@@ -537,9 +645,22 @@ This replaces `sessionLabel()`'s eight-hex-character UUID slice
 (`packages/plugin/src/huddle/index.ts:55-60`), which is the thing that prompted this milestone:
 reading `111693de` aloud to a dyslexic listener is a non-answer to "who is speaking".
 
+> **Confirmed as the project's one call-sign, 2026-08-21 (round 3 reconciliation), by X-04 and
+> 007 C4.** `003` §6 independently minted a **different** call-sign — two words (*"amber falcon"*),
+> an unspecified hash, at rank 4 of 5, *"used ONLY to break a collision"*, with collisions resolved
+> by **appending** rather than probing. Given the same two colliding sessions, the two designs
+> emitted *"orca plugin tts 13, amber falcon"* and *"Willow"* for the same session in the same audio
+> stream. **This specification wins** — it states its hash exactly, states its cardinality, and
+> probes — and `003` §6 has been amended to consume it as the display-name chain's disambiguator.
+> There is one call-sign, it is one word, and it is `WORDS[fnv1a32(sessionId) mod 64]`.
+
 The 64-word list is not fixed here — see Q48. Constraints on it: one or two syllables, no minimal
-pairs (`Cedar`/`Cedar` variants, `Falcon`/`Talon`), no words the normalizer would mangle, no words
-that collide with our own control vocabulary (`stop`, `skip`, `status`, `next`).
+pairs (`Cedar`/`Cedar` variants, `Falcon`/`Talon`), no words the normalizer would mangle, and **no
+word that appears in the spoken control vocabulary of
+`docs/.discussion/003-panel-and-control-channel.md` §4a.3** — which is the seventeen-word list, not
+the four (`stop`, `skip`, `status`, `next`) this document originally named. `003` §4a is the single
+source for both the key bindings and the spoken vocabulary; this document cites it and does not
+restate it, so the two can never drift apart again.
 
 ### 11.3 Where the control lives — on the agent, not in a settings pane
 
@@ -595,7 +716,7 @@ speech-dispatcher backends). We cannot install any of them, and should not try.
    > System Settings, Accessibility, Spoken Content, Manage Voices."*
 
    Spoken once, never repeated, dismissible. This is the same never-fail-silently obligation as
-   `LINUX_INSTALL_HINT` (`os-synth/index.ts:90-93`), which already does exactly this for the
+   `LINUX_INSTALL_HINT` (`os-synth/index.ts:148`), which already does exactly this for the
    missing `espeak-ng` binary. Quietly sounding bad is a silent degradation, and R015 forbids it.
 
 **One honest gap:** `say -v '?'` does not report quality. Reading it on macOS requires
@@ -640,10 +761,10 @@ setting, with no code change.
 | Option | What it sounds like | Costs | Fails when |
 |---|---|---|---|
 | **A — Never** | voices alone carry identity | zero time cost; maximum flow | the listener has not yet learned the mapping; any tier-≥1 or overflow identity; `V = 1` |
-| **B — On switch only** (today: `switchTo()`, `huddle/index.ts:117-121`) | *"Now reading from orca-plugin-tts, session 111693de."* | one announcement per switch | long gaps — after five minutes of one speaker, the listener has forgotten who it was |
+| **B — On switch only** (today: `switchTo()`, `huddle/index.ts:165` — **and no caller invokes it**, 007 C8) | *"Now reading from orca-plugin-tts, session 111693de."* | one announcement per switch | long gaps — after five minutes of one speaker, the listener has forgotten who it was |
 | **C — Call-sign prefix, every turn** | *"Cedar. The tests pass."* | ~350 ms every turn | tiring in a fast back-and-forth with one agent |
-| **D — Earcon only** | two notes, then speech | ~140 ms; needs learning | a listener who has not learned it, or who has disabled it |
-| **E — Earcon always, call-sign on switch** | notes every turn, name when the speaker changes | ~140 ms typical | the long-gap case, same as B |
+| **D — Earcon only** | two notes, then speech | 140 ms of tone **plus one sink spawn (~970 ms on v1 macOS) until M9** — §11.1d; needs learning | a listener who has not learned it, or who has disabled it |
+| **E — Earcon always, call-sign on switch** | notes every turn, name when the speaker changes | as D, every turn — **the slowest row in this table on v1, not the cheapest** (§11.1d) | the long-gap case, same as B |
 | **F — Adaptive** | name whenever ≥ 2 sessions have spoken in the last *N* minutes, **or** the identity is tier ≥ 1, **or** more than *M* minutes have passed | variable; no fixed cost | hardest to predict — the listener cannot anticipate whether a name is coming |
 
 Two rules are **not** options, because they are correctness rather than taste:
@@ -655,7 +776,18 @@ Two rules are **not** options, because they are correctness rather than taste:
    a pitfall.
 
 Voice Lab must be able to play the same two-agent exchange under each of A–F, back to back, so the
-choice is made by hearing rather than by argument.
+choice is made by hearing rather than by argument. That is an obligation on `004`, recorded there in
+its "What this document does not decide" table under Q34.
+
+**One thing this table does not cost, and nobody did.** `008` X-05 stacked the preambles that three
+documents each prepend *"regardless of the setting"* — this document's earcon (§11.1) and mandatory
+call-sign (§13 rule 1), `003` §6's identity re-spoken after ~30 s of silence, and `002`'s omission
+announcements — and measured **~2.7 s of preamble in front of a 1.0 s reply** on the guaranteed
+floor, where every session is overflow and naming is mandatory. Three "regardless" rules in three
+documents compose into something nobody chose. **This is not resolved here.** It needs an
+utterance-preamble budget owned by whichever module finally assembles the utterance, with the
+percentage set by the listener; it is recorded as `Q61` in `docs/.discussion/000-open-questions.md`
+rather than left implicit.
 
 ---
 
@@ -737,7 +869,7 @@ each reply."*
 ### 14.3 Ubuntu 24.04 stock — `V = 1` on the floor, `V = 13` with `espeak-ng`
 
 **Case A — stock desktop, `spd-say` floor.** `/usr/bin/espeak-ng` is not installed
-(`os-synth/index.ts:58-93`). `spd-say` makes sound but cannot write a WAV, so we do not own playback
+(`os-synth/index.ts:100-140`; the `spd-say` bullet at `:111-117`). `spd-say` makes sound but cannot write a WAV, so we do not own playback
 and cannot vary pitch or rate reliably. `V = 1`, no prosody. Every session lands in overflow.
 
 ```
@@ -750,6 +882,18 @@ once, at startup:  "Only the system speech service is available, so agents will 
 Three agents, one voice, and the listener can still tell exactly who is speaking — because the
 earcon and the name never depended on the host. **This is the row that proves the design satisfies
 R1.** Compare the naive design: three identical voices, indistinguishable, gate M15 failed.
+
+> **One honest gap in this row, recorded 2026-08-21 (round 3 reconciliation), from `006` §15b X3.**
+> The earcon above is generated PCM handed to a sink — and on this exact rung **we do not own
+> playback**: `#speakDirect()` gives the text to speech-dispatcher and yields nothing
+> (`os-synth/index.ts:321`, `#speakDirect()` at `:407`). So the *voice* comes from the daemon and the *earcon* would have to
+> come from somewhere else, and no document says from where. The delivery mechanism for an earcon on
+> the `spd-say` floor is **unspecified**, and it is unspecified in the one case this section calls
+> the proof of R1. It is not fatal — the **call-sign** is spoken by the daemon along with everything
+> else, and the call-sign alone satisfies the gate here — but the row should be read as *"the
+> call-sign proves R1, and the earcon on this rung is an open mechanism"*, not as *"both work"*.
+> Same shape as X-10 on the Voice Lab side, and it wants the same answer: a capability read, not an
+> assumption.
 
 **Case B — `sudo apt install espeak-ng`.** `V = 13` — the eight male and five female variants within
 one English language file, maximin-ordered so male and female alternate:
@@ -795,9 +939,39 @@ that could not have failed is not a check, so:
 | **Restart stability.** Record the assignment map, kill the worker, force a re-fork, re-read. | any session whose identity changed |
 | **Join stability.** Assign to two sessions, start a third, re-read the first two. | either incumbent's identity moving |
 | **Overflow honesty.** Force `V = 1`; run three sessions. | any reply spoken without a name, or any two sessions sounding alike unnamed |
+| **Earcon–control disjointness** (§11.1c) | any identity motif whose bytes equal a control earcon's, or either set violating the note-count / pitch-set invariant |
 | **The negative control.** Run the same blind test with per-agent identity **disabled**. | scoring well anyway — which would mean the test measures something else |
 
 The last row is the one that makes the rest evidence rather than ritual.
+
+### 15.1 M15 cannot pass its own gate without M16 — stated plainly
+
+> **Added 2026-08-21 (round 3 reconciliation), forced by 007 C5.** Q50 named this and left it open.
+> It is **not** a minor open question; it is a **precondition**, and leaving it open means M15 could
+> be scheduled, built, and then found ungateable.
+
+The gate is *"with two agents running, you can tell who is speaking without being told."* But huddle
+**locks onto exactly one session and stays there** (`HuddleController#locked`,
+`packages/plugin/src/huddle/index.ts:73`) — and that lock **is the P22 fix**. It is not an accident
+to be removed; it is the remedy for *"another session's replies hijacked the audio."*
+
+So: **if only one session ever speaks, per-agent identity distinguishes nothing, and there is no
+listening test that can pass.** Two resolutions exist, and one of them must be chosen before M15 is
+scheduled:
+
+| Resolution | What M15 becomes | Cost |
+|---|---|---|
+| **A — M15 depends on M16.** The lock becomes a *followed set*; M16's presence work is what makes more than one session audible. | the full design above, gateable as written | **M15 is scheduled after M16, not before it.** The roadmap currently has them the other way round |
+| **B — identity exists only for switch announcements.** The lock stays single. Identity distinguishes *"who am I now following"* across an explicit switch, not two concurrent speakers. | §13 options C–F collapse to option B (on switch only); the earcon and call-sign still carry the switch; tiers ≥ 1 rarely arise | cheap, and it makes the M15 gate's own wording wrong — it would have to be rewritten as *"after a switch, you can tell who you are now hearing"* |
+
+**Recommendation: A, and say so on the roadmap.** B is coherent and cheap, but it spends the whole
+identity design on an event that happens a few times an hour, and the listener's own complaint —
+*"three agents are talking to me"* — is about concurrency. **What is not acceptable is scheduling
+M15 before M16 and discovering at the gate that the gate cannot be run.** If the author prefers B,
+gate M15 must be reworded in the same change.
+
+Either way, **the P22 lock is never simply deleted.** A followed *set* is still an explicit,
+listener-chosen set; it is not a return to "whatever transcript was touched last."
 
 ---
 
@@ -805,7 +979,7 @@ The last row is the one that makes the rest evidence rather than ritual.
 
 | # | Prerequisite | Why M15 cannot ship without it | State |
 |---|---|---|---|
-| 1 | **H24 — the wire.** `speech-service.ts:121` calls `generate(chunk.text)` with no options | there is no point assigning a voice that cannot be passed. This is M15's first task | open |
+| 1 | **H24 — the wire.** | **CLOSED** by `6b776d4`: `speech-service.ts:257` passes `this.#synthesizeOptions()`. Pinned by P26's reachability test. This row was recorded as *open* against code that already had it | **done** |
 | 2 | `SynthesizeOptions.pitchSemitones` and the `identity` capability block | section 4 | open |
 | 3 | **F7** — Linux `listVoices()` must return voices the selected backend accepts | otherwise every Linux assignment is a wrong-voice lie | open, live defect |
 | 4 | **Windows `SpeakSsml` migration** + XML escaping + a `catch → Speak` fallback that drops pitch and keeps the words | takes Windows from 2 identities to 6. **Costed in 8.5. This is a funded dependency of the tuple, not an implied one** — decline it and Windows tier 0 stays at 2 | open |
@@ -814,7 +988,9 @@ The last row is the one that makes the rest evidence rather than ritual.
 | 5b | **Voice-list cache** — built once at `prepare()`, invalidated by rescan, never polled | `say -v '?'` costs ~450 ms, MEASURED, against a ~500 ms first-audio budget (9.1) | open |
 | 6 | Rate calibration table (section 8.3) | otherwise one rate number means three things | open; needs M11 |
 | 7 | Roster from `~/.claude/sessions/*.json` replacing the newest-transcript heuristic | Q27; also fixes P22 properly and answers Q28 | open |
-| 8 | H25 — Linux rate | closed by `linuxCommand()` (`os-synth/index.ts:117-133`) | **done** |
+| 9 | **M16's followed set** — more than one session must be able to speak, or gate M15 cannot be run at all (§15.1, 007 C5) | the gate says *"with two agents running"*; the lock says one. **This is a scheduling dependency: M15 after M16** | open, **blocking the gate** |
+| 10 | **`switchTo()` must have a caller.** `huddle/index.ts:165` implements P22's *"announce switches aloud"* — sets the lock, notifies, speaks *"Now reading from {label}."* — and **nothing anywhere invokes it** (007 C8). No `follow` command in the manifest, no palette entry, no event path | every identity announcement this document designs rides on a switch that cannot be triggered. P26's shape exactly. Wire it to a `follow` command with a reachability test, or delete it — an unreachable implementation reads to the next agent as a shipped feature | open, **live defect** |
+| 8 | H25 — Linux rate | closed by `linuxCommand()` (`os-synth/index.ts:175`) | **done** |
 
 ---
 
@@ -831,7 +1007,7 @@ To append to `docs/.discussion/000-open-questions.md`.
 | Q47 | D | **Earcon cadence.** Before every utterance, every turn, or only on speaker change? 140 ms × every chunk is a real cost in a streaming reply; only-on-change loses the cue mid-turn. |
 | Q48 | T→D | **The 64-word call-sign list.** Which words (design: the constraints in 11.2), and may the listener rename an agent's call-sign (design), and which words feel right (taste, Voice Lab)? |
 | Q49 | D | **Does M15's parity claim require caching 3–4 Piper voices at first run** rather than one? That is the difference between "parity by design doc" and "parity you can hear on Windows". Bears on first-run download size and on M9. |
-| Q50 | D | **Per-agent identity vs. the single-session lock (P22).** Huddle currently follows exactly one session. Per-agent voices are only useful if it follows more than one — so does M15 also change the lock into a *followed set*, and is that a separate milestone? |
+| Q50 | D | **Per-agent identity vs. the single-session lock (P22).** — **ANSWERED 2026-08-21 in §15.1**: it is a precondition, not a question. Recommendation A — the lock becomes a listener-chosen *followed set*, M16 delivers it, and **M15 is scheduled after M16**. The alternative (identity for switch announcements only) is coherent but requires rewording gate M15 in the same change. Left in the table because the author, not an agent, chooses between A and B. |
 | Q51 | E | **Can voice *quality tier* be read on macOS without a Swift sidecar?** `say -v '?'` does not report it; only `AVSpeechSynthesisVoice.quality` does (MEASURED: all 180 voices on the author's machine are `.default`). If it cannot, 11.6's one-time "install better voices" notice is implementable on Linux and Windows now and on macOS only via the sidecar or a weak name-set proxy. Probe: check whether any preinstalled macOS CLI exposes the attribute. |
 | Q52 | D | **Is the Windows `SpeakSsml` migration worth its escaping risk?** 8.5 recommends taking it (2 identities → 6) behind a `catch → Speak` fallback. Declining is coherent: Windows tier 0 stays at 2 and every third agent is named every turn. The author decides how much second-layer escaping over spoken text they are willing to fund. |
 
@@ -845,4 +1021,4 @@ To append to `docs/.discussion/000-open-questions.md`.
 | Adds or changes a flow | yes — assignment flow (section 7.4), overflow announcement, switch announcement |
 | Adds a failure mode | yes — F1–F10, of which F2b, F3, F4, F5, F7 have distinct causes not previously listed |
 | Opens or resolves a question | yes — Q32, Q33 resolved; Q31/H26 design half resolved; Q34 framed; Q43–Q52 opened |
-| Invalidates a v1 decision | yes — `sessionLabel()`'s eight-hex-character UUID slice (`huddle/index.ts:55-60`), and the linear Windows rate formula (`os-synth/index.ts:227`) |
+| Invalidates a v1 decision | yes — `sessionLabel()`'s eight-hex-character UUID slice (`huddle/index.ts:55-60`), and the linear Windows rate formula (`os-synth/index.ts:366`) |

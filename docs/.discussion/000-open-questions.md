@@ -150,6 +150,49 @@ floor produces no sound at all on the most common Linux desktop. Filed as a bug,
 
 ---
 
+## The Q43–Q52 collision — read this before citing any of those numbers
+
+**Recorded 2026-08-21 during the round-3 reconciliation. Flagged as X5 in `docs/design/006-fma.md`
+§15b and not acted on until now.**
+
+Four documents — `002`, `003`, `004`, `005` — each opened new questions starting at **Q43**, none of
+them consulting this file, which is the arbiter. So **Q43 through Q52 each name two to four
+different questions**, and a bare `Q45` is ambiguous: it is *"does an HTML comment survive into the
+JSONL"* in `002`, *"is `orca-tts control` viable as a foreground TUI"* in `003`, *"what is the
+escaping contract for phrase templates"* in `004`, and *"espeak-ng `-p` → semitones"* in `005`.
+
+This is PITFALLS **P12**'s collision in the one file a fresh agent trusts without checking, and R032
+exists to prevent it. **Until the ledger renumbers them, cite them as `002 Q45`, `003 Q45`, and so
+on — never bare.** This reconciliation deliberately did **not** renumber them, because those
+documents are cited by `006`, `007` and `008`, which are the record of what was found and must not
+be rewritten. Renumbering is cheap only while entries are uncited, and these are past that point;
+the fix is a mapping table in the ledger, not an edit to four documents.
+
+**New questions therefore start at Q60**, leaving the whole Q53–Q59 range free for the ledger's
+mapping.
+
+---
+
+## Q60–Q61 · opened by the round-3 reconciliation (`docs/design/009-reconciliation.md`)
+
+| # | Kind | Question | Note |
+|---|---|---|---|
+| Q60 | E | **Does a raw-mode stdin reader in an ORCA terminal pane actually receive `terminal.sendText` bytes when `enter: false`?** `003` §2D.1's whole target-resolution handshake depends on it, and `003` §2D.3 forbids `enter: true` on every control path — so if the bytes only arrive on submit, the handshake needs a different carrier and the safety property is lost. Probe: run a two-line Node script in an ORCA pane with `setRawMode(true)`, call `terminal.sendText` from a panel with `enter: false`, and print what arrives, with byte offsets. **Nothing may be built on 2D.1 until this is run (P0).** | Cheapest reversible answer if it comes back negative: fall back to `enter: true` **for the probe only**, sending a string that is inert in every shell and in an agent composer (a lone `#` comment), and keep `enter: false` for real envelopes. |
+| Q61 | D | **Who arbitrates the audio stream, and what is the utterance-preamble budget?** `008` X-05 stacked what three designs each prepend *"regardless of the setting"* — `005`'s earcon and mandatory call-sign, `003` §6's identity after ~30 s of silence, `002`'s omission announcements — at **~2.7 s in front of a 1.0 s reply** on the guaranteed floor. Three "regardless" rules, individually reasonable, collectively unlistenable, and no module owns the sum. Design: a budget in milliseconds or as a percentage of the estimated spoken length, enforced by whichever module assembles the utterance, dropping elements in a stated priority order — and the drop is **counted, not spoken**, or it defeats the point. The percentage is taste and belongs to Voice Lab. | Recorded rather than resolved by the round-3 reconciliation: it is a *needs-a-decision*, not a *blocks-implementation*, and picking a priority order without hearing the stack is exactly the P23 mistake. |
+
+---
+
 ## Resolution log
 
 Append here as questions close. Format: `Qn — resolved <date> — <evidence>`.
+
+- **Q28 — resolved 2026-08-21** — `003` §6, as amended: the **display-name chain** is registry
+  `name` → branch → displayName → call-sign alone, never hex. The **call-sign itself** is `005`
+  §11.2's, one word, `WORDS[fnv1a32(sessionId) mod 64]`, probed not appended (X-04 / 007 C4).
+- **Q34 — still the listener's**, but its option space is now fixed at `005` §13's A–F, and `004`
+  carries the obligation to play all six back to back.
+- **Q50 (`005`) — answered 2026-08-21** — `005` §15.1: the single-session lock is a **precondition**,
+  not an open question. **M15 is scheduled after M16**, or gate M15 cannot be run (007 C5).
+- **Q47 (`003`) / row 40 (`004`) — hex is closed, 2026-08-21** — `announce.sessionLabelHashChars`
+  keeps the value 0 and loses the default of 8; `path-tail-3-plus-hash` is removed from row 39's
+  option space entirely. Hex was shipped as taste and is correctness (007 C7).

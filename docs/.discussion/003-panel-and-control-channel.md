@@ -8,6 +8,11 @@
 > **Revised 2026-08-21** after `docs/.research/q-round1-platform.md` reported word-boundary
 > callbacks and pause/resume on all three platforms — see section 8, which is load-bearing for the
 > display model of section 4 and adds a third control.
+
+> **Amended 2026-08-21 — round-3 reconciliation.** Findings from `docs/design/008-crossreview-round3.md`,
+> `docs/design/007-user-stories.md` §30 and `docs/design/006-fma.md` §15b were resolved **in this
+> document, in place**. Every amendment carries a dated note naming the finding that forced it.
+> Ledger of what changed and what was deferred: `docs/design/009-reconciliation.md`.
 >
 > Every claim about ORCA's API carries a `file:line` into `/Users/m5air/source/orca` at
 > `87097551f8e98a21c3afa7d457f66d6fd1f94038` (PITFALLS P0). Where this document adds a citation the
@@ -162,18 +167,147 @@ The panel types a command into the terminal the agent is running in.
 
 #### D — A dedicated control pane: `terminal.sendText` into a terminal running our own reader
 
+> **Amended 2026-08-21 (round 3 reconciliation), forced by findings X-01 and X-02 of
+> `docs/design/008-crossreview-round3.md`.** The first draft of this option assumed the panel could
+> pick the control pane's `terminalId`, and gave one stdin two mutually exclusive reading modes.
+> Both were wrong, and the first one was dangerous: guessing the id types a control envelope into
+> the *agent's* terminal, where it lands as a user turn, the agent answers it, and huddle reads the
+> answer aloud. A Stop press would produce speech. The target-resolution handshake (2D.1), the
+> framing sentinel (2D.2) and the `enter` flag rule (2D.3) below replace those assumptions. The
+> option's verdict is unchanged; its mechanism is not.
+
 The user opens one terminal pane per worktree and runs `orca-tts control`. That process:
 
 1. renders the live dashboard (section 4) by reading the worker's state file;
-2. reads single keypresses — `s` stop, `n` skip, `m` mute, `f` follow — and, being focused, has
-   **no** keybinding problem at all;
-3. reads lines on stdin, which is where `terminal.sendText` writes;
-4. forwards every command over a kept-open unix socket to the worker.
+2. reads single keypresses from a raw-mode stdin, per the one keyboard table in section 4a — and,
+   being focused, has **no** keybinding problem at all;
+3. reads **framed envelopes** off the same stdin, which is where `terminal.sendText` writes
+   (2D.2 — an envelope is *not* a line, and must not be read as one);
+4. forwards every command over a kept-open unix socket to the worker;
+5. answers the panel's target-resolution nonce (2D.1), which is how the panel learns which
+   `terminalId` it is.
 
 `terminal.sendText` writes straight to the PTY — `orca-runtime.ts:18559-18614`
 (`getLivePtyForHandle` → `writeTerminalAction`) — so a foreground process reading stdin in that
 pane receives it. This is a *new* citation; round-1 established the method was panel-callable but
 not that it reaches a foreground reader.
+
+##### 2D.1 — Target resolution: a nonce handshake, never a guess
+
+**The panel cannot tell the control pane from the agent's terminal by looking.**
+`workspace.readContext` maps every terminal to `({ id: terminal.handle })` and nothing else — no
+title, no cwd, no command, no pid (`src/main/plugins/plugin-host-service-bindings.ts:57-59`). And
+`terminal.sendText` re-lists the active worktree's terminals and throws for anything outside it
+(`src/main/plugins/plugin-host-method-bindings.ts:92-109`), so the candidate set is exactly *"every
+terminal in this worktree"* — which, by this document's own design, contains at least one agent
+terminal **and** the control pane.
+
+002 already wrote the rule that forbids guessing here: *"Refuse on ambiguity. If the focused
+worktree has more than one terminal and we cannot distinguish them, do not send"* (002, "Validating
+the target", check 2). Applied to this option, that refusal fires in the only configuration this
+document designs for. So the panel must **make the ambiguity resolvable**, not tolerate it:
+
+```
+on panel load, and again whenever workspace.readContext reports a different
+worktree, a different terminal-id set, or a send throws:
+
+  nonce = "n-" + <monotonic> + "-" + <random>            // one per probe round
+  for each terminalId in workspace.readContext().terminals:
+      terminal.sendText({ terminalId, text: FRAME(probe{nonce}), enter: FALSE })
+
+  the control pane, on receiving a framed probe, writes {nonce, terminalId?} to
+  the worker over its unix socket; the worker records (nonce -> the pane that answered)
+
+  the panel learns the answering id by the only read it has: it re-sends its NEXT
+  real command to each candidate in turn only until one is acknowledged, or — the
+  cheaper route — the worker writes the resolved id into the control pane's own
+  rendered state, and the pane prints it for the user, who never has to read it
+  because the panel's button now works.
+
+  no answer within 750 ms  ->  state = no_control_pane (section 5), buttons DISABLED
+  more than one answer     ->  state = no_control_pane, reason "two control panes
+                               in one worktree"; the user is told to close one
+```
+
+Three properties this buys, and each is the answer to a way the old design failed:
+
+- **`enter: false` on every probe.** A probe is characters in a buffer. It is never a user turn, so
+  a probe that lands in the agent's terminal is visible junk the user can clear — not a message the
+  agent answers and huddle then speaks. This is the single line that separates an annoyance from
+  the failure this document exists to prevent.
+- **The id is cached for the session and re-probed on change**, so the 60 ms segment of the Stop
+  budget (Q13) is not spent re-discovering the target on every press.
+- **`no_control_pane` is a first-class state, reached by evidence.** The panel renders it when
+  nothing answered — not when a heuristic felt unsure.
+
+**One thing this handshake assumes and nobody has run.** That a **raw-mode** stdin reader in an
+ORCA pane receives `terminal.sendText` bytes at all when `enter: false` — i.e. that the PTY write
+reaches the reader without a submit. `orca-runtime.ts:39794-39810` says the payload is written
+straight through and `\r` is merely appended when `enter` is set, so it should; *"should"* is not
+evidence, and PITFALLS **P0** is explicit about that. Recorded as **Q60** in
+`docs/.discussion/000-open-questions.md`, with its probe. **Do not build 2D.1 before running it.**
+If it comes back negative, the cheapest reversible fallback is `enter: true` **for the probe only**,
+carrying a string that is inert in every shell and in an agent composer (a lone `#` comment) — and
+`enter: false` stays mandatory for real envelopes.
+
+**Verify by effect.** The test that could fail: two terminals in one worktree, one running
+`orca-tts control` and one running an agent; run the probe; assert the resolved id is the control
+pane's **and** assert the agent's transcript gained **no** new user record. An assertion on the
+transcript is the one that would have caught the original design.
+
+##### 2D.2 — Framing: one stdin, two streams, and the envelope's own letters are the control keys
+
+Single-keypress reading requires `stdin.setRawMode(true)`. In raw mode there is no line discipline:
+bytes arrive as they land. `terminal.sendText` writes the payload straight to the PTY and appends
+`\r` only when `enter` is set (`orca-runtime.ts:39794-39810`, `buildSendPayload`, reached via
+`sendTerminal` at `:18559-18614`). So an envelope does not arrive as a *line*; it arrives as ~70
+individual keystrokes — and the string `{"v":1,"id":"c-…","verb":"stop",…}` contains `s`, `t`, `o`,
+`p`, `n`, `m`, `f` and `p`. Reading it as keypresses fires stop, skip, mute, follow and pause in
+whatever order the JSON spells them. **"Reads keypresses and also reads lines" is not
+implementable.**
+
+**The frame, specified.** Every envelope on the wire is wrapped in an OSC sequence a keyboard
+cannot produce:
+
+```
+FRAME(payload) = ESC ] 777 ; orca-tts ; <payload-json> BEL
+              =  \x1b]777;orca-tts;{"v":1,…}\x07
+```
+
+The control pane's stdin reader is a two-state machine:
+
+| State | On `\x1b` | On `\x07` | On anything else |
+|---|---|---|---|
+| `KEYS` | enter `FRAME`, start buffering | — (a bare BEL is discarded) | dispatch as a keypress |
+| `FRAME` | reset the buffer (a truncated frame is discarded, counted, never executed) | parse the buffer as an envelope; on parse failure refuse `unknown_verb` and count it; return to `KEYS` | append to the buffer |
+
+Rules that make the frame safe rather than merely present:
+
+1. **Nothing inside a frame is ever dispatched as a keypress.** That is the whole point.
+2. **A frame is bounded.** More than 4,096 buffered bytes without a BEL discards the buffer and
+   returns to `KEYS` — the same cap `terminal.sendText` already enforces on the sending side, so an
+   unterminated frame cannot wedge the reader.
+3. **The escape prefix is chosen because no key produces it.** A user pressing `Esc` sends a bare
+   `\x1b`, which enters `FRAME` and is discarded 4,096 bytes or one BEL later; that costs an
+   ignored `Esc`, not a wrong command. If that proves annoying in use, the fix is a timeout on
+   `FRAME`, not a different sentinel.
+4. **The counters are visible.** Discarded frames and unparseable frames are counted and shown in
+   the TUI, because a silently-dropped control message is exactly the class of failure P18 records.
+
+##### 2D.3 — The `enter` flag, stated once, because it is the difference between a buffer and a turn
+
+`terminal.sendText` takes `{terminalId, text, enter}`. `enter` appends `\r` to the PTY payload
+(`orca-runtime.ts:39794-39810`). In a shell or an agent CLI that `\r` is what **submits**. This
+document therefore fixes it:
+
+| Send | `enter` | Why |
+|---|---|---|
+| target-resolution probe (2D.1) | **`false`** | a probe that lands in an agent terminal must never become a user turn |
+| every control envelope (section 3) | **`false`** | the frame is self-terminating (BEL); `\r` adds nothing and would submit if the target were ever wrong |
+| 002's Option E recap request | **`true`** | it *is* deliberately a user turn, sent to a target resolved by 2D.1, with the listener's explicit consent |
+
+**Rule: `enter: true` is only ever used for text a human asked us to say on their behalf.** No
+control path sets it. A future control path that wants it is a design change, not a parameter.
 
 Costs, stated honestly:
 
@@ -184,6 +318,9 @@ Costs, stated honestly:
   (`plugin-host-method-bindings.ts:98-107`: *"terminal is outside the active worktree"*). So it is
   **one control pane per worktree**, and the panel must handle "no control pane in this worktree"
   as a named state, not a dead button. → Q44.
+- **The probe costs one `terminal.sendText` per terminal per probe round**, against the 30-per-10 s
+  bridge budget (F4). Probing is rare — load, worktree change, and after a throw — so it is
+  budgeted as a user action, not as telemetry.
 - One visible pane of screen real estate. But this cost buys the display surface, which is the only
   way we get one at all — see section 4.
 
@@ -239,7 +376,7 @@ Why 250 ms and not something looser:
 |---|---|---|
 | click → panel JS → bridge → capability gate → PTY write | 60 ms | local IPC; the gate is a synchronous table lookup (`plugin-capability-gate.ts:39-45`) |
 | PTY → control-pane reader → unix socket → worker | 40 ms | line read on an already-running process, kept-open socket |
-| worker: bump generation, clear queue, cancel synthesis | 100 ms | `provider.cancel()` + `playback.bargeIn()`, already implemented (`packages/plugin/src/speech-service.ts:81-85`) |
+| worker: bump generation, clear queue, cancel synthesis | 100 ms | `provider.cancel()` + `playback.bargeIn()`, already implemented (`packages/plugin/src/speech-service.ts:99` (`cancelSynthesis` → `provider.cancel()`) and `:115` (`bargeIn()`)) |
 | audio device drain | 50 ms | requires a bounded sink buffer; `ffplay.kill()` measured at 1.5 ms (PITFALLS P9) |
 | **total** | **250 ms** | |
 
@@ -299,7 +436,7 @@ ever becomes panel-callable (orca#15643, open and cold per Q9). One envelope, al
 ```
 
 `gen` is the whole design. The worker already carries a playback generation counter
-(`PlaybackQueue.generation`, used at `packages/plugin/src/speech-service.ts:111-116`); buzz
+(`PlaybackQueue.generation`, used at `packages/plugin/src/speech-service.ts:253-257`); buzz
 independently arrived at the same primitive and for the same reason —
 *"a stale Stop click cannot silence a later utterance"*
 (`tts.rs:604-610`, `tts_pipeline_controls.rs:37-59`, via `q-round1-buzz-transcript.md`).
@@ -336,6 +473,14 @@ panel bridge (`plugin-panel-bridge.ts:53-62`) and we mirror that discipline on o
 `stale_generation`, `expired`, `duplicate`, `session_gone`, `no_control_pane`, `unknown_verb`.
 The listener cannot see a log, so a refusal that matters to them is spoken — briefly, and with an
 earcon rather than a sentence where a sentence would be slower than the thing it describes.
+
+**Every earcon this document emits — the Stop confirmation (§10.2), Pause, the paused heartbeat
+(§8.7 rule 4) and the refusal earcon above — comes from the reserved *control band* of the one
+earcon table, `docs/design/005-agent-identity.md` §11.1, implemented in `@orca-tts/core`.** This
+document does not mint tones. That reservation exists because 005 allocated all 30 identity motifs
+from a single perceptual space, so an unreserved control earcon would, by construction, be some
+live agent's identity — and a listener who has learned "rising G5-A5 is Cedar" would hear that exact
+motif as the confirmation of a Stop (X-03).
 
 **R6 — Ordering is not assumed.** Commands are independent; nothing depends on arrival order.
 `gen` plus `id` makes ordering irrelevant, which is what lets four transports coexist.
@@ -532,6 +677,86 @@ and the buttons render **disabled with that reason attached** — see section 5.
 
 ---
 
+## 4a. The one keyboard and spoken-control vocabulary
+
+> **Added 2026-08-21 (round 3 reconciliation), forced by X-09 and 007 C1.** Three documents had
+> independently assigned keys, and they inverted each other: `Space` meant *pause* in the control
+> pane and *play* in the Voice Lab; *stop* was `s` in one and `.` in the other; `R` meant *replay
+> audio* in one and *restore a settings snapshot* in the other; `M` meant *mute* in one and *reveal
+> more controls* in the other. A fourth list — 005 §11.2's *"our own control vocabulary (`stop`,
+> `skip`, `status`, `next`)"* — was shorter than either and constrained the call-sign word list
+> against the wrong set.
+>
+> **This table is the single source. `docs/design/004-voice-lab.md` §8 and
+> `docs/design/005-agent-identity.md` §11.2 cite it; they do not restate it.** It ships as data —
+> one map in `@orca-tts/core` — consumed by the TUI, the lab and the future voice-command path, so
+> the three can never drift again. The bindings below are the defaults; the listener may rebind,
+> and rebinding rebinds *both* surfaces at once, which is the property that matters.
+>
+> **The lab ships first (M11), so the lab's habit is the one that forms.** That argued for taking
+> the lab's bindings wholesale. It is not what this table does, for one reason: the lab's `.` for
+> stop and `S` for snapshot are *arbitrary*, while the TUI's `s` for stop is the fastest
+> press-to-silence route in the system (route 1, ~20–60 ms) and is the one binding a listener must
+> be able to hit without looking. So `s` wins, and everything that collided with it moved. Where
+> the lab's choice was not load-bearing — `Space`, `E`, `C`, `?` — it was kept.
+
+### 4a.1 Transport — identical meaning on every surface
+
+| Key | Verb | Control-pane TUI | Voice Lab | Changed from |
+|---|---|---|---|---|
+| `Space` | **play / pause toggle** | pauses, then resumes, the current utterance | starts the fixture; pressing again pauses, again resumes | nothing — this *is* the reconciliation. One verb, "toggle playback", which happens to have nothing to start in the TUI and something to start in the lab |
+| `p` | pause / resume alias | yes | yes | 003 already had it; 004 gains it, and **004's `,` is retired** |
+| `s` | **stop** | yes | yes | **004's `.` becomes an alias, not the primary**; `s` is canonical because it is the fastest route we have |
+| `.` | stop alias | yes | yes | kept so the lab's early muscle memory is not punished |
+| `n` | skip | yes | unassigned (the lab has no queue) | unchanged |
+| `R` | **replay** the last thing played | replay from the last-20 buffer, `↑` `↓` to choose | replay the last fixture or confirmation played | **004's "restore a snapshot" moves off `R`** |
+| `m` | **mute** | mute the highlighted session | mute the speak-on-change confirmations | **004's `V` is retired**; `m` means mute on both |
+| `?` | describe what is focused | help | speak the focused control's one-line description | unchanged in spirit on both |
+| `Esc` | close whatever opened | yes | yes; focus never moves as a side effect | unchanged |
+
+### 4a.2 Surface-specific — no key may mean two things
+
+| Key | Surface | Does |
+|---|---|---|
+| `f` / `u` | TUI | follow / unfollow the highlighted session |
+| `↑` `↓` | TUI | choose among the last 20 |
+| `↑` `↓` | Lab | previous / next control (skips collapsed panels) |
+| `←` `→` | Lab | change the focused control's value by one step |
+| `Tab` | Lab | next panel |
+| `+` / `-` | Lab | **reveal / collapse that panel's More tier** — moved off `M`, which is mute |
+| `C` | Lab | compare A/B · `1` `2` keep first / keep second |
+| `E` | Lab | explain — the stage ladder |
+| `K` / `L` | Lab | **snapshot ("keep") / restore ("load")** — moved off `S` / `R`, which are stop and replay |
+
+`↑` `↓` carrying different meanings on the two surfaces is deliberate and is not a collision: in
+each case it means *"move through the list this surface is about"*, and the two surfaces are never
+on screen at once.
+
+### 4a.3 The spoken control vocabulary
+
+The words below are what a future voice-command path listens for, and are therefore the words the
+call-sign list may not contain (005 §11.2 cites this row, and its four-word list is superseded):
+
+```
+play · pause · resume · stop · skip · next · replay · mute · unmute
+follow · unfollow · status · help · louder · quieter · faster · slower
+```
+
+`louder` / `quieter` / `faster` / `slower` are listed although no verb implements them yet,
+precisely so a call-sign named "Slower" cannot be minted today and collide when they arrive.
+
+### 4a.4 Plugin chords, and the sentence that must stay in the README
+
+Plugin chords are dead in terminal focus on any policy setting (F6), so **no key in 4a.1 may be
+documented as reachable by a chord alone.** The chords we declare are a bonus: `Mod+Shift+S` speak
+clipboard, `Mod+Shift+X` stop, `Mod+Shift+H` toggle huddle, `Mod+Shift+U` say status,
+`Mod+Shift+K` skip, `Mod+Shift+L` unfollow, `Mod+Shift+P` pause. All are drawn from the free set
+vendored at ORCA `0f26ff4a` / v1.4.185 (`C H K L P Q S U W X Y`) and pinned by
+`packages/plugin/src/manifest/keybindings.test.ts` (P19). Re-extract when bumping the supported
+ORCA version.
+
+---
+
 ## 5. Q14 — hide the controls, or disable them with a reason?
 
 ### Question
@@ -558,6 +783,13 @@ and one word for three faults is how P17 cost us an hour:
 | `no_control_pane` | no `orca-tts control` in the focused worktree | *"no control pane in this worktree — open a terminal here and run `orca-tts control`"* |
 | `rate_limited` | our own bridge budget spent (F4) | *"too many actions just now — retrying in Ns"*, with N counting down |
 | `capability_denied` / `consent_required` | consent not granted for `terminal:send` | *"Read Aloud needs terminal permission — approve it in Settings → Plugins"* |
+| `action_failed` | `terminal.sendText` **threw** — the resolved id is gone, the worktree changed under us, or the payload exceeded the host's cap | *"that terminal is no longer reachable — finding the control pane again"*, and the 2D.1 probe re-runs once |
+
+**A note the manifest forces (007 C2).** `terminal:send` is **not** among the four capabilities the
+shipped manifest declares (`events:subscribe`, `storage`, `settings:own`, `notifications:show`), so
+route 2 cannot work until M13 adds it — and adding a capability changes the consent fingerprint, so
+every existing install must **re-consent**. That is a first-run dialog in the middle of an upgrade,
+and it belongs in M13's task list and in the user flow, not in a footnote here.
 
 Two rules govern the status region, both from PITFALLS:
 
@@ -567,10 +799,37 @@ value as if it were current. Because it is read-blind (section 4), its status re
 *"say not connected rather than showing a frozen lie"* — is satisfied by construction here, not by
 discipline.
 
-**Verify by effect.** The panel does know one thing by effect: `terminal.sendText` returns
-`{ accepted: boolean }` (`plugin-host-api.ts:52`), and `workspace.readContext` tells it whether the
-focused worktree has any terminal at all. So the control-pane indicator is derived from a probe that
-*could* fail, not from a config assumption. It is a real check.
+**Verify by effect.**
+
+> **Amended 2026-08-21 (round 3 reconciliation), forced by findings E-02 / C-06.** This paragraph
+> previously derived the control-pane indicator from `terminal.sendText`'s `{ accepted: boolean }`
+> and called it *"a real check"*. **It was not a check at all.** `accepted: false` is never
+> constructed anywhere in ORCA's tree: `sendTerminalText` returns `{ accepted: result.accepted }`
+> (`src/main/plugins/plugin-host-service-bindings.ts:61-64`) from `sendTerminal`
+> (`src/main/runtime/orca-runtime.ts:18559-18614`), which has exactly two success returns, both
+> hard-coded `accepted: true`, and **throws** on every other path — `terminal_not_writable`,
+> `invalid_terminal_send`, `TERMINAL_INPUT_TOO_LARGE_ERROR` — as does the binding itself
+> (`plugin-host-method-bindings.ts:99-106`: *"no active worktree is available for terminal input"*,
+> *"terminal is outside the active worktree"*). A boolean that can only ever be `true` is a
+> permanently-green light, and this project's own standing rule is that **an indicator that never
+> changes is a broken indicator.** The sentence *"It is a real check"* is deleted.
+
+The indicator is derived instead from two things that **can** fail:
+
+1. **The rejection path, caught and named.** Every `terminal.sendText` call is wrapped. A throw
+   arrives at the panel as `{ ok: false, code }` through the bridge
+   (`plugin-panel-bridge.ts:53-62`), and the code is mapped onto the three named states below —
+   `action_failed` and `capability_denied` / `consent_required` and `rate_limited`. This is
+   strictly better than the boolean it replaces, because the throw **carries a reason** and the
+   boolean did not.
+2. **The nonce handshake of 2D.1**, which is the only positive evidence a control pane exists. No
+   answer within the window is `no_control_pane`. It could not have been said before this round,
+   because until 2D.1 there was no probe at all — only an assumption wearing a probe's clothes.
+
+`{ accepted }` is retained for exactly one purpose: it distinguishes "the host accepted the write"
+from "the host threw". It is **never** read as evidence that a control pane exists, received the
+bytes, or acted on them. Effect is proven by the handshake and by the audio, not by the transport's
+receipt.
 
 And the confirmation of a successful Stop does **not** come back through the panel. It arrives in
 the audio stream — the silence itself, plus a short earcon — because that is the channel the
@@ -603,30 +862,62 @@ familiar.
 | Session registry `name` | `~/.claude/sessions/<pid>.json` (F5) | *"orca plugin tts 13"*, *"math study f8"* | **already pronounceable, already unique, already chosen by tooling the user uses** |
 | ORCA tab title | `orca terminal list --json` | *"ORCA TTS plugin integration"* | best prose, but costs a subprocess and cannot be joined to a `sessionId` (F5) |
 | Colour | — | unspeakable | useful in the TUI, useless in audio |
-| Generated call-sign | hash → two-word list | *"amber falcon"* | maximally distinct, but arbitrary, unstable, and one more thing to learn |
+| Generated call-sign | `fnv1a32(sessionId)` → **one**-word list of 64 (`005` §11.2) | *"Willow"* | maximally distinct and host-independent — which is why X-04 promoted it from this table's last row to layer 0. "Arbitrary" was the objection; P28's *guaranteed-on-all-three is 1* is the answer to it |
 
 ### Recommendation
 
-**A fallback chain, resolved once per session and then cached, never re-derived per utterance:**
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-04 and 007 C4.** This section
+> originally minted its **own** call-sign — two words, *"amber falcon"*, from an unspecified hash,
+> at **rank 4 of 5**, *"used ONLY to break a collision"*, with collisions resolved by **appending**.
+> `docs/design/005-agent-identity.md` §11.2 mints a **different** call-sign — one word, one or two
+> syllables, `WORDS[fnv1a32(sessionId) mod 64]`, at **rank 0**, mandatory for every tier ≥ 1
+> identity, with collisions resolved by **probing to a different word**. Given the same two
+> colliding sessions, this document emitted *"orca plugin tts 13, amber falcon"* while 005 emitted
+> *"Willow"* — for the same session, in the same audio stream. Both cannot be the default.
+>
+> **005 wins, and this section now consumes its call-sign rather than defining a rival one.** The
+> argument is P28's: guaranteed-on-all-three voice-based identity is **1**, so the only mechanisms
+> that work on every platform are the ones we generate ourselves, and 005 is the document that
+> specifies its hash exactly, states its cardinality, and probes rather than appends. This section
+> keeps what it was actually good at: the **display-name chain** — how a session is *described* at
+> length, on a switch, in the TUI roster, and on request.
+
+**The call-sign is 005's.** `callSign = WORDS[fnv1a32(sessionId) mod 64]`, one word, one or two
+syllables, collision-resolved by double-hash probing over the live roster
+(005 §7.3, §11.2). This document does not redefine it, does not use two words, and does not resolve
+collisions by appending. Where this document previously said *"amber falcon"*, read *"Willow"*.
+
+**What this section owns is the long form** — the *display name* — resolved once per session and
+then cached, never re-derived per utterance:
 
 ```
 1. session registry `name`, spoken with hyphens as word breaks     "orca plugin tts 13"
 2. branch, if the name is missing or duplicated                    "on branch panel bridge"
 3. worktree displayName                                            "orca plugin tts"
-4. generated call-sign from a pronounceable two-word list,
-   keyed by sessionId, used ONLY to break a collision              "amber falcon"
+4. the call-sign alone, if none of the above resolves              "Willow"
 5. never, under any circumstance, hex
 ```
 
 Three rules attach to it.
 
-**Collisions are broken by adding, not by falling back.** If two live sessions resolve to the same
-spoken name, both get their call-sign appended: *"orca plugin tts 13, amber falcon"*. Falling back
-to the hash for one of them makes the pair asymmetric and unlearnable.
+**A collision in the long form is broken by the call-sign, which cannot collide.** If two live
+sessions resolve to the same display name, each is spoken as *"orca plugin tts 13, Willow"* and
+*"orca plugin tts 13, Cedar"*. The call-sign has already been probed to uniqueness against the live
+roster by 005 §7.3, so this is disambiguation by a value that is *known* distinct — not, as the
+first draft had it, by a value minted here and hoped to be.
 
-**Identity is spoken on transitions, not on every utterance.** Speak it when the followed session
-changes, on the first utterance of a turn, and after any silence longer than ~30 s. Prefixing every
-chunk turns the identity into noise, and noise is what gets tuned out — precisely when it matters.
+**Identity is spoken on transitions, not on every utterance — except where 005 makes it
+mandatory.** Speak the long form when the followed session changes, on the first utterance of a
+turn, and after any silence longer than ~30 s. But **005 §13 rule 1 overrides this**: any identity
+in tier ≥ 1 or overflow is named every turn regardless, because those identities sit at the
+perceptual floor. That override is correctness, not taste, and it is 005's to make.
+
+**Both documents write into one audio stream and neither costs the total.** X-05 of
+`docs/design/008-crossreview-round3.md` measured the stack — earcon, call-sign, re-spoken long form
+— at ~2.7 s of preamble in front of a 1.0 s reply on the guaranteed floor. That finding is **not
+resolved here**: it needs an utterance-preamble budget owned by whichever module assembles the
+utterance, with the percentage set by the listener in Voice Lab. Recorded as open (`Q61`) rather
+than quietly left out.
 
 **The default wording is taste, and taste belongs to the listener (PITFALLS P23).** Ship the
 mechanism and the option space; settle *"orca plugin tts 13"* versus *"session orca plugin tts
@@ -689,6 +980,61 @@ Rules:
 5. Mute is a level, not an edge (section 3, R4): a repeated mute is a no-op, and the state survives
    a worker re-fork by living in plugin storage, because ORCA reaps an idle worker after five
    minutes and PITFALLS P20 records what in-memory state costs us.
+
+### 7.1 What must never be re-spoken — the 301st reply
+
+> **Added 2026-08-21 (round 3 reconciliation), forced by B-01.** None of the four designs asked
+> what happens at reply 301, and the answer is **P22's third fault with a new cause: the history
+> gets read out again.**
+>
+> **Status: IMPLEMENTED while this section was being written.** Commit `393248f` *"gate dedup on a
+> per-file high-water mark, not an evictable id set"* landed part 2 below —
+> `#highWater = new Map<string, number>()` (`packages/plugin/src/huddle/index.ts:97`), persisted
+> under `HUDDLE_HIGH_WATER_KEY` (`:42`, read at `:112`, written at `:296`). The gate itself is
+> `packages/plugin/src/huddle/index.ts:266-268`: *"The high-water mark is the gate. The id set is
+> only a secondary filter for duplicates within…"*. `MAX_REMEMBERED_IDS` is now
+> explicitly **not** load-bearing (`:44-47`). This section stays as the design record, and the two
+> replay-buffer rules at the end are **not** covered by that commit — check them before closing
+> B-01.
+
+`MAX_REMEMBERED_IDS = 300` (`packages/plugin/src/huddle/index.ts:44`) caps the set of
+already-spoken reply uuids, and `#spoken` is trimmed to the last 300 (`:293-294`). Reply 1's id is
+then **evicted while its transcript line is still on disk**. `WATCH_WINDOW_MS` re-opens the watch on
+every `agent.status.changed`, and ORCA re-forks the worker after five minutes idle (P20/P6), at
+which point `#spoken` is restored from storage — with at most 300 entries, or rebuilt empty. A long
+session on the far side of an eviction re-reads replies the listener already heard, and this
+section's own replay buffer makes it worse: a muted session's replies go to the replay buffer, and
+the replay buffer's relationship to `#spoken` was undefined.
+
+**The mechanism, in two parts. The first is required; the second is the durable answer.**
+
+**1. The id set becomes a floor, not a fence (required, ~3 lines).** Alongside `#spoken`, keep
+`#oldestRemembered` — the id and the record timestamp of the oldest entry still in the set. A reply
+is spoken only if it is **not** in `#spoken` **and** its record is **newer than
+`#oldestRemembered`**. Anything older than the floor is, by construction, something we either spoke
+or deliberately declined to speak, and is never spoken again. This turns an unbounded failure into
+a bounded one and cannot regress: the floor only ever moves forward.
+
+**2. A per-file high-water mark (the durable answer).** Remember, per transcript file, the **byte
+offset last read** — one number per session, O(1), and it cannot be evicted into a re-speak because
+there is nothing to evict. Persisted alongside the mute state in plugin storage, keyed by transcript
+path, pruned when the file is gone. The id set stays as a within-file dedup for the P20 race
+(records that arrive out of order at the tail); the offset is what stops the *history* being
+re-read.
+
+**Two rules that close the replay-buffer gap:**
+
+- Entering the replay buffer **marks a reply as seen**. A muted session's reply is dropped from the
+  speech queue and retained for replay (Q30), and both of those facts advance `#spoken` and the
+  high-water mark. Unmuting must never re-speak what mute already accounted for.
+- Replaying from the buffer (`R`) **does not** rewind either. Replay is an explicit request; the
+  high-water mark records what arrived, not what was heard.
+
+**Verify by effect, with a probe that could fail.** Feed a transcript of 305 replies through the
+watcher, restart the worker between replies 300 and 301, and assert the sink produced **exactly
+305 utterances** — not 306, and not 605. Run the same fixture with the floor removed and assert the
+count goes **up**; without that negative control the test is a ritual, because a passing count
+proves nothing about which mechanism produced it.
 
 ---
 
@@ -891,11 +1237,22 @@ does **not** bump the generation, and that is precisely what distinguishes it fr
 | **Pause** | **unchanged** | kept, and still growing | **held, position kept** | short earcon, then silence |
 | **Mute** (per session) | unchanged | that session's items dropped | finishes | count announced |
 
+> **Amended 2026-08-21 (round 3 reconciliation), forced by 007 C3.** This rule previously restated
+> the cap as *"the normal cap still applies while paused: 20 queued"*. The number was wrong and
+> there were three of them: `packages/plugin/src/main.ts:96` ships `maxQueued: 8`,
+> `packages/plugin/src/speech-service.ts:74` declares `DEFAULT_MAX_QUEUED = 20`, and this document
+> reasoned against 20. **The one value is 8** — it is what the listener has actually been living
+> with, and 20 replies of backlog is ~3 minutes of unrequested speech, which is the P22 experience
+> with a cap on it rather than a cure. `DEFAULT_MAX_QUEUED` must be changed to 8 so there is one
+> constant, and this document now **cites** 004 Panel F row 36 rather than restating a number.
+
 **The backlog rule, because pause has exactly the P22 shape that mute has.** While paused the queue
 keeps accepting replies, so resuming after ten minutes is a flood — the precise experience that
 produced *"I feel helpless"*. Therefore:
 
-1. the normal cap still applies while paused: 20 queued, drop the **oldest**, and **say so**;
+1. the normal cap still applies while paused — **`queue.maxQueued`, whose one value is 8**
+   (`docs/design/004-voice-lab.md` Panel F row 36; see the amendment note below) — drop the
+   **oldest**, and **say so**;
 2. after **120 s** paused the worker moves the queued backlog to the replay buffer and says so once
    — *"paused two minutes; six replies moved to replay"*;
 3. resume **announces before it speaks** — *"resuming; two replies waiting"* — and never floods;
@@ -912,8 +1269,9 @@ produced *"I feel helpless"*. Therefore:
   in that slot re-introduces the moving target that the adoption exists to prevent.
 - **Panel:** the secondary control row — `[ pause ] [ skip ] [ mute ]` — with the label toggling
   between `pause` and `resume` inside a **fixed-width box**, so that row does not reflow either.
-- **Control-pane TUI:** **Space** primary, `p` alias. Space is the universal play/pause and nothing
-  else in the TUI claims it; `p` survives a terminal that swallows Space.
+- **Control-pane TUI:** **Space** primary, `p` alias — per the one keyboard table, section 4a.1,
+  where `Space` is the play/pause **toggle** on both surfaces. `p` survives a terminal that
+  swallows Space.
 - **Plugin hotkey:** `Mod+Shift+P`. `P` is in the free set vendored at ORCA `0f26ff4a` / v1.4.185
   (`C H K L P Q S U W X Y`) and we currently use only `S X H U` — PITFALLS P19, re-extract when
   bumping the supported ORCA version. And remember F6: like every plugin chord it is dead in
@@ -977,7 +1335,7 @@ truncates at 8 096 characters and appends *"... message truncated."* **aloud**
 did not happen, from their point of view. So: queue overflow, mute skips, degradation to a fallback
 engine, a refused command, and a session switch are all spoken — briefly, with an earcon where a
 sentence would take longer than the event it describes. The existing `onDropped` hook
-(`packages/plugin/src/speech-service.ts:24,73-75`) is the seam; today it only logs and notifies, and
+(`packages/plugin/src/speech-service.ts:65` declaration, fired at `:177`) is the seam; today it only logs and notifies, and
 it must also speak.
 
 Two more worth naming even though they are not this document's scope: buzz spends an entire tool
@@ -1087,7 +1445,7 @@ sequenceDiagram
     W->>W: capture cursor BEFORE the bump, or the offset dies (8.6)
     W->>W: bump generation, clear pending queue
     W->>W: provider.cancel()  (in-flight synthesis)
-    Note over W: segment budget 100 ms<br/>speech-service.ts:81-85
+    Note over W: segment budget 100 ms<br/>speech-service.ts:99,115
     W->>S: bargeIn(): flush buffered audio
     S-->>U: SILENCE
     Note over S,U: drain budget 50 ms<br/>ffplay kill measured 1.5 ms (P9)
@@ -1119,11 +1477,15 @@ flowchart LR
 | # | Question | Recommendation |
 |---|---|---|
 | 1 | Control channel | Dedicated control pane per worktree (`orca-tts control`); panel buttons reach it via `terminal.sendText`; palette and CLI as fallbacks. Option A rejected (agent attention), option B **verified non-existent** (F3). |
+| 1a | **Target resolution (X-01)** | A **nonce handshake with `enter: false`** (2D.1), never a guess. The answering id is cached and re-probed on worktree change or on a throw. No answer → `no_control_pane`, buttons disabled. `enter: true` is used **only** for text a human asked us to say (2D.3). |
+| 1b | **Framing (X-02)** | Envelopes are wrapped in `\x1b]777;orca-tts;…\x07`; the control pane's stdin is a two-state machine, raw-mode keypresses outside frames, envelopes inside, nothing inside a frame ever dispatched as a key (2D.2). |
+| 1c | **Keyboard vocabulary (X-09)** | **One table, section 4a**, cited by 004 §8 and 005 §11.2. `Space` = play/pause toggle everywhere; `s` = stop everywhere; `R` = replay everywhere; `m` = mute everywhere. The lab's `S`/`R` snapshot-restore move to `K`/`L`; its `M` more-tier moves to `+`; its `V` and `,` are retired. |
+| 1d | **The 301st reply (B-01)** | The remembered-id set becomes a **floor**, not a fence, and a **per-file byte high-water mark** is the durable bound (7.1). Entering the replay buffer marks a reply seen. |
 | 2 | Q13 Stop latency | **p50 ≤ 120 ms, p99 ≤ 250 ms, > 400 ms fails CI.** Must interrupt mid-chunk. Polling cannot meet it: worst case ≈ 495 ms. |
 | 3 | Q12 envelope | `{v,id,verb,gen,arg,at}`. Idempotent by `id` (last 64). Stale by **generation**, not clock. 5 s absolute guard. Six named refusal codes. |
 | 4 | Q14 unavailable | Disabled **with the named reason and the remedy**. Never hidden, never a frozen last-known value. |
 | 5 | Display surface | The control-pane TUI, not the plugin panel — the panel is read-blind today. Poll ceiling recorded for when #15643 lands: 1 Hz nominal, self-capped at 24/10 s. |
-| 6 | Q28 identity | Registry `name` → branch → displayName → call-sign. **Never hex.** Collisions append, not fall back. Spoken on transitions only. |
+| 6 | Q28 identity | **The call-sign is 005's** (one word, `WORDS[fnv1a32(sessionId) mod 64]`, probed — X-04). This document owns the *display name* chain: registry `name` → branch → displayName → call-sign alone. **Never hex.** Long-form collisions are disambiguated by the already-unique call-sign. Spoken on transitions — except that 005 §13 rule 1's every-turn naming for tier ≥ 1 overrides it. |
 | 7 | Q29 presence | "In the huddle" = `running` and not muted. "The voice" = `followed`. `spoke-recently` is decoration. |
 | 8 | Q30 mute | **Dropped** from speech, **retained** for replay, count announced, never auto-played on unmute. |
 | 9 | Word cursor | **Exact per-word in the TUI; chunk-level and labelled approximate in the panel.** Per-word push would spend 26 of 29 bridge slots and starve Stop; interpolation lies by ±1 word. Batch as one schedule per utterance, capped at 400 words. |
@@ -1135,6 +1497,19 @@ flowchart LR
 ## 12. New open questions
 
 Proposed for `000-open-questions.md`; not added there by this document.
+
+> **Note added 2026-08-21 (round 3 reconciliation).** The numbers below **collide** with Q43–Q52 as
+> opened by `002`, `004` and `005`, all four of which started at Q43 without consulting the arbiter
+> (`006` §15b X5; PITFALLS P12). Cite these as **`003` Q43**, **`003` Q45**, and so on — never
+> bare. See the collision note in `docs/.discussion/000-open-questions.md`.
+>
+> **Two of them changed status in this round.** `003` Q44 (*"is one control pane per worktree
+> acceptable"*) is now partly answered by §2D.1: the panel resolves its target by handshake, so the
+> per-worktree constraint is a scoping decision rather than an unsolved addressing problem.
+> `003` Q45 and Q46 remain unanswered and are the reason the 400 ms CI gate of section 2 is a
+> **target, not yet a gate** — `008` C-02 is right that a gate on an architecture whose viability is
+> the same document's open question is a red light nobody can turn green. **Sequence the probes
+> first; make it a gate second.**
 
 | # | Kind | Question |
 |---|---|---|

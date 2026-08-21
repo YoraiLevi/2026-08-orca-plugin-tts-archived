@@ -14,22 +14,32 @@ capability renders nothing at all, so there is no host settings form to target. 
 therefore also the settings UI, and its export format is the settings format. M11 and M12 fuse at
 the schema. That raises the bar on "The export format" below from convenience to contract.
 
+> **Amended 2026-08-21 — round-3 reconciliation.** Findings from `docs/design/008-crossreview-round3.md`,
+> `docs/design/007-user-stories.md` §30 and `docs/design/006-fma.md` §15b were resolved **in this
+> document, in place**. Every amendment carries a dated note naming the finding that forced it.
+> Ledger of what changed and what was deferred: `docs/design/009-reconciliation.md`.
+
 ---
 
 ## 1. What the lab is, in one paragraph
 
 `pnpm voice-lab` starts a Node server bound to `127.0.0.1` (T111a) that imports the **TypeScript
 source** of `normalize()` and the real `OsSynthProvider`, and serves one self-contained HTML page
-with no CDN and no build step. The page holds a fixture, a control surface of 45 controls, and a
+with no CDN and no build step. The page holds a fixture, a control surface of 46 controls, and a
 Play button. Changing a control re-normalizes instantly in the page's own memory, and re-synthesis
 is a single POST that returns WAV bytes the browser plays and caches. Nothing about ORCA is
 involved, and nothing about the neural engine is required (Q25 resolved: the OS synthesizer settles
 these decisions; M11 does not wait for M9).
 
-> **Build hazard, inherited.** `packages/core/dist/` is tracked and two normalizer commits stale;
-> its `dist/normalizer/index.js:304-305` still emits the old path wording. `scripts/voice-lab.mjs`
-> must import from source, not `dist/`, or the lab tunes a normalizer that is not the one that
-> ships. Delete `packages/core/dist/` from the index before T111 starts.
+> **Build hazard — CLOSED. Amended 2026-08-21 (round 3 reconciliation), forced by E-08.** This
+> paragraph asserted that `packages/core/dist/` is tracked and stale, and instructed the
+> implementer to delete it from the index before T111. `git ls-files packages/core/dist` returns
+> **zero files**; it was already untracked when this document was written. The instruction was a
+> no-op and is withdrawn. **The rule it was protecting still holds and is not withdrawn:**
+> `scripts/voice-lab.mjs` imports the **TypeScript source** of `@orca-tts/core`, never a build
+> output, or the lab tunes a normalizer that is not the one that ships. Enforce it mechanically —
+> a test that asserts the lab's resolved module path contains `/src/` — rather than as an
+> instruction to a human, which is what X6 of `docs/design/006-fma.md` flagged.
 
 ---
 
@@ -42,10 +52,10 @@ these decisions; M11 does not wait for M9).
 | Cost | Evidence |
 |---|---|
 | One player process per chunk, ~970 ms inter-sentence gap on macOS | `packages/plugin/src/sinks/subprocess-sink.ts:8-10` — documented in the sink's own header |
-| Temp-dir round trip per chunk: `mkdtemp` → `writeFile` → spawn → `rm` | `sinks/subprocess-sink.ts:52-60` |
+| Temp-dir round trip per chunk: `mkdtemp` → `writeFile` → spawn → `rm` | `sinks/subprocess-sink.ts:52-61` |
 | Every replay re-pays synthesis; `say ""` alone costs 414 ms | PITFALLS P10 |
 | `listVoices()` costs ~450 ms per call on macOS | `docs/.research/q-round1-platform.md` "Cost of `listVoices()`" |
-| It builds a second playback path the plugin does not use, contradicting R5.2 / constitution R023 — providers emit audio and never own playback (`packages/core/src/types/index.ts:33-37`) | — |
+| It builds a second playback path the plugin does not use, contradicting R5.2 / constitution R023 — providers emit audio and never own playback (`packages/core/src/types/index.ts:33-38`) | — |
 
 A four-sentence fixture replayed server-side is four spawns: roughly 4 × 970 ms of gap on top of
 synthesis, every single time the listener presses Play. That does not meet a two-second gate on the
@@ -55,8 +65,8 @@ synthesis, every single time the listener presses Play. That does not meet a two
 
 The provider already yields a `wav` buffer, not an OS-specific stream:
 
-- `packages/providers/src/os-synth/index.ts:132` — `yield { data, format: 'wav', sampleRate: 22050, channels: 1 }`
-- `packages/providers/src/os-synth/index.ts:140-141` — the darwin command forces
+- `packages/providers/src/os-synth/index.ts:338` — `yield { data, format: 'wav', sampleRate: …, channels: 1 }`
+- `packages/providers/src/os-synth/index.ts:352` — the darwin command forces
   `--data-format=LEI16@22050` with the comment *"WAV, never the default AIFF: decodeAudioData
   rejects AIFF-C (measured, E6e)"*.
 
@@ -86,9 +96,9 @@ side of the ledger. It changes nothing on the *playback* side, because the sidec
 straight into an `AudioBuffer` with no `decodeAudioData` step at all.
 
 So the sidecar makes the cold path faster and leaves the warm path exactly where it is. **The one
-requirement it places on M11**: the lab's audio layer must accept any `AudioChunk` the provider
-contract allows — today `'wav'` (`providers/src/os-synth/index.ts:132`), tomorrow `'pcm-s16le'`
-(`core/src/types/index.ts:3-9` declares `format` as provider-chosen). Branch on
+requirement it places on M11**: the lab's audio layer must accept any chunk the provider
+contract allows — today `'wav'` (`providers/src/os-synth/index.ts:338`), tomorrow `'pcm-s16le'`
+(`core/src/types/index.ts:3-10` declares `format` at `:7`, provider-chosen). Branch on
 `chunk.format`, do not assume WAV. That is a ten-line precaution now instead of a rewrite later.
 
 ### Consequence, stated rather than hidden
@@ -99,12 +109,53 @@ floor that does not exist in the shipped plugin**. Mitigation: control `pace.sim
 listener can hear either world. This is the same "engine-provisional" tagging Q25's resolution
 already requires.
 
-### Failure mode
+### Failure modes — there are **three** provider outcomes, not two
 
-If `provider.generate()` throws or the platform has no synthesizer (stock Ubuntu has no `espeak-ng`
-binary — `q-round1-platform.md` "Linux"), `POST /speak` returns `503` with the provider's error
-text, and the page **says so aloud and in text**. Never a silent dead Play button (constitution:
-never fail silently; PITFALLS P18).
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-10.** This section previously named
+> one failure mode, and it does not fire on the most common Linux desktop. **On the stock Ubuntu
+> `spd-say` rung the provider speaks out loud and yields no bytes at all**, so the browser-plays
+> architecture receives an empty chunk array, the `503` never fires, the AudioBuffer cache has
+> nothing to cache, and the A/B compare, the per-stage play, the 0 ms replay and the two-second
+> gate all silently do nothing **while the room fills with speech the page cannot stop, scrub or
+> repeat**. The lab appears to work and is silent — on the exact machine PITFALLS P25 exists for.
+> R016 says a limitation is named in the body of the document, and this one was absent from the
+> section that decides the architecture (C-07).
+
+| Outcome | What the provider does | What the lab does |
+|---|---|---|
+| **bytes** | yields audio chunks (`os-synth/index.ts:338`; every rung except the one below) | decode, cache, play in the browser — the design above |
+| **throw** | `provider.generate()` throws, or the platform has no synthesizer at all | `POST /speak` returns **`503`** with the provider's error text, and the page **says so aloud and in text**. Never a silent dead Play button (constitution: never fail silently; PITFALLS P18) |
+| **spoke-elsewhere** | `packages/providers/src/os-synth/index.ts:321`: the backend is not in `LINUX_WAV_BACKENDS` (`:146`), so `#speakDirect()` (`:407`) hands the text to speech-dispatcher, **the daemon speaks it, and nothing is yielded** | a **named state**, below |
+
+**The `spoke-elsewhere` state is a capability read, not a guess.** The provider already knows which
+rung it is on — `get linuxBackend()` (`os-synth/index.ts:226`) — so `POST /speak` returns
+`200 { played: 'elsewhere', backend: 'spd-say' }` before synthesizing, and the page:
+
+1. **says it aloud, through the same daemon that will speak everything else**, because that is the
+   only audio channel that works on this machine:
+   > *"This machine's speech service played that. The lab cannot replay, compare or scrub it.
+   > Install espeak-ng to use the lab: `sudo apt install espeak-ng`."*
+   The install hint is the one already written at `os-synth/index.ts:148`
+   (`LINUX_INSTALL_HINT`, used at `:160`, `:267`) — not a second copy of it.
+2. **disables, with the reason attached and never hides**, the four affordances that depend on
+   owning the bytes: Compare (A/B), replay, per-stage play, and the cold/warm timing readout. A
+   disabled control with a stated reason is 003 §5's rule; a control that silently does nothing is
+   PITFALLS P18.
+3. **keeps everything that does not depend on playback**: the written-vs-spoken pane, the word
+   diff, the stage ladder, the export. Tuning *what the words are* still works on this rung. Only
+   tuning *how they sound* does not.
+
+**Stated plainly, because R016 requires it and because the alternative is discovering it in use:
+the M11 gate — "change a control, hear the difference in under two seconds" — is NOT satisfiable
+on the stock-Ubuntu `spd-say` rung.** R013 says a feature that degrades on one OS is not done. The
+honest remedy is the install hint, and the honest statement is that the lab's *audio* half has a
+platform prerequisite that the plugin's audio half does not.
+
+**Verify by effect.** Force `linuxBackend` to `spd-say` and assert `POST /speak` returns the
+`spoke-elsewhere` envelope, that the page renders the four controls disabled, and that the
+announcement was **spoken**, asserted on the daemon call and not on a log line. Run the same probe
+with `espeak-ng` present and assert the controls are **enabled** — without that half, the test
+cannot fail for the right reason.
 
 ---
 
@@ -118,7 +169,9 @@ click per trial is worse than the bias it removes. But the bias is real and chea
 
 Design:
 
-1. `A` and `B` hold two full control sets. Pressing **Compare** plays A, a 300 ms earcon, then B.
+1. `A` and `B` hold two full control sets. Pressing **Compare** plays A, the `control.compare`
+   separator (300 ms — `005` §11.1b, the one deliberate exception to the control band's 150 ms,
+   because a separator has to read as a gap), then B.
 2. During playback the page shows only "first" and "second" — never which set.
 3. On stop, the page speaks and shows *"first was your current set; second was path depth, last two folders"* — the **single differing control** is named, not the whole set.
 4. **Keep first / keep second** — one key each (`1` / `2`). The chosen set becomes current.
@@ -132,10 +185,11 @@ Design:
 ladder is one keystroke (`E`, "explain") away and is never on screen unless asked for.**
 
 **Correct the count first.** There are **15** transforms in `normalize()`
-(`packages/core/src/normalizer/index.ts:81-94`), not 12. Three different counts exist in the repo —
-`docs/architecture.md:96` says 11, `000-open-questions.md` Q23 says 12, and the in-file banner
-comments are misnumbered (`index.ts:438` labels the number stages "stage 10"; `index.ts:579` labels
-`collapseWhitespace` "stage 11" while sitting below `tidyPunctuation`). **Fix these before the lab
+(`packages/core/src/normalizer/index.ts:96-109`), not 12. Three different counts exist in the repo —
+`000-open-questions.md` Q23 says 12, and the in-file banner
+comments are misnumbered (`index.ts:477` labels the number stages "stage 10"; `index.ts:618` labels
+`collapseWhitespace` "stage 11" while sitting below `tidyPunctuation` at `:607`). `docs/architecture.md:95`
+now correctly says 15 — that half of the disagreement is already closed. **Fix these before the lab
 renders a stage ladder**, or the UI will disagree with the source it is displaying.
 
 The stage view, when opened, is a vertical ladder of 15 rows. Each row shows only the text that
@@ -179,7 +233,7 @@ and write is wrapped and the page renders correctly from defaults when it does.
 
 ## 6. The control surface
 
-45 controls, six panels (omissions 7 · structure 7 · names and paths 9 · numbers 4 · voice and pacing 9 · interruptions and announcements 9). Each panel opens with a **Common** tier of two to four controls; the rest
+46 controls, six panels (omissions 7 · structure 7 · names and paths 9 · numbers 4 · voice and pacing 9 · interruptions and announcements 10 — row 46 is new; see B-05). Each panel opens with a **Common** tier of two to four controls; the rest
 are behind **More** (`M`) on that panel. Nothing is displayed as a grid; one column, one control per
 row, full width (section 8).
 
@@ -196,29 +250,38 @@ get a lead-in (H1) and URLs get a destination (H2), while **emoji vanish with no
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `omit.codeBlocks` | select | `announce` · `drop` | `announce` | Common | stage 1 `stripFencedCode` | `core/src/normalizer/index.ts:77,107` | EI |
-| 2 | `omit.codeBlockPhrase` | text (template: `{lang}` `{lines}`) | any string ≤ 120 chars | `" . Here, a code block is omitted. "` | Common | stage 1 | `index.ts:73` | EI |
-| 3 | `omit.codeBlockDetail` | multi-toggle | `language` · `lineCount` | neither | More | stage 1 (fills the template) | `index.ts:107-129` (new capture) | EI |
-| 4 | `omit.inlineCode` | select | `strip` · `verbatim` · `announce` | `strip` | More | stage 2 `stripInlineCode` | `index.ts:133` | EI |
-| 5 | `omit.urls` | select | `host-phrase` · `host-and-path` · `label-only` · `drop-silent` | `host-phrase` | Common | stage 4 `stripUrls` | `index.ts:182` | EI |
-| 6 | `omit.urlPhrase` | text (template: `{host}` `{path}`) | any string ≤ 120 chars | `"a link to {host}"` | More | stage 4 | `index.ts:172-177` | EI |
-| 7 | `omit.emoji` | select | `silent` · `announce-count` · `name` | `silent` | Common | stage 11 `stripEmoji` | `index.ts:428-436` | EI |
+| 1 | `omit.codeBlocks` | select | `announce` · `drop` | `announce` | Common | stage 1 `stripFencedCode` | `core/src/normalizer/index.ts:96,122` | EI |
+| 2 | `omit.codeBlockPhrase` | text (template: `{lang}` `{lines}`) | any string ≤ 120 chars | `" . Here, a code block is omitted. "` | Common | stage 1 | `index.ts:88` | EI |
+| 3 | `omit.codeBlockDetail` | multi-toggle | `language` · `lineCount` | neither | More | stage 1 (fills the template) | `index.ts:122-144` (new capture) | EI |
+| 4 | `omit.inlineCode` | select | `strip` · `verbatim` · `announce` | `strip` | More | stage 2 `stripInlineCode` | `index.ts:148` | EI |
+| 5 | `omit.urls` | select | `host-phrase` · `host-and-path` · `label-only` · `drop-silent` | `host-phrase` | Common | stage 4 `stripUrls` | `index.ts:197` | EI |
+| 6 | `omit.urlPhrase` | text (template: `{host}` `{path}`) | any string ≤ 120 chars | `"a link to {host}"` | More | stage 4 | `index.ts:187-192` | EI |
+| 7 | `omit.emoji` | select | `silent` · `announce-count` · `name` | `silent` | Common | stage 11 `stripEmoji` | `index.ts:467-475` | EI |
 
 ### Panel B — How structure is spoken
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 8 | `struct.headingCue` | select | `none` · `level-word` ("section", "subsection") · `prefix-word` · `pause-only` | `none` — all six levels collapse | Common | stage 5 `headingsToPauses` | `index.ts:218-227` | EI |
-| 9 | `struct.headingPauseMs` | slider | 0–1500 ms, step 50 — **milliseconds, never "comma vs full stop"** (6a) | 0; a heading becomes a plain sentence and the pause is whatever the engine gives a full stop | More | stage 5 → pause token | `index.ts:218` | **EP** |
-| 10 | `struct.orderedListNumbers` | select | `drop` · `number` ("one.") · `ordinal` ("first,") | `drop` | Common | stage 6 `listItemsToSentences` | `index.ts:229-243` | EI |
-| 11 | `struct.bulletMarker` | select | `drop` · `say-item` | `drop` | More | stage 6 | `index.ts:237` | EI |
-| 12 | `struct.tableLeadIn` | text | any string ≤ 60 chars | `"Table."` | More | stage 7 `tablesToRows` | `index.ts:272` | EI |
-| 13 | `struct.tableHeaderRepeat` | select | `every-cell` · `row-start` · `first-row-only` · `never` | `every-cell` | Common | stage 7 | `index.ts:282` | EI |
-| 14 | `struct.tableFirstCellHeader` | toggle | on · off | off — first cell is spoken bare | More | stage 7 | `index.ts:276,284` | EI |
+| 8 | `struct.headingCue` | select | `none` · `level-word` ("section", "subsection") · `prefix-word` · `pause-only` | `none` — all six levels collapse | Common | stage 5 `headingsToPauses` | `index.ts:233-242` | EI |
+| 9 | `struct.headingPauseMs` | slider | 0–1500 ms, step 50 — **milliseconds, never "comma vs full stop"** (6a) | 0; a heading becomes a plain sentence and the pause is whatever the engine gives a full stop | More | stage 5 → pause token | `index.ts:233` (the pause point is `endWithStop` at `:240`) | **EP** |
+| 10 | `struct.orderedLists` | select | `numeral` ("1, alpha" → heard as "one, alpha") · `word` ("first, alpha") · `drop` (v1) | **`numeral`** — **not** `drop`; verified by effect, `normalize("1. alpha\n2. beta")` returns `"one, alpha. two, beta."` | Common | stage 6 `listItemsToSentences` | `index.ts:272-282`; the option at `normalizer/index.ts:20,50` | EI |
+| 11 | `struct.bulletMarker` | select | `drop` · `say-item` | `drop` | More | stage 6 | `index.ts:263` (marker detection) · `:278` (drop) | EI |
+| 12 | `struct.tableLeadIn` | text | any string ≤ 60 chars | `"Table."` | More | stage 7 `tablesToRows` | `index.ts:311` | EI |
+| 13 | `struct.tableHeaderRepeat` | select | `every-cell` · `row-start` · `first-row-only` · `never` | `every-cell` | Common | stage 7 | `index.ts:321` | EI |
+| 14 | `struct.tableFirstCellHeader` | toggle | on · off | off — first cell is spoken bare | More | stage 7 | `index.ts:315,323` | EI |
 
-Row 10 is the one item in this document I would call a comprehension bug rather than a taste
-question: `1. alpha / 2. beta` becomes `"alpha. beta."`, so a numbered procedure loses its numbers.
-The option space belongs here regardless; the default is still the listener's.
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-07.** Row 10 was written as *"the one
+> item in this document I would call a comprehension bug"* on the premise that today's behaviour is
+> `drop`. **It is not, and was not when this was written.** Commit `5cab7eb` changed the default to
+> `'numeral'`; verified by effect, `normalize("1. alpha\n2. beta")` returns
+> `"one, alpha. two, beta."`. The legal values are `'numeral' | 'word' | 'drop'`
+> (`normalizer/index.ts:20`), not this document's `drop · number · ordinal`, and the option is
+> spelled **`orderedLists`**, plural. The row is corrected above; the comprehension bug is closed.
+
+The option space still belongs here — the default is still the listener's, and `drop` remains
+reachable for anyone who wants v1's behaviour back. What changed is that the *shipped* default is
+already the comprehensible one, so the lab is choosing between three good answers rather than
+rescuing a bad one.
 
 ### Panel C — How names, paths and identifiers are spoken
 
@@ -227,51 +290,68 @@ the default — are the listener's, and are deliberately left unset.**
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 15 | `path.style` | select | `spoken` · `terse` · `verbatim` | `spoken` | Common | stage 8 `speakFilePaths` | `index.ts:78,309` | EI |
-| 16 | `path.extensionStyle` | select | `word-last` · `word-first` · `raw-last` · `omit` | `word-last` | Common | stage 8 | `index.ts:88,349-358` | EI |
-| 17 | `path.namePhrase` | text (template `{name}`) | ≤ 60 chars | `"file named {name}"` | More | stage 8 | `index.ts:347-357` | EI |
-| 18 | `path.folderPhrase` | text (template `{folders}`) | ≤ 60 chars | `"in folder {folders}"` | More | stage 8 | `index.ts:347-357` | EI |
-| **19** | **`path.depthPolicy`** — **Q41's option space** | select | `full` · `last-n` · `first-n` · `filename-only` · `filename-then-location` · `elide-middle` ("packages, then two folders, then normalizer") | `full`, unlimited | Common | stage 8 | `index.ts:342` | EI |
-| 20 | `path.depthN` | slider | 1–8 | n/a — no limit exists | Common | stage 8 | `index.ts:342` | EI |
-| 21 | `path.extensionWords` | key/value editor | 32 rows today; add/remove/edit | fixed table; unknown suffixes fall to `"dot xyz"` (`index.ts:341`) | More | stage 8 | `index.ts:40-47` | EI |
-| **22** | **`ident.style`** — **Q39's option space** | select | `verbatim` · `underscore-pause` (`_flush_buffer` → "flush, buffer") · `split-words` ("flush buffer") · `split-and-announce` ("the function flush buffer") · `spell-leading-underscore` ("underscore flush buffer") | `verbatim` — `_flush_buffer()` is spoken raw | Common | stages 2 + 9 | `index.ts:133,386` | EI |
-| 23 | `ident.parens` | select | `keep` · `drop` · `say-call` ("a call to") | `keep` | More | stages 2 + 9 | `index.ts:386` | EI |
+| 15 | `path.style` | select | `spoken` · `terse` · `verbatim` | `spoken` | Common | stage 8 `speakFilePaths` | `index.ts:93,348` | EI |
+| 16 | `path.extensionStyle` | select | `word-last` · `word-first` · `raw-last` · `omit` | `word-last` | Common | stage 8 | `index.ts:103` (read at the call site) `,388-397` | EI |
+| 17 | `path.namePhrase` | text (template `{name}`) | ≤ 60 chars | `"file named {name}"` | More | stage 8 | `index.ts:386-396` (the folder phrase is built at `:381`) | EI |
+| 18 | `path.folderPhrase` | text (template `{folders}`) | ≤ 60 chars | `"in folder {folders}"` | More | stage 8 | `index.ts:386-396` (the folder phrase is built at `:381`) | EI |
+| **19** | **`path.depthPolicy`** — **Q41's option space** | select | `full` · `last-n` · `first-n` · `filename-only` · `filename-then-location` · `elide-middle` ("packages, then two folders, then normalizer") | `full`, unlimited | Common | stage 8 | `index.ts:371-374` | EI |
+| 20 | `path.depthN` | slider | 1–8 | n/a — no limit exists | Common | stage 8 | `index.ts:371-374` | EI |
+| 21 | `path.extensionWords` | key/value editor | 32 rows today; add/remove/edit | fixed table; unknown suffixes fall to `"dot xyz"` (`index.ts:380`) | More | stage 8 | `index.ts:55-62` | EI |
+| **22** | **`ident.style`** — **Q39's option space** | select | `verbatim` · `underscore-pause` (`_flush_buffer` → "flush, buffer") · `split-words` ("flush buffer") · `split-and-announce` ("the function flush buffer") · `spell-leading-underscore` ("underscore flush buffer") | `verbatim` — `_flush_buffer()` is spoken raw | Common | stages 2 + 9 | `index.ts:148,425` | EI |
+| 23 | `ident.parens` | select | `keep` · `drop` · `say-call` ("a call to") | `keep` | More | stages 2 + 9 | `index.ts:425` | EI |
 
 Row 22 must not fight stage 9. `stripMarkdownMarkers` deliberately preserves dunders and leading
-underscores (`index.ts:386`, the M2 anti-goal gate); `ident.style` is the *only* place that decides
+underscores (`index.ts:425`, the M2 anti-goal gate); `ident.style` is the *only* place that decides
 what an underscore sounds like, and stage 9 keeps them intact so that it can.
 
 ### Panel D — Numbers and units
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 24 | `num.expandIntegers` | toggle | on · off | on | Common | stage 13 `expandNumbers` | `index.ts:79,92,479` | EI |
-| 25 | `num.expandUnits` | toggle | on · off | on | Common | stage 12 `expandUnits` | `index.ts:92,522` | EI |
-| 26 | `num.unitWords` | key/value editor | 11 rows today | fixed table | More | stage 12 | `index.ts:50-62` | EI |
-| 27 | `num.decimals` | select | `engine` · `words` | `engine` — `3.14` handed through | More | stage 13 | `index.ts:501-507` | **EP** |
+| 24 | `num.expandIntegers` | toggle | on · off | on | Common | stage 13 `expandNumbers` | `index.ts:94,107,518` | EI |
+| 25 | `num.expandUnits` | toggle | on · off | on | Common | stage 12 `expandUnits` | `index.ts:107,561` | EI |
+| 26 | `num.unitWords` | key/value editor | 11 rows today | fixed table | More | stage 12 | `index.ts:65-77` | EI |
+| 27 | `num.decimals` | select | `engine` · `words` | `engine` — `3.14` handed through | More | stage 13 | `index.ts:540-546` | **EP** |
 
 Rows 24 and 25 are **the fix for H16**: today one flag (`expandNumbers`) gates both behaviours
-(`index.ts:92`), so a listener who wants "fifty two milliseconds" but numeral-shaped counts cannot
+(`index.ts:107`), so a listener who wants "fifty two milliseconds" but numeral-shaped counts cannot
 have it. The lab splits them, and the split must land in the schema **before M12 freezes it**.
 
 ### Panel E — Voice and pacing
 
-This panel exists because of H24, the single largest gap found in the audit: `SpeechService` calls
-`provider.generate(chunk.text)` with **no options at all**
-(`packages/plugin/src/speech-service.ts:121`), so `SynthesizeOptions.voice` and `.rate`
-(`packages/core/src/types/index.ts:26-31`) are unreachable from any path through the running
-plugin, even though `OsSynthProvider` implements both (`providers/src/os-synth/index.ts:143-165`).
-**M11 is where that wire gets pulled**, or the lab settles word choices while the loudest complaint
-stays unfixable.
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-07.** This panel's preamble asserted
+> **H24** — *"`SpeechService` calls `provider.generate(chunk.text)` with no options at all"*, called
+> *"the single largest gap found in the audit"* — as a current defect. **It was already fixed when
+> this document was written.** Commit `6b776d4` landed the wire; `speech-service.ts:257` reads
+> `this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())`, built by `#synthesizeOptions()` at `:232` from
+> `SpeechServiceDeps.voice` and `.rate` (`:57-58`). PITFALLS **P26** records the fix *and* the
+> reachability test that pins it. Two more claims in this panel were stale in the same way and are
+> corrected in place: row 29's *"Linux drops it entirely"* and row 33's *"never forwarded"*. Three
+> "Today" columns asserting defects that no longer exist is the P0 failure arriving through the
+> front door — a reader who follows the citation cannot tell a stale pointer from a fabricated one.
+
+This panel exists because voice and rate are **the two settings every user asks for first**, and
+until commit `6b776d4` no caller could reach them (H24, now closed — see the note above). The wire
+exists; **what does not exist is a way for the listener to choose the values**, and that is what
+M11 is for. `SynthesizeOptions.voice` and `.rate` (`packages/core/src/types/index.ts:26-31`) are
+implemented by `OsSynthProvider` on all three platforms (`providers/src/os-synth/index.ts:346-372`
+for darwin and win32; the Linux branch is `linuxCommand()`, `:175`) and are now forwarded by
+`SpeechService`. The remaining gap is the **UI**, not the wire.
+
+> **The durable fix for this whole class, applied from here on.** Cite a **symbol name plus the
+> line**, not a bare line number, and re-derive against `HEAD` rather than inheriting from a
+> research round. A `scripts/check-citations.mjs` that greps every `path:line` out of `docs/` and
+> asserts the line still contains the expected token is ~40 lines and **could actually fail** —
+> which is more than can be said for a convention.
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 28 | `voice.id` | select | populated at runtime from `provider.listVoices()` — never a hard-coded name | unset, unreachable | Common | `SynthesizeOptions.voice` | `speech-service.ts:121`; `os-synth/index.ts:143` | **EP** |
-| 29 | `voice.rate` | slider | 0.5–2.0, step 0.05 | unset, unreachable; Linux drops it entirely | Common | `SynthesizeOptions.rate` | `os-synth/index.ts:144,150,161-166` | **EP** |
+| 28 | `voice.id` | select | populated at runtime from `provider.listVoices()` — never a hard-coded name | **reachable, unset** — the wire landed in `6b776d4`; nothing chooses a value yet | Common | `SynthesizeOptions.voice` | `speech-service.ts:257`; `os-synth/index.ts:351` (darwin `-v`), `:365` (win32 `SelectVoice`), `:175` `linuxCommand` (linux) | **EP** |
+| 29 | `voice.rate` | slider | 0.5–2.0, step 0.05 | **reachable, unset, and honoured on all three** — Linux no longer drops it (`5cab7eb`/`6b776d4`) | Common | `SynthesizeOptions.rate` | `os-synth/index.ts:366` (win32 `$s.Rate`); darwin `-r` and the Linux `-r`/`-s` are in `#command()` `:346-372` and `linuxCommand` `:175` | **EP** |
 | 30 | `voice.pitch` | slider | −50…+50, `engine` default | no field exists | More | needs `[[pbas]]` / SSML `<prosody>` / `-p` | `q-round1-platform.md` Q33 | **EP** |
 | 31 | `voice.volume` | slider | 0–100 | no field exists | More | `[[volm]]` / `Volume` / `-a` | `q-round1-platform.md` Q33 | **EP** |
 | 32 | `pace.chunkMaxUnits` | slider | 40–600, step 20 | 200 | Common | `ChunkerOptions.maxUnits` | `core/src/chunker/index.ts:53` | **PP** |
-| 33 | `pace.isolateFirstSentence` | toggle | on · off | `true`, and **never forwarded** — `SpeechService` passes only `maxUnits` | More | `ChunkerOptions.isolateFirstSentence` | `chunker/index.ts:66`; `speech-service.ts:112-114` | **PP** |
+| 33 | `pace.isolateFirstSentence` | toggle | on · off | `true`, **and forwarded** — `speech-service.ts:245-246` passes it alongside `maxUnits` (`6b776d4`) | More | `ChunkerOptions.isolateFirstSentence` | `chunker/index.ts:66`; `speech-service.ts:245-246` | **PP** |
 | 34 | `pace.simulateChunkGapMs` | slider | 0–1500; presets `0` (M9 target), `970` (v1 macOS, measured) | n/a — lab-only | Common | lab playback scheduler only | `sinks/subprocess-sink.ts:8-10` | **PP** |
 | 35 | `pace.sentencePauseMs` | slider | 0–800 ms, step 25 | none — pauses come only from emitted punctuation | More | pause token → rendering stage (6a) | H39 | **EP** |
 | 44 | `pace.pauseBackend` | select | `punctuation` (today, all platforms) · `ssml` (`<break time>`; macOS `AVSpeechUtterance`, Windows `SpeakSsml`, Linux `espeak-ng -m`) · `in-band` (macOS `[[slnc]]`, MEASURED) | `punctuation` — the only one implemented | Common | how rows 9 and 35 are encoded (6a) | `q-round1-platform.md` Q33 / "Unused capabilities" 3 | **EP** |
@@ -289,19 +369,59 @@ costs ~450 ms per enumeration on macOS.
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 36 | `queue.maxQueued` | slider | 1–20 | **8** shipped, while `DEFAULT_MAX_QUEUED = 20` — the two disagree | Common | `SpeechService` queue | `plugin/src/main.ts:41`; `speech-service.ts:28` | EI |
-| 37 | `queue.overflowPolicy` | select | `drop-oldest` · `drop-newest` | `drop-oldest` (P22's third fault) | More | queue | `speech-service.ts:28` | EI |
-| 38 | `announce.mode` | select | `replace` · `queue` | `replace` — status and toggle speech cuts off a reply in progress | Common | `speak(text, mode)` (P21) | `main.ts:114,127,141` | EI |
-| 39 | `announce.sessionLabel` | select | `path-tail-3-plus-hash` · `path-tail-1` · `call-sign` (word pair) · `title` | last 3 path segments + 8 hex chars | Common | huddle session label | `plugin/src/huddle/index.ts:55-59` | EI |
-| 40 | `announce.sessionLabelHashChars` | slider | 0–8 | 8 | Common | same | `huddle/index.ts:55-59` | EI |
+| 36 | `queue.maxQueued` | slider | 1–20, **default 8** | **8** shipped at `main.ts:96`, while `DEFAULT_MAX_QUEUED = 20` at `speech-service.ts:74` — see the note below; **the one value is 8** | Common | `SpeechService` queue | `plugin/src/main.ts:96`; `speech-service.ts:74` | EI |
+| 37 | `queue.overflowPolicy` | select | `drop-oldest` · `drop-newest` | `drop-oldest` (P22's third fault) | More | queue | `speech-service.ts:74,155-177` | EI |
+| 38 | `announce.mode` | select | `replace` · `queue` | `replace` — status and toggle speech cuts off a reply in progress | Common | `speak(text, mode)` (P21) | `main.ts:121,134,148` | EI |
+| 39 | `announce.sessionLabel` | select | `call-sign` · `call-sign-plus-name` · `registry-name` · `branch` · `displayName` — **no hex value exists** | last 3 path segments + 8 hex chars, which is the defect M15 exists to remove | Common | huddle session label | `plugin/src/huddle/index.ts:55-60`; the chain is `003` §6, the call-sign is `005` §11.2 | EI |
+| 40 | `announce.sessionLabelHashChars` | slider | 0–8, **default 0** | 8 | More | same | `huddle/index.ts:55-60` | EI |
 | 41 | `announce.switchPhrase` | text (template `{label}`) | ≤ 80 chars | `"Now reading from {label}."` | More | huddle switch | `huddle/index.ts:118-119` | EI |
-| 42 | `announce.statusTemplate` | text | ≤ 160 chars | fixed order and phrasing | More | status command | `main.ts:119-127` | EI |
+| 42 | `announce.statusTemplate` | text | ≤ 160 chars | fixed order and phrasing | More | status command | `main.ts:124-136` | EI |
 | 43 | `input.clipboardCap` | slider | 2,000–50,000 chars | 20,000 | More | clipboard read | `plugin/src/clipboard.ts:63` | EI |
+| **46** | **`input.huddleReplyCap`** — **new, forced by B-05** | slider | 2,000–50,000 chars | **no cap exists at all**; `huddle/index.ts:179` speaks the whole reply, and the eight-reply queue cap cannot drop a single 40,000-character item | Common | huddle speak path | `plugin/src/huddle/index.ts:179`; the mechanism is `002` "The reply that does not fit" | EI |
 | 45 | `interrupt.granularity` | select | `immediate` · `at-word` (finish the current word, then stop) · `pause-keeps-position` | `immediate` — `cancel()` is `SIGKILL` on the child | Common | barge-in / skip / stop | `providers/src/os-synth/index.ts` cancel path; `q-round1-platform.md` "Unused capabilities" 2 | **EP** |
 
-Row 40 is not cosmetic. `"orca-plugin-tts, session 111693de"` is spoken aloud on every session
-switch, and eight hex characters read to a dyslexic listener is close to the worst case the project
-has. Q28 asks the same question from the other end.
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-04, 007 C4 and 007 C7.** Two rows in
+> this panel shipped a **correctness failure as a tunable**, and one shipped an option space that
+> could express neither of the two designs that own the question.
+>
+> **Row 40 defaulted to 8 hex characters.** `003` §6 says *"never, under any circumstance, hex"* and
+> `005` §11.2 calls the eight-character slice *"a non-answer to who is speaking"* and the reason
+> M15 exists. Both treat it as **correctness**, not taste. A lab that ships a slider defaulting to
+> the value two designs forbid invites the listener to select it. **The row is kept — 0 is a useful
+> setting and removing the control would remove the only way to say "none" — but its default is now
+> `0`, it moves to the More tier, and the lab speaks a one-time warning if it is ever set above 0.**
+>
+> **Row 39's option space is replaced.** It offered `path-tail-3-plus-hash` (the forbidden value)
+> and `call-sign (word pair)` — which encodes `003`'s two-word call-sign, a shape that no longer
+> exists: X-04 resolved the call-sign in favour of `005`'s **one word**, and `003` §6 is now the
+> display-name chain that consumes it. It also had **no `registry-name` option at all**, which was
+> `003`'s rank-1 recommendation and is `005`'s long form — so the listener could not hear either
+> design's recommended default in the instrument built to choose defaults. The new space is the
+> resolved chain: `call-sign · call-sign-plus-name · registry-name · branch · displayName`.
+>
+> **The listener still chooses. They simply cannot choose hex.** Which of the five is the default is
+> taste and is left unset here, exactly as Q40 and Q42 are.
+
+`"orca-plugin-tts, session 111693de"` is spoken aloud on every session switch, and eight hex
+characters read to a dyslexic listener is close to the worst case the project has. Q28 asks the same
+question from the other end, and `005` answers it.
+
+**The queue cap, settled (007 C3).** Three values existed: `main.ts:96` ships `maxQueued: 8`,
+`speech-service.ts:74` declares `DEFAULT_MAX_QUEUED = 20`, and `003` §8.7 reasoned against 20.
+**The one value is 8.** It is what the listener has actually been living with, and twenty queued
+replies is roughly three minutes of unrequested speech — the P22 experience with a cap on it rather
+than a cure. `DEFAULT_MAX_QUEUED` must be changed to **8** so there is one constant and not two,
+and `003` §8.7 now cites row 36 rather than restating a number. The slider's range stays 1–20
+because a listener who wants a deeper queue may have one; the *default* is the thing that was
+ambiguous.
+
+**Row 46 exists because the queue cap cannot help.** `queue.maxQueued` counts **replies**, so a
+single reply is never dropped by overflow however long it is. A 40,000-character reply is roughly
+200 chunks, ~33 minutes of audio, and on v1 macOS another ~3 minutes of inter-chunk silence. buzz
+caps at 8,096 characters and announces the truncation **aloud**; `003` §9 adoption 3 cites that and
+adopts only the announcement. Row 46 is the cap. **Its existence is correctness and is settled in
+`002`; only its number is taste and lives here**, next to `input.clipboardCap`, which is the
+identical control for the other input.
 
 ### What is deliberately absent
 
@@ -313,9 +433,15 @@ the ambiguity window (H34). A lab that exposes everything is not a lab, it is a 
 Play button. Each of these is shown in the stage view as "fixed by design" so the listener can see
 that the decision was made, not overlooked.
 
-**Bug, not a control:** H25 — rate is honoured on macOS and Windows and **silently dropped on
-Linux** (`os-synth/index.ts:161-166`; `espeak-ng` takes `-s`). That is an R1 parity defect and gets
-fixed, not exposed.
+**Bug, not a control — H25, and it is already fixed.**
+
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-07.** This paragraph listed H25 —
+> *"rate … silently dropped on Linux"* — as a live R1 parity defect to be fixed during M11.
+> **It was closed before this document was written.** `linuxCommand()`
+> (`packages/providers/src/os-synth/index.ts:175`, called at `:374`) pushes `-r` on the `spd-say`
+> rung and `-s <wpm>` on the espeak rungs. `005` §2 said so in the same commit, so the two
+> designs disagreed with each other about the same line of code. Nothing here needs fixing;
+> row 29's "Today" column is corrected accordingly.
 
 ---
 
@@ -341,7 +467,7 @@ The team lead's argument is correct and is the strongest single point raised aga
 The HANDOFF "what listening taught us" table is a list of *prosody* complaints — "omissions abrupt",
 "table rows too quick", "headings become pauses". Today the normalizer fakes every one of those by
 emitting punctuation and hoping the engine honours it: the code-block lead-in is given *its own
-sentence* purely so the engine pauses either side of it (`core/src/normalizer/index.ts:71-73`, and
+sentence* purely so the engine pauses either side of it (`core/src/normalizer/index.ts:86-88`, and
 the comment says so). That is a pause expressed as a full stop — an on/off switch with no dial.
 `<break time="500ms"/>` is the dial, MEASURED parsing correctly on macOS, and available on Windows
 (`SpeakSsml`, also the only route to pitch there) and Linux (`espeak-ng -m --ssml-break`).
@@ -349,13 +475,13 @@ the comment says so). That is a pause expressed as a full stop — an on/off swi
 **What it costs, stated plainly, because it is not just a new control:**
 
 1. **`normalize()` stops being plain text.** It is documented as pure, synchronous and
-   dependency-free (`index.ts:1-13`), and its output is fed to `Chunker` (`speech-service.ts:113-115`),
+   dependency-free (`index.ts:1-13`), and its output is fed to `Chunker` (`speech-service.ts:243` → `:245-247`),
    which splits on `.` `!` `?` (`chunker/index.ts:37`). Emitting `<break/>` mid-sentence means the
    chunker must not split inside a tag and must not count markup toward `maxUnits`. That is a real
    change to two modules and their 94 tests, not an addition.
 2. **Escaping becomes mandatory, in both directions.** Any `<` or `&` in an agent reply becomes
    malformed SSML. Windows already interpolates text into a PowerShell string escaped only for `'`
-   (`providers/src/os-synth/index.ts:152-158`), and macOS `say` does not take SSML at all — it takes
+   (`providers/src/os-synth/index.ts:360-370`; `$s.Speak('…')` at `:368`), and macOS `say` does not take SSML at all — it takes
    the older in-band `[[...]]` commands, which means user text containing `[[` is a live injection
    today (MEASURED). See Q45.
 3. **It fragments the provider contract.** `say` needs `[[slnc 500]]`, `AVSpeechUtterance` needs
@@ -385,7 +511,7 @@ For a dyslexic listener who is also watching the screen, a cursor moving word by
 spoken text is plausibly the most useful thing a display can do — nine words in, nine
 `willSpeakRangeOfSpeechString` callbacks out, each with the exact `NSRange`, MEASURED headless.
 It is also unreachable from what we ship: `OsSynthProvider` spawns a CLI and reads a finished WAV
-(`os-synth/index.ts:120-132`). There is no callback to subscribe to. Reaching it means the macOS
+(`os-synth/index.ts:310-345`; the `readFile` is at `:336`). There is no callback to subscribe to. Reaching it means the macOS
 Swift sidecar, `SetOutputToAudioStream` + `SpeakProgress` on Windows, and the SSIP socket on Linux —
 three new integrations, which is a milestone, not a task.
 
@@ -408,7 +534,7 @@ it. All three platforms have it (`pauseSpeaking(at: .word)` / `Pause()`/`Resume(
 actually means.
 
 In the browser this is free: `AudioContext.suspend()` / `resume()`. So the lab gets pause as a
-**transport key** (`,` pause/resume, alongside `.` stop) *and* as row 45,
+**transport key** (`p` pause/resume, alongside `s` stop — §4a) *and* as row 45,
 `interrupt.granularity`, which is the setting the plugin will need once a provider can honour it.
 The lab is the right place to discover whether "finish the word" is audibly better than "cut now",
 because that is a taste question and this document does not answer taste questions.
@@ -430,10 +556,16 @@ because that is a taste question and this document does not answer taste questio
   },
   "normalize":  { "codeBlocks": "announce", "pathStyle": "spoken", "extensionStyle": "word-last",
                   "expandIntegers": true, "expandUnits": true,
+                  "orderedLists": "numeral",       // X-07: the FIFTH NormalizeOptions field.
+                                                   // It exists in the type and was absent here.
                   "pathDepthPolicy": "last-n", "pathDepthN": 2, "identStyle": "split-words" },
   "chunk":      { "maxUnits": 200, "isolateFirstSentence": true },
-  "synthesize": { "voice": "Samantha", "rate": 1.0 },
-  "runtime":    { "maxQueued": 8, "announceMode": "replace", "sessionLabel": "path-tail-1" },
+  "synthesize": { "voiceIndex": 3,                 // an INDEX into the host's runtime voice list,
+                  "voiceNameChecksum": "Samantha", // never a name (P28, 005 section 9). The name
+                  "rate": 1.0 },                   // travels only as a checksum.
+  "runtime":    { "maxQueued": 8, "announceMode": "replace", "sessionLabel": "call-sign",
+                  "sessionLabelHashChars": 0,      // C7: hex is not an option; 0 is the default
+                  "huddleReplyCap": 8000 },        // B-05: the cap's EXISTENCE is correctness
   "phrases":    { "codeBlock": " . Here, a code block is omitted. ", "url": "a link to {host}",
                   "pathName": "file named {name}", "pathFolder": "in folder {folders}",
                   "tableLeadIn": "Table.", "switch": "Now reading from {label}." },
@@ -443,8 +575,23 @@ because that is a taste question and this document does not answer taste questio
 }
 ```
 
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-07 and 006 §15b X1.** Two fields were
+> wrong in a schema this document calls *"a contract"*.
+>
+> **`orderedLists` was missing entirely.** `NormalizeOptions` has **five** fields
+> (`core/src/normalizer/index.ts:22-52`); this block carried four. A field that exists in the type
+> and not in the schema is exactly PITFALLS **P26**'s shape — *"a field that cannot be walked is not
+> a setting, it is a comment"* — and this schema freezes at `schemaVersion: 1` before M12.
+>
+> **`"voice": "Samantha"` persisted a name.** `005` §9 and P28 both say the opposite: the three
+> platforms share **no** voice name, `say -v NotAVoiceAtAll` exits 0 and emits the default voice's
+> exact bytes, and Windows `SelectVoice` binds by case-sensitive substring. So a settings file
+> naming a voice binds silently to something else on any other machine. It is now an **index**, with
+> the name kept only as a **checksum** — index authoritative, name verified, mismatch discards the
+> map. `provenance.voiceListHash` was already in this document doing half the job; this completes it.
+
 **Four sections, because there are four consumers**, and this is the shape T124 must iterate:
-`normalize` → `NormalizeOptions` (`core/src/normalizer/index.ts:20-37`), `chunk` →
+`normalize` → `NormalizeOptions` (`core/src/normalizer/index.ts:22-52`), `chunk` →
 `ChunkerOptions` (`core/src/chunker/index.ts:27-34`), `synthesize` → `SynthesizeOptions`
 (`core/src/types/index.ts:26-31`), `runtime` + `phrases` → the plugin's own literals. T124 as
 written iterates `NormalizeOptions` alone; that assertion would be green today while rate, voice and
@@ -491,18 +638,40 @@ except the one in focus.
 
 **2. Keyboard is the primary interface, not an accommodation.**
 
-| Key | Does |
-|---|---|
-| `↑` `↓` | previous / next control (skips collapsed panels) |
-| `←` `→` | change the focused control's value by one step |
-| `Space` | Play the fixture with the current settings |
-| `.` | Stop · `,` pause / resume — distinct from stop, keeps the position (6a) |
-| `Tab` | next panel · `M` reveal that panel's More tier |
-| `C` | Compare (A/B, section 3) · `1` `2` keep first / keep second |
-| `E` | Explain — open the 15-stage ladder for the current fixture |
-| `S` | Snapshot the current set · `R` restore a snapshot |
-| `?` | speak the focused control's one-line description |
-| `Esc` | close whatever opened; focus never moves as a side effect |
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-09 and 007 C1.** This table inverted
+> the control pane's on four keys: `Space` meant *Play* here and *pause* there; *stop* was `.` here
+> and `s` there; `R` meant *restore a snapshot* here and *replay audio* there; `M` meant *reveal
+> more controls* here and *mute* there. For a listener who is not looking at the screen and is
+> building muscle memory across both surfaces in the same hour, a control that **changes meaning**
+> is worse than one that moves — and `003` §9 adoption 1 spends a CSS rule and an E2E test to
+> prevent the lesser hazard.
+>
+> **The one table now lives in `docs/.discussion/003-panel-and-control-channel.md` §4a, and this
+> document cites it rather than restating it.** The lab ships first, so the lab's habit is the one
+> that forms — that argued for keeping the lab's bindings wholesale, and it is not what happened,
+> for one reason: `s` for stop is the fastest press-to-silence route in the system and the one
+> binding a listener must be able to hit without looking. So `s` won and the collisions moved.
+> Where the lab's choice was not load-bearing — `Space`, `E`, `C`, `?`, the arrows — it was kept.
+
+The bindings, reproduced here for reading convenience only — **§4a is the source, and it ships as
+one map in `@orca-tts/core` consumed by both surfaces**:
+
+| Key | Does | Changed? |
+|---|---|---|
+| `↑` `↓` | previous / next control (skips collapsed panels) | — |
+| `←` `→` | change the focused control's value by one step | — |
+| `Space` | **play / pause toggle** — starts the fixture, pauses it, resumes it | now a toggle, matching the TUI |
+| `s` | **Stop** · `.` retained as an alias | **`s` is now primary**; `.` demoted to alias |
+| `p` | pause / resume alias | **new**; `,` is retired |
+| `R` | **replay** the last thing played | **was "restore a snapshot"** |
+| `m` | **mute** the speak-on-change confirmations | **was `V`** |
+| `K` / `L` | snapshot ("keep") / restore ("load") | **were `S` / `R`** |
+| `+` / `-` | reveal / collapse that panel's More tier | **was `M`** |
+| `Tab` | next panel | — |
+| `C` | Compare (A/B, section 3) · `1` `2` keep first / keep second | — |
+| `E` | Explain — open the 15-stage ladder for the current fixture | — |
+| `?` | speak the focused control's one-line description | — |
+| `Esc` | close whatever opened; focus never moves as a side effect | — |
 
 Focus never moves on its own. No modal steals it, no re-render resets it, and changing a value does
 not re-order anything on screen.
@@ -515,7 +684,7 @@ sentence that announces `voice.rate`. Three guards:
 
 - Debounce 250 ms, `replace` mode — dragging a slider must not queue thirty confirmations (the P21 lesson).
 - The confirmation is spoken through the **same** normalize → chunk → synthesize path as the fixture, so it is never a second speech implementation that can drift.
-- Toggle-able (`V`), and automatically muted while a fixture is playing.
+- Toggle-able (`m`, per §4a — **was `V`**), and automatically muted while a fixture is playing.
 
 **4. Minimal reading, and no reading required to operate.** Every control's *value* is a word, never
 a number alone: `path.depthN` reads "last two folders", not "2". Sliders announce their value on
@@ -523,9 +692,23 @@ change. The written-vs-spoken panes use a large serif face, generous line height
 colouring; the only colour is the diff highlight, and it is never the sole carrier of meaning — a
 changed span is also underlined and reachable by keyboard.
 
-**5. Audible state, always.** Play, stop, skip and error each have a distinct 150 ms earcon so
+**5. Audible state, always.** Play, stop, skip and error each have a distinct earcon so
 "is it doing anything" never needs to be read. A `503` from `/speak` is spoken aloud, not shown as a
-red border. This is the same requirement as the plugin's: never fail silently.
+red border, and so is the `spoke-elsewhere` state (section 2). This is the same requirement as the
+plugin's: never fail silently.
+
+> **Amended 2026-08-21 (round 3 reconciliation), forced by X-03.** This rule minted *"four distinct
+> 150 ms earcons"* and section 3 minted a *"300 ms"* compare separator, while `005` §11.1
+> independently allocated **all 30** motifs of a six-note pentatonic space to agent identity and
+> `003` needed four more again. Nothing reserved a band, so every control earcon the lab plays is,
+> by construction, some live agent's identity — and a listener who has learned "rising G5-A5 is
+> Cedar" would hear that exact motif as the confirmation of a Stop.
+>
+> **The lab does not mint tones.** Every earcon it plays comes from the reserved **control band** of
+> the one earcon table — `docs/design/005-agent-identity.md` §11.1, implemented in
+> `@orca-tts/core`. The lab's four states map onto `control.play`, `control.stop`, `control.skip`
+> and `control.error`; the A/B separator is `control.compare`. Their durations come from that table,
+> not from this document.
 
 ### Wireframe
 
@@ -548,9 +731,9 @@ red border. This is the same requirement as the plugin's: never fail silently.
 │   ▸ How an identifier is said     ‹ verbatim: flush underscore buffer ›       EI    │
 │                                                                                     │
 │  ▸ WHAT GETS LEFT OUT (7)      ▸ STRUCTURE (7)      ▸ NUMBERS (4)                   │
-│  ▸ VOICE & PACING (9)          ▸ INTERRUPTIONS (9)                                  │
+│  ▸ VOICE & PACING (9)          ▸ INTERRUPTIONS (10)                                 │
 ├───────────────────────────────────────────────────────────────────────────────────┤
-│  ♪ playing · 1.2 s        [Save to plugin]   [Export a copy]   45 controls · 8 EP   │
+│  ♪ playing · 1.2 s        [Save to plugin]   [Export a copy]   46 controls · 8 EP   │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -626,7 +809,10 @@ into a conversation.
 |---|---|
 | Q40 | Which `ident.style` is the default (row 22 enumerates the space) |
 | Q42 | Which `path.depthPolicy` is the default, and at what depth (rows 19–20) |
-| Q34 | Whether a spoken speaker-announcement is still wanted once voices differ |
+| Q34 | Whether a spoken speaker-announcement is still wanted once voices differ. **The option space is `005` §13's A–F, and this lab carries an obligation from it: it must be able to play the same two-agent exchange under each of A–F back to back.** Two of the six are *not* options — `005` §13 makes every tier-≥1 or overflow identity named every turn, and makes a switch always audible in some form; those are correctness |
+| Q39 row 39 | Which session label is spoken — `call-sign · call-sign-plus-name · registry-name · branch · displayName`. **Not hex**, which is the one value removed rather than left to taste (007 C7) |
+| Q47 (`002`) | The **named vocabulary** of Option D's skip announcements — "a diagram", "a table of N rows", "a stack trace". `002` assigns the wording here and **this document has no controls for it**: Panel A covers code blocks, inline code, URLs and emoji, and none of Option D's classifier. `008` X-08 is unresolved; see `docs/design/009-reconciliation.md` |
+| Row 46 | The huddle reply cap's **number**. Its **existence** is correctness and is settled in `002` |
 | — | Every "Today" value in section 6 — those are the current behaviour, not a recommendation |
 
 ---
@@ -639,7 +825,7 @@ into a conversation.
 | Q49 | D | **Does `Chunker` become markup-aware, or does the pause token stay outside the text?** It splits on `.` `!` `?` and counts characters toward `maxUnits` (`core/src/chunker/index.ts:37,53`). SSML tags must not be split across chunks and must not count toward the budget. This is the concrete cost of section 6a's recommendation and the first thing M12a must decide. |
 | Q50 | E | **Is `pauseSpeaking(at: .word)` reachable without a sidecar on any platform?** Row 45 assumes not — it is tagged EP for that reason. Probe: whether `spd-say`'s SSIP `PAUSE` can be driven from the plugin worker on Linux, and whether Windows `Pause()`/`Resume()` survive the one-shot PowerShell spawn we use today (it almost certainly does not — the process exits). |
 | Q44 | D | Should `pace.simulateChunkGapMs` (row 34) exist at all, or does simulating a defect we intend to delete in M9 encourage tuning against it? |
-| Q45 | E | **Template injection.** Rows 2, 6, 17, 18, 12, 41, 42 are free text that reaches the synthesizer. On macOS, `[[` in user text is interpreted as an embedded speech command (measured, `q-round1-platform.md`); on Windows the text is interpolated into a PowerShell string escaped only for `'` (`os-synth/index.ts:152-158`). What is the escaping contract for phrase templates, and where is it enforced — the lab, the schema, or the provider? |
+| Q45 | E | **Template injection.** Rows 2, 6, 17, 18, 12, 41, 42 are free text that reaches the synthesizer. On macOS, `[[` in user text is interpreted as an embedded speech command (measured, `q-round1-platform.md`); on Windows the text is interpolated into a PowerShell string escaped only for `'` (`os-synth/index.ts:360-370`). What is the escaping contract for phrase templates, and where is it enforced — the lab, the schema, or the provider? |
 | Q46 | D | An `EP` value tuned on macOS lands in a settings file that may be opened on Linux, where `rate` is dropped and no voice name matches. Does the plugin ignore EP fields whose `provenance.platform` differs, warn once aloud, or attempt a mapping? |
 | Q47 | D | Since Q35 leaves no host settings UI, does **Save to plugin** write the file directly (fast, but the lab now mutates the plugin's state from outside), or does the plugin poll/watch it? This also decides whether the lab can be used *while* huddle mode is running. |
-| Q48 | E | The stage count disagrees in three places (`architecture.md:96` says 11, Q23 says 12, the source has 15 at `index.ts:81-94`, and the in-file banner comments are misnumbered). Fix the source comments and the docs before T112 renders a stage ladder. |
+| Q48 | E | The stage count disagrees in three places (Q23 says 12, the source has 15 at `index.ts:96-109`, and the in-file banner comments are misnumbered at `index.ts:477` and `:618`; `architecture.md:95` is already correct at 15). Fix the source comments and the docs before T112 renders a stage ladder. |
