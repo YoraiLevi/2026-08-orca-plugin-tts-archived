@@ -286,26 +286,41 @@ describe('006 C4 — the five-minute reap must not silently change which session
   })
 })
 
-describe('006 TT4/site 15 — a record with no uuid must not be re-spoken on every read', () => {
-  it('produces the same id for the same line, read twice', async () => {
-    const { root, worktree, file } = await scaffold()
-    const speech = new FakeSpeech()
-    const c = boot(root, new MemoryStore(), speech)
-    c.toggle()
-    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
-    await settle(10)
-    // No `uuid` key at all — the id used to be `${Date.now()}-${parts.length}`, i.e. a NEW id on
-    // every read, so dedup could never match and the paragraph came back every time the file was
-    // touched. This is P20's failure through a side door P20's fix does not close.
+describe('006 TT4/site 15 — a record with no uuid gets a STABLE id', () => {
+  it('decodes to the same id every time the same line is read', async () => {
+    const { decodeClaudeLine, decodeGenericLine } = await import('./decoders.js')
+    // No `uuid` key at all. The id was `${Date.now()}-${parts.length}` — a NEW id on every read, so
+    // the id set could never match it. Round 4's high-water mark now gates dedup, which covers the
+    // plain append case, so this asserts the defect WHERE IT LIVES rather than through a path that
+    // masks it: a test that went green because a different fix covered it would be exactly the
+    // "could not have failed" shape the test audit was written about (P33).
     const line = JSON.stringify({
       type: 'assistant', message: { content: [{ type: 'text', text: 'no uuid here' }] }
     })
-    await appendFile(file, line + '\n')
-    await settle()          // past the 250 ms debounce
-    // Touch the file again without adding anything new.
-    await appendFile(file, '\n')
-    await settle()
-    expect(speech.spoken.filter((t) => t === 'no uuid here').length,
-      'the same paragraph was read aloud again on a re-read').toBe(1)
+    const a = decodeClaudeLine(line)
+    await new Promise((r) => setTimeout(r, 5))
+    const b = decodeClaudeLine(line)
+    expect(a?.id, 'the same line produced two different ids, so dedup could never match').toBe(b?.id)
+    expect(String(a?.id), 'a time-based id is not derived from the record at all').not.toMatch(/^\d{13}/)
+
+    const generic = JSON.stringify({ role: 'assistant', content: 'codex said this' })
+    await new Promise((r) => setTimeout(r, 5))
+    expect(decodeGenericLine(generic)?.id).toBe(decodeGenericLine(generic)?.id)
+  })
+
+  it('CONTROL: a record that HAS a uuid still uses it', async () => {
+    const { decodeClaudeLine } = await import('./decoders.js')
+    const line = JSON.stringify({
+      type: 'assistant', uuid: 'real-uuid-1', message: { content: [{ type: 'text', text: 'x' }] }
+    })
+    expect(decodeClaudeLine(line)?.id).toBe('real-uuid-1')
+  })
+
+  it('CONTROL: two different texts do not collide onto one id', async () => {
+    const { decodeClaudeLine } = await import('./decoders.js')
+    const mk = (t: string): string => JSON.stringify({
+      type: 'assistant', message: { content: [{ type: 'text', text: t }] }
+    })
+    expect(decodeClaudeLine(mk('alpha'))?.id).not.toBe(decodeClaudeLine(mk('bravo'))?.id)
   })
 })
