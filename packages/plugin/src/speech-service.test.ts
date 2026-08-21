@@ -379,6 +379,10 @@ describe('006 rank 3 — provenance is re-resolved at speak time, not trusted fr
       sink: new FakeSink(),
       resolveLabel: (id) => (alive ? `orca-plugin-tts, session ${id}` : null)
     })
+    // The drain runs synchronously up to its first await, so an entry queued BEHIND something
+    // else is the only one whose provenance is resolved after the world has moved — which is C1's
+    // sequence exactly: the reply is waiting in the queue when the session exits.
+    s.speak('an earlier reply.', 'queue')
     s.speak('the reply the dead agent wrote', 'queue', 'orca-plugin-tts, session aaaa1111', 'aaaa1111')
     alive = false
     await settle()
@@ -395,10 +399,14 @@ describe('006 rank 3 — provenance is re-resolved at speak time, not trusted fr
     const s = new SpeechService({
       provider, sink: new FakeSink(), resolveLabel: () => current
     })
+    s.speak('an earlier reply.', 'queue')
     s.speak('a reply', 'queue', 'project one, session aaaa1111', 'aaaa1111')
     current = 'project two, session aaaa1111'
     await settle()
-    expect(provider.synthesized.join(' ')).toContain('From project two, session aaaa1111.')
+    // The prefix goes through the normalizer with the reply, so the digits are read as words —
+    // the same treatment the label already gets everywhere else. Assert on the part that carries
+    // the meaning: WHICH project the words came from.
+    expect(provider.synthesized.join(' ')).toContain('From project two, session')
   })
 
   /**
@@ -413,6 +421,7 @@ describe('006 rank 3 — provenance is re-resolved at speak time, not trusted fr
       provider, sink: new FakeSink(),
       resolveLabel: (id) => (alive ? `p, session ${id}` : null)
     })
+    s.speak('an earlier reply.', 'queue')
     s.speak('one', 'queue', 'p, session s1', 's1')
     s.speak('two', 'queue', 'p, session s1', 's1')
     await settle()
@@ -420,6 +429,7 @@ describe('006 rank 3 — provenance is re-resolved at speak time, not trusted fr
       .not.toMatch(/From p, session/)
 
     alive = false
+    s.speak('another earlier reply.', 'queue')
     s.speak('three', 'queue', 'p, session s1', 's1')
     s.speak('four', 'queue', 'p, session s1', 's1')
     await settle()
