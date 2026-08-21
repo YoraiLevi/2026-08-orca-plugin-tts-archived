@@ -48,7 +48,7 @@ The bar makes the counter measure convergence rather than enthusiasm.
 | 5 | Provider seam v2 + M9 · settings · **measure what was never measured** | 3 | **3 new designs, 5 measurement contradictions** | no | the ~970 ms was real; the mechanism cited for it everywhere was wrong |
 | 6 | Fold the measurements · audit tests that cannot fail · design M16 + M17 | 3 | **9 unfailable tests, 3 live mutants, 2 designs** | no | M17 declared not buildable to R1 parity, with evidence |
 | 7 | Adversarial review of everything rounds 4–6 produced | 1 | **31** | **no** | see `014-review-round7.md` |
-| 8 | Adversarial review of `PLAN.md`, `TASKS.md`, the constitution's budget table, `006` and `packages/core/src/**` — run, not read | 1 | **24** | **no** | see `017-review-round8.md`. 22 of 24 came from executing the code; **0** from reading a document |
+| 8 | Adversarial review of `PLAN.md`, `TASKS.md`, the constitution's budget table, `006` and `packages/core/src/**` — run, not read | 1 | **26** | **no** | see `017-review-round8.md`. 22 of 26 came from executing the code, 2 from a peer's implementation work re-verified here; **0** from reading a document |
 
 ## Parking lot
 
@@ -86,13 +86,13 @@ flagged it as a blocking defect on the process itself:
 That is correct and the fault is the architect's. The rows above are backfilled from the
 commit log and the round artifacts. **Dry counter: 0 of 3.** No round has yet been dry.
 
-**Updated at the close of round 8, 2026-08-21 — kept, not backfilled.** Round 8 produced **24 items
+**Updated at the close of round 8, 2026-08-21 — kept, not backfilled.** Round 8 produced **26 items
 clearing the bar** (`017-review-round8.md` section 8). Applying the bar honestly, item by item:
 
 | Bar clause | Items | Example |
 |---|---|---|
-| 3 — a failure mode with a distinct cause, detection or degradation | 20 | **R8-08**, `!` and `?` end a sentence unconditionally, so a shebang or a markdown image mints a chunk with no speakable glyph — a cause `006` section 4 does not list |
-| 1 — changes a recorded decision | 2 | **R8-01** replaces the FMA's per-component organisation with a seam-contract section; **R8-02** lifts `006`'s exemption from the R006 sweep, which `HANDOFF.md:129-131` granted and round 7 disputed in R7-08 |
+| 3 — a failure mode with a distinct cause, detection or degradation | 22 | **R8-08**, `!` and `?` end a sentence unconditionally, so a shebang or a markdown image mints a chunk with no speakable glyph — a cause `006` section 4 does not list |
+| 1 — changes a recorded decision | 2 | **R8-01** replaces the FMA's per-component organisation with a seam-contract section (**R8-26** sharpens its wording from *two disagreeing predicates* to *a contract in a form that carries no meaning of its own*); **R8-02** lifts `006`'s exemption from the R006 sweep, which `HANDOFF.md:129-131` granted and round 7 disputed in R7-08 |
 | 5 — invalidates a recorded claim with evidence | 2 | **R8-03**, `HANDOFF.md:56` states CI is green; `pnpm check:citations --max-stale=34` exits **1** at clean `HEAD` `[measured-here]`, n=2. **R8-04**, the brief's own statement of G-1's cause is wrong, corrected by measurement |
 
 Two recorded items do **not** clear the bar and are named so the honesty of the count can be
@@ -128,15 +128,17 @@ Round 8 carried out that instruction. Two results change the recipe for rounds 9
 run before — reports **zero stale citations in all three** `[measured-here]`. That branch of the
 round-7 plan is closed and yielded nothing.
 
-**The yield moved entirely to execution.** Of round 8's 24 items, **22 came from running the code**
+**The yield moved entirely to execution.** Of round 8's 26 items, **22 came from running the code**
 (one battery of 45 hostile inputs through `normalize()` → `Chunker` → `OsSynthProvider`, plus the six
-committed fixtures end to end) and **2 from running an existing checker nobody had run**. **None came
-from reading a document.**
+committed fixtures end to end), **2 from running an existing checker nobody had run**, and **2 from a
+peer's implementation work (J21, PITFALLS P37), re-verified here — which moved two of the reported
+facts**. **None came from reading a document.**
 
 The structural reading, in one sentence: **`006` is organised by component, so it can review every
 rule against its own component's job and never put two components' rules side by side** — and every
 defect this round found lives in that space, where two modules each own a predicate for the same
-concept and the predicates disagree. Three such pairs are tabulated in `017` section 1.
+concept and the predicates disagree. Three such pairs are tabulated in `017` section 1, and a fourth witness — stage identity as a
+positional integer, five copies deep, every check comparing a copy to a copy — is `017` section 6b.
 
 **Rounds 9 and 10 therefore do not re-read anything.** They build `006` section 22 — *Seam
 contracts*, one row per adjacent pair, each row stating what the upstream component may emit that

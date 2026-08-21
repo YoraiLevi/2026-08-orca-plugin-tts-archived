@@ -15,7 +15,7 @@ they should have been.
 **What this document is.** The record of what round 8 found. It edits nothing it reviews. Every
 performance number carries an R006 label with a run count.
 
-**Round 8 was not dry. 24 items clear the ledger bar** (section 8). But the count is not the point
+**Round 8 was not dry. 26 items clear the ledger bar** (section 8). But the count is not the point
 of this round, and section 1 is.
 
 ---
@@ -63,6 +63,19 @@ whose subject is a seam.**
 **Why running it found it in five minutes.** Real input crosses the seams; imagined input does not.
 Everything in this round came from pointing committed files and hostile strings at the actual
 functions and reading what came out the far end — not from reading either function.
+
+**Sharpened after the fact by a fourth witness — see R8-26.** A peer's independent finding
+(PITFALLS **P37**, J21) supplies a case that does not fit the "two predicates" wording above and
+does fit the thing underneath it. The general form, restated:
+
+> **A cross-component contract expressed in a form that carries no meaning of its own — a character
+> count, a positional integer, a bare argv string — can only be validated by comparing it against
+> another copy of itself. That is the one check incapable of detecting an error the copies share.**
+
+The three rows in the table are that shape (a length standing for speakability, a punctuation class
+standing for a sentence, a string standing for a safe argument). R8-26 is a fourth, and it is the
+clearest of the four because there the copies are *literally* compared to each other, in a passing
+test, and the answer is still not anchored to anything.
 
 **Resolution.** Add **`006` section 22 — Seam contracts**, one row per adjacent pair
 (normalizer→chunker, chunker→provider, provider→sink, sink→device), and for each row state the
@@ -485,6 +498,119 @@ NM6, already on the books, still open.** A restatement, not a new item.
 
 ---
 
+## 6b. Stage identity — the fourth witness, and where I disagree with the brief
+
+Handed to this round by the team lead from a peer's work (J21, PITFALLS **P37**). Verified
+independently here before being written down, and the verification moved two of the reported facts.
+
+### R8-26 — A stage is addressed by its ordinal, five copies deep, and every check compares a copy to a copy
+**S4, structural** · `voice-lab/lib/controls.mjs:32,258-260` `[live tree]`, `scripts/voice-lab.mjs:101-118` `[live tree]`, `voice-lab/lib/lab.test.mjs:117-141` `[live tree]`, P37
+
+A normalizer stage has no name at the seam. It has a **position**, and the position is written down
+in five places, `[measured-here]` at `HEAD` and in the live tree:
+
+| Where | Form | Count |
+|---|---|---|
+| `scripts/voice-lab.mjs` `STAGES` | `{ n, name, controlIds }` | 16 rows |
+| `voice-lab/lib/controls.mjs` `STAGES` | a name list, addressed by index | 16 |
+| `voice-lab/lib/controls.mjs` `CONTROLS[].stages` | `stages: [N]` | **27** non-empty |
+| `voice-lab/index.html` (inlined twin) | `stages: [N]` | **27** non-empty |
+| `voice-lab/lib/controls.mjs` `FIXED_BY_DESIGN_STAGES` | a bare integer list | 1 line, 5 integers |
+| `docs/**` prose — `PLAN.md`, `004`, `008`, two research files | *"stage 13 expandNumbers"* | **42** references |
+
+**Two corrections to the facts as they reached me**, stated because the brief asked for evidence over
+agreement:
+
+1. **The renumber is already committed.** `git show HEAD:voice-lab/lib/controls.mjs` gives
+   `FIXED_BY_DESIGN_STAGES = [2, 4, 11, 15, 16]` and `stripHtmlComments` at position 2. The value
+   `[3, 10, 14, 15]` quoted to me is the **pre-insert** state; P37 records it as though it were
+   current. That is P37 describing a hazard in the tense of a defect, which is a small instance of
+   the same problem it is about.
+2. **The count is 27 numeric `stages: [N]` references per twin, not 24** — and it is 27 in *both*
+   twins, so the inlining is currently consistent.
+
+**Where the checks actually reach, and where they stop.** This is the part worth having, and it took
+running the tests rather than reading them:
+
+| Binding | Anchored to what | Can it go silently wrong? |
+|---|---|---|
+| the ladder's `apply[]` ↔ `normalize()` | **behaviour** — `assertLoadedModuleIsOnDiskSource` (`scripts/voice-lab.mjs:202-228` `[live tree]`) runs seven probes through both and demands byte equality | **no** — this is a genuine effect check and the strongest thing in the file |
+| server `STAGES[].name` ↔ page `STAGES[n-1]` | each other (`lab.test.mjs:138`) | only if the two drift apart |
+| page `CONTROLS[].stages` ↔ server `STAGES[].controlIds` | each other (`lab.test.mjs:139-140`) | **yes** — two hand-authored lists; renumber both consistently-but-wrongly and both agree |
+| `FIXED_BY_DESIGN_STAGES` ↔ `controlsForStage()` | the `CONTROLS` table (`lab.test.mjs:117-120`, `withoutControls`) | **yes, mostly** — see R8-27 |
+| **control → the transform it governs** | **nothing** | **yes, completely** |
+
+The last row is the finding. `assertLoadedModuleIsOnDiskSource` anchors the *pipeline* to behaviour
+and deliberately does not reach the control map; every other check compares one hand-written list to
+another hand-written list. **So the one binding a listener actually consumes — focus a changed word
+in the ladder, be sent to the knob that governs it (`004` section 4) — is the only binding in the
+system with no effect check at all.** A control silently pointed at the wrong transform sends the
+listener to a knob that does nothing to the word they are looking at, in the tool whose entire
+purpose is settling taste by ear, and `pnpm test` stays green.
+
+This is R8-01's general form in its clearest instance: an ordinal is a name whose referent lives in a
+list held somewhere else, so the only available check is copy-against-copy — and a renumber is
+precisely the error every copy shares.
+
+**Resolution — independently reached, and therefore corroboration rather than echo.** Address stages
+by **stable string id** (`'strip-fenced-code'`, `'expand-numbers'`), derive any display ordinal from
+the name list, and never write a position down twice. **J21 reached the same recommendation from the
+implementer's side** while doing the insert, and was told to write it up rather than build it; this
+round reached it from the reviewer's side without seeing that write-up. Two witnesses, two
+directions. The property that makes it work is the one an ordinal lacks: a string id **cannot be
+made wrong by an insert**, and a typo in one is a lookup failure — a loud, locatable nothing — rather
+than a plausible wrong answer.
+
+The second half is the part a rename alone does not buy: **give the control→transform binding an
+effect check.** Perturb the transform a control claims to govern and assert that the control's own
+output moves. That is the seam contract of R8-01 applied here, and it is the only thing that would
+have caught a consistent-but-wrong renumber.
+
+### R8-27 — `FIXED_BY_DESIGN_STAGES` is checked by a test that only fires when the zero-control set changes
+**S5** · `voice-lab/lib/lab.test.mjs:117-120` `[live tree]`, P36, P37
+
+```js
+const withoutControls = STAGES.map((_, i) => i + 1).filter((n) => controlsForStage(n).length === 0)
+expect(withoutControls).toEqual(FIXED_BY_DESIGN_STAGES)
+```
+
+P37 calls this *"the ONE check standing between that constant and a silent wrong answer"*, and it is
+real — the expected list is hand-written and the actual list is computed, which is P36's
+independent-restatement shape done correctly. **But its sensitivity is narrower than P37 implies, and
+worth stating so nobody over-trusts it.** It fires only when an edit changes *which stages have zero
+controls*. Move a control from stage 13 to stage 14 — both already governed — and `withoutControls`
+is byte-identical, the test passes, and the listener is sent to the wrong knob. The failure R8-26
+describes is in exactly that blind spot.
+
+**Resolution.** Fold into R8-26: once stages carry string ids, this constant becomes a list of names
+and the class of error disappears rather than being detected.
+
+### Where I disagree with the brief — the boot assertion is right, and softening it would be a mistake
+
+The brief asks whether *"fails loudly at the worst possible moment"* serves the author. **On the
+evidence, yes, and I would not change it.** `assertLoadedModuleIsOnDiskSource` refuses to start when
+the ladder and `normalize()` disagree, and its message names both causes it can have
+(`scripts/voice-lab.mjs:220-227` `[live tree]`). Three reasons that is the right call:
+
+1. **The alternative is worse and this project has already named it.** A Lab that starts with a
+   drifted ladder serves the listener a reading of a normalizer that is not the one that ships —
+   *"a corrupted reading they cannot diagnose"*, in P37's own words. Every governing document in
+   this repo prefers a named refusal to a plausible wrong answer, and `006` section 0 ranks a loud
+   crash *below* a confident wrong answer for exactly this reason.
+2. **"The worst possible moment" is not accurate.** Boot is before the browser is open, before a
+   fixture is chosen, before any audio exists. It is the **earliest** moment the fault is knowable
+   and the one where the listener has lost nothing.
+3. **It is an effect check** — seven probes through both paths, byte-compared — in a file otherwise
+   full of copy-against-copy checks. It is the one thing here that cannot go green while being
+   wrong, and R8-26 exists precisely because its coverage stops short of the control map.
+
+**The defect is that a five-file atomic change is required at all, not that the alarm is loud.** Fix
+the cause (R8-26's string ids) and the alarm stops firing on its own. Making the alarm quieter while
+leaving the ordinals in place would delete the only honest indicator in the neighbourhood — which is
+P32's shape, and this repo has paid for that lesson twice already.
+
+---
+
 ## 7. Process results that are not findings
 
 - **`pnpm check:citations` over `011`, `012`, `013`** — the brief's assigned check, never run before.
@@ -507,8 +633,9 @@ NM6, already on the books, still open.** A restatement, not a new item.
 | 4 — markdown constructs | R8-11 … R8-17 | 7 |
 | 5 — numbers | R8-18 … R8-23 | 6 |
 | 6 — paths | R8-24, R8-25 | 1 (R8-25 is a restatement) |
+| 6b — stage identity | R8-26, R8-27 | 2 |
 | 7 — process results | — | 0 |
-| **Total** | **25 recorded** | **24** |
+| **Total** | **27 recorded** | **26** |
 
 By severity, using `006` section 0's ranking:
 
@@ -516,16 +643,18 @@ By severity, using `006` section 0's ranking:
 |---|---|---|
 | **S1** | 1 | R8-11 (provenance) |
 | **S2** | 9 | R8-04, R8-05, R8-07, R8-08, R8-10, R8-12, R8-15, R8-16, R8-21 |
-| **S4** | 12 | R8-06, R8-09, R8-13, R8-14, R8-17, R8-18 … R8-20, R8-22 … R8-24 |
-| **S5 / process** | 3 | R8-01, R8-02, R8-03 |
+| **S4** | 13 | R8-06, R8-09, R8-13, R8-14, R8-17, R8-18 … R8-20, R8-22 … R8-24, R8-26 |
+| **S5 / process** | 4 | R8-01, R8-02, R8-03, R8-27 |
 
 **Blocks implementation: R8-04** (a live, reachable, whole-reply loss on the author's own platform)
 and **R8-03** (CI is red, and R5 conditions publishing on it).
 
-**The shape, which matters more than the number.** Twenty-two of the twenty-four came from **running
+**The shape, which matters more than the number.** Twenty-two of the twenty-six came from **running
 the code**, not reading it — one probe battery of 45 hostile inputs through `normalize()` → `Chunker`
 → `OsSynthProvider`, plus the six committed fixtures. Two (R8-02, R8-03) came from running an
-existing checker that nobody had run. **Zero came from reading a document.** Seven prior rounds read
+existing checker that nobody had run. Two (R8-26, R8-27) came from a peer's implementation work and were re-verified here by running the
+tests and `git show` — which moved two of the reported facts, so even a handed-over finding needed
+executing. **Zero came from reading a document.** Seven prior rounds read
 these documents closely and well; the yield curve on reading has gone flat, and the yield curve on
 execution has not started.
 
