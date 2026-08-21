@@ -54,7 +54,7 @@ not refined**, which is the author's own summary after one day of listening.
 |---|---|
 | Repo | https://github.com/YoraiLevi/orca-plugin-tts (public) |
 | CI | **RED.** `pnpm check:citations --max-stale=34` exits 1 at clean `HEAD` with **91 stale** `[measured-here]`. The 3-OS test matrix is green; the citation ratchet is not, and has not been since the J03 code movement. Found by round 8 (**R8-03**) after this table had claimed green for four days. |
-| Tests | **584 passing, 23 files** at `c57192e` `[measured-here]`, `pnpm test` |
+| Tests | **653 / 658** at `0156560` in a clean detached worktree `[measured-here]`. **Four of the five reds are not real**: two are a load-dependent queue-drain race in `main.test.ts`, two are `check-citations` timing out at 5,000 ms in a file that takes 33 s under load. J28 owns the flake. The one genuine red is **SC-14** — `packages/core/src/index.ts` will not load under plain node — which is red on purpose. **A suite count taken today means "the machine was quiet", not "the code is correct."** Never quote one without naming the reds, and never take it in the shared tree |
 | Verified by a human | huddle mode spoke live agent replies, 2026-08-21 |
 | Next | **M11 Voice Lab** — and nothing else until it exists |
 
