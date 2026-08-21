@@ -23,13 +23,23 @@ transforms. The listener is told "fixed by design" about a stage two controls go
 the wrong knob. Nothing type-checks it, nothing tests it, and the ladder still renders. Contrast the
 same repo's `STAGES` name list, which is compared against the call order in `normalize()` and went
 red immediately — the difference is that one list carries NAMES and the other carries POSITIONS.
-**Instead:** address stages by NAME wherever a name will do — `stages: ['speakFilePaths']` cannot be
-made wrong by an insert, and a typo in it is a lookup failure rather than a plausible wrong answer.
-Where the ordinal must stay (the ladder's display numbering), DERIVE it from the name list rather
-than writing it a second time. Until that refactor exists, treat "insert a stage" as a
-five-file atomic change and serialise it against anyone else in the tree: a split renumber leaves
-the Lab unbootable, and if someone is measuring against that server they get a corrupted reading
-they cannot diagnose.
+**Instead — the recommendation, stated so it can be picked up as its own Job (NOT implemented):**
+give every stage a **stable string id** and make that the identity. `'strip-fenced-code'`,
+`'expand-numbers'`. Controls then name what they govern — `stages: ['speak-file-paths']` — and
+`FIXED_BY_DESIGN` becomes a list of ids rather than a list of positions. **The numeric index is
+demoted to a display detail, DERIVED from the pipeline array and never written down twice.**
+
+The property that buys is the one this entry is about: an id cannot be silently re-pointed by an
+insert. Its two failure modes are both loud — a typo is a lookup miss, and a renamed stage is an id
+nothing resolves. Compare the positional version, whose failure mode is an integer that is still in
+range, still valid, and now means something else. The right-sized cost is real: it is a five-file
+mechanical change plus a decision about whether the ladder's on-screen numbering follows array
+order, so it deserves its own Job rather than being smuggled into a bug fix.
+
+Until that exists, treat "insert a stage" as a **five-file atomic change** and serialise it against
+anyone else in the tree: a split renumber leaves the Lab unbootable, and if someone is measuring
+against that server they get a corrupted reading they cannot diagnose. `33037fc` is the worked
+example of the full sweep — read it before attempting another insert.
 **Verify by effect:** change one integer in `FIXED_BY_DESIGN_STAGES` and run `pnpm test`. Today it
 goes red only because `lab.test.mjs` recomputes the same list from `controlsForStage()` — which is
 the ONE check standing between that constant and a silent wrong answer. Delete that test and the
