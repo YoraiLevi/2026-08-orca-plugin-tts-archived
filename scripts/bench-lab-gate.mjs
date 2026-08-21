@@ -630,6 +630,8 @@ async function coldSeries (cdp, n, fixture) {
  * control the listener just changed. That is the stale hit FR-023 exists to forbid, and the
  * listener reads it as "that control does nothing" — a taste result that is really a cache bug.
  */
+const req = (t) => (t.ok ? t.speakRequests : null)
+
 async function staleHitProbe (cdp, fixture) {
   await settle(cdp)
   await selectFixture(cdp, fixture)
@@ -646,7 +648,6 @@ async function staleHitProbe (cdp, fixture) {
   await focusControl(cdp, 'voice.rate')
   const afterReload = await trial(cdp, KEYS.space)
 
-  const req = (t) => (t.ok ? t.speakRequests : null)
   const stale = req(afterChange) === 0 && req(prime) > 0 && req(afterReload) > 0
   record({
     id: 'cachekey.stale-hit',
