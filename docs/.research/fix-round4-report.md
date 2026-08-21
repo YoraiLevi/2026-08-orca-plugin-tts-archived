@@ -132,7 +132,7 @@ AssertionError: expected 'reply alpha flood number nine' to contain 'Speech is d
 
 **What was wrong.** `read-aloud.status` exists to answer P22's *"this is really confusing what it is
 even reading right now"*, and it was wired to `speak(..., 'replace')`, which clears `#pending` at
-`speech-service.ts:79` with **no `onDropped` call**. The answer deleted the subject of the question,
+`speech-service.ts:65` with **no `onDropped` call**. The answer deleted the subject of the question,
 silently — while announcing *"N more waiting"* about the replies it had just removed. The huddle
 toggle and `unfollow` had the same wiring.
 
@@ -168,7 +168,7 @@ AssertionError: expected 'delta reply one echo reply two Skippe…' to contain '
 
 ## Fix 3 — huddle silently served nothing to every non-Claude agent
 
-**What was wrong.** `huddle/index.ts:245` called `decodeClaudeLine` unconditionally. A Codex/Grok/omp
+**What was wrong.** `huddle/index.ts:552` called `decodeClaudeLine` unconditionally. A Codex/Grok/omp
 record fails `rec['type'] !== 'assistant'`, so every line decoded to `null` and huddle was completely
 mute — while `panel.html` stated *"supports Claude, Codex, Grok and omp"*. `decoderFor`,
 `decodeGenericLine` and `UNSUPPORTED_AGENTS` had **zero non-test callers**: P26's shape on a new wire.

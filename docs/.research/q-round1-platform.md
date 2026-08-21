@@ -219,7 +219,7 @@ per-agent voice id can bind to the wrong voice without any error.
 ### Linux — DOCUMENTED, and this is the sharpest finding in the file
 
 Our provider synthesizes on Linux with `espeak-ng -w <file>`
-(`packages/providers/src/os-synth/index.ts:103-112`). **`/usr/bin/espeak-ng` is not present on a
+(`packages/providers/src/os-synth/index.ts:124`). **`/usr/bin/espeak-ng` is not present on a
 stock Ubuntu desktop.**
 
 Primary source: the official Ubuntu 24.04.3 desktop image package manifest,

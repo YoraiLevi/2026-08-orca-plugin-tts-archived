@@ -53,11 +53,11 @@ plugin today:
 
 - `ChunkerOptions` — `maxUnits`, `countUnits`, `isolateFirstSentence`
   (`packages/core/src/chunker/index.ts:27-34`). `SpeechService` forwards only `maxUnits`
-  (`packages/plugin/src/speech-service.ts:112-114`), and `main.ts` never sets it, so
+  (`packages/plugin/src/speech-service.ts:38`), and `main.ts` never sets it, so
   `isolateFirstSentence` is unreachable from any caller.
 - `SynthesizeOptions` — `voice`, `rate`, `signal` (`packages/core/src/types/index.ts:26-31`).
   **`SpeechService` calls `provider.generate(chunk.text)` with no options at all**
-  (`speech-service.ts:121`). Voice and rate are therefore not settable by any path through the
+  (`speech-service.ts:250`). Voice and rate are therefore not settable by any path through the
   running plugin, even though `OsSynthProvider` implements both
   (`packages/providers/src/os-synth/index.ts:196-218`).
 
@@ -205,7 +205,7 @@ Hardcoded values in the speech path a listener might reasonably want to change.
 | H17 | Empty-output threshold | `core/src/normalizer/index.ts:97` | `length <= 1` → `""` | defensible as fixed |
 | H18 | Emoji deleted with no announcement | `core/src/normalizer/index.ts:428-436` | always silent | **unexposed preference** — directly contradicts the lesson that produced H1 and H2 ("omissions abrupt, I didn't expect it", HANDOFF). Code blocks and URLs get a lead-in; emoji vanish |
 | H19 | Chunk size | `core/src/chunker/index.ts:53` | `DEFAULT_MAX_UNITS = 200` chars | **unexposed preference, high value** — with the ~970 ms per-chunk gap (`plugin/src/sinks/subprocess-sink.ts:8-10`), chunk size *is* the pacing control |
-| H20 | `isolateFirstSentence` | `core/src/chunker/index.ts:66` | `true`, and never forwarded | **unexposed preference** — `SpeechService` passes only `maxUnits` (`plugin/src/speech-service.ts:112-114`), so this option is unreachable from the plugin |
+| H20 | `isolateFirstSentence` | `core/src/chunker/index.ts:66` | `true`, and never forwarded | **unexposed preference** — `SpeechService` passes only `maxUnits` (`plugin/src/speech-service.ts:38`), so this option is unreachable from the plugin |
 | H21 | `ABBREVIATIONS` table | `core/src/chunker/index.ts:46-51` | 30 fixed tokens | defensible as fixed |
 | H22 | Queue overflow limit | `plugin/src/main.ts:41` | `maxQueued: 8` | **unexposed preference** — and it disagrees with `DEFAULT_MAX_QUEUED = 20` (`plugin/src/speech-service.ts:89`); the shipped value is 8 |
 | H23 | Overflow-notice coalescing delay | `plugin/src/main.ts:45` | 500 ms | defensible as fixed |

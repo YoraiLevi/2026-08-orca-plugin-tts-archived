@@ -92,7 +92,7 @@ All rows MEASURED or DOCUMENTED in `docs/.research/q-round1-platform.md`; none a
 | `SelectVoice(name)` is a case-sensitive **substring** match | a short name can bind the wrong voice with no error |
 | Rate exists everywhere; pitch and volume exist everywhere but through three different surfaces | the tuple is `(voice, pitch, rate)`, reachable unevenly |
 | H24 — **CLOSED before this document was written** (`6b776d4`). `speech-service.ts:257` calls `generate(chunk.text, this.#synthesizeOptions())`, built at `:232` from `SpeechServiceDeps.voice` / `.rate` (`:57-58`); PITFALLS **P26** pins it with a reachability test | **M15's first task is the algorithm. The wire exists.** See the amendment note below |
-| H25: rate was dropped on Linux — now fixed by `linuxCommand()` (`os-synth/index.ts:175`, called at `:374`) | prerequisite, closed |
+| H25: rate was dropped on Linux — now fixed by `linuxCommand()` (`os-synth/index.ts:196`, called at `:458`) | prerequisite, closed |
 | H26: `rate*175` wpm on macOS vs a −10…+10 clamp on Windows | one number does not mean one thing — see section 8 |
 | Q27: `~/.claude/sessions/<pid>.json` is a live registry carrying `sessionId`, `name`, `cwd`, `pid` | the concurrent roster collision avoidance needs, **and a human-chosen name for free** |
 
@@ -182,7 +182,7 @@ speaker in the first second without effort:
 |---|---:|---:|---:|---:|---:|---|
 | macOS, OS-synth, prose-quality only | 22 | 3 | 3 | **66** | 198 | 6 compact locale + 16 Eloquence |
 | macOS, OS-synth, incl. novelty voices | 41 | 3 | 3 | 123 | 369 | 19 MacinTalk voices; several unintelligible for prose — do **not** count them |
-| Windows 11 stock, **as shipped today** | 2 | 1 | 3 | **2** | 6 | `$s.Speak` has no pitch; `#command()` `:346-372` |
+| Windows 11 stock, **as shipped today** | 2 | 1 | 3 | **2** | 6 | `$s.Speak` has no pitch; `#command()` `:428` |
 | Windows 11 stock, **with `SpeakSsml`** | 2 | 3 | 3 | **6** | 18 | requires switching to `SpeakSsml` + XML escaping |
 | Ubuntu stock, `spd-say` floor | 1 | 1 | 1 | **1** | 1 | `spd-say` cannot write a WAV; we do not own playback there (`os-synth/index.ts:111-117`) |
 | Ubuntu + `espeak-ng` installed | 13 | 3 | 3 | **39** | 117 | `m1`–`m8` + `f1`–`f5` within one language file; 104 variants × 8 en files exist but are not all distinct-in-prose |
@@ -328,7 +328,7 @@ flowchart TD
 
 The listener tunes one number in the Voice Lab. That number is a **multiplier of a reference rate**,
 and the reference is `RATE_REF_WPM = 175` — which is simultaneously espeak-ng's documented default
-speed and the base the provider already uses on macOS (`os-synth/index.ts:167`, `ESPEAK_BASE_WPM`, used at `:191`).
+speed and the base the provider already uses on macOS (`os-synth/index.ts:188`, `ESPEAK_BASE_WPM`, used at `:212`).
 
 `targetWpm = 175 × rate`
 
@@ -477,7 +477,7 @@ identity.assignments = {
 ```
 
 Bounded to 64 entries, LRU by last-spoken — the same discipline as `MAX_REMEMBERED_IDS = 300`
-(`packages/plugin/src/huddle/index.ts:44`), for the same reason (256 KB per stored value).
+(`packages/plugin/src/huddle/index.ts:80`), for the same reason (256 KB per stored value).
 
 **Authority rule.** `hostFingerprint` is the guard; `index` is authoritative; `voiceName` is a
 **checksum**. On restore, if the fingerprint matches but the name at that index no longer matches
@@ -492,7 +492,7 @@ index without checking the name (macOS would substitute silently).
 **MEASURED:** `say -v '?'` costs 456 / 439 / 451 / 460 / 442 ms over five runs. R4.2's first-audio
 budget is ~500 ms. **Enumerating the voice list once per utterance would spend the whole budget
 before synthesis starts**, and `prepare()` already pays it because it calls `listVoices()`
-(`prepare()` at `os-synth/index.ts:228`, which calls `listVoices()` at `:232`/`:279`). Per-agent assignment consults the list constantly, so the list must
+(`prepare()` at `os-synth/index.ts:273`, which calls `listVoices()` at `:277`). Per-agent assignment consults the list constantly, so the list must
 be cached — not per utterance, not per session, **once per activation**.
 
 | Question | Answer |
@@ -518,7 +518,7 @@ Every row degrades to something **audible and named**. Never to silence, never t
 
 | # | Failure | Detection (by effect) | Degradation |
 |---|---|---|---|
-| F1 | Voice list empty — `listVoices()` returns `[]` (stock Ubuntu before the ladder; a broken PowerShell) | `voices.length === 0` at `prepare()` | Floor: one voice, no prosody, **call-sign mandatory every turn**. Speak once: *"System voices are unavailable on this machine, so agents will be named before each reply."* Plus the actionable hint already written at `os-synth/index.ts:148` (`LINUX_INSTALL_HINT`, used at `:160`, `:267`) |
+| F1 | Voice list empty — `listVoices()` returns `[]` (stock Ubuntu before the ladder; a broken PowerShell) | `voices.length === 0` at `prepare()` | Floor: one voice, no prosody, **call-sign mandatory every turn**. Speak once: *"System voices are unavailable on this machine, so agents will be named before each reply."* Plus the actionable hint already written at `os-synth/index.ts:169` (`LINUX_INSTALL_HINT`, used at `:160`, `:169`) |
 | F2 | Assigned index no longer exists — a voice was uninstalled, or one was **installed mid-session** and the cached list is stale (9.1) | host fingerprint mismatch on rescan; or a synthesis whose checksum equals the fallback baseline | Discard the map, recompute, and **say so**: *"Voices were reassigned after a system change."* Silent reassignment would present a new voice as the same agent. Rescan is user-triggered, never polled — a 450 ms poll for a twice-a-year event is not a check, it is a tax |
 | F2b | `SpeakSsml` throws on malformed SSML, turning a cosmetic pitch failure into **silence** (8.5) | the PowerShell call exits non-zero, or writes a zero-length WAV | `catch → $s.Speak(plainText)`: drop the pitch, **keep the words**, and record that this session fell to tier-0 prosody so the identity layer keeps speaking its call-sign. Pitch may fail; speech may not |
 | F3 | **macOS silent-fallback lie** — `say -v Bogus` exits 0 and emits the default voice's exact bytes | one-off **distinctness probe**: synthesize a 3-word phrase with each candidate and with no `-v`; any candidate whose md5 equals the no-voice baseline is **not a real voice** and is struck from the ranked list | The list shrinks; identities are recomputed on the smaller list. Never keep a voice that failed the probe |
@@ -526,7 +526,7 @@ Every row degrades to something **audible and named**. Never to silence, never t
 | F4 | **Windows substring binding** — `SelectVoice('David')` matching something unintended | pass the full `VoiceInfo.Name`, then **read `$s.Voice.Name` back** and compare | Mismatch → strike that voice from the list, log a WARNING, reassign. The read-back is the whole check; without it the failure is invisible |
 | F5 | **Two live sessions hold the same slot** — stale roster, two workers, a race | before speaking, re-read the roster; if two live sessions resolve to the same slot, both are in violation | Demote **both** to overflow: shared neutral voice, call-sign mandatory, announced. Two identical unnamed voices is precisely the P22 failure and must be impossible |
 | F6 | The session registry does not cover the agent CLI in use (Q27's unresolved sub-question — all five observed sessions were Claude Code) | registry lookup by `sessionId` returns nothing while a transcript is being read | Roster degrades to "transcripts modified within the last N minutes"; collision avoidance degrades to hash-only; **overflow behaviour becomes the default** (everyone named). Announce the degradation once |
-| F7 | **The enumerable path is not the synthesizable path** — Linux `listVoices()` returns `spd-say --list-synthesis-voices` output (`os-synth/index.ts:279`) while synthesis prefers `espeak-ng` (`LINUX_WAV_BACKENDS`, `:146`). Assigning one of those names produces the wrong voice or none | assign, synthesize the probe, compare checksums — F3's probe catches it | `listVoices()` must return only voices the **selected backend** accepts. Until it does, treat Linux as `V = 1` and rely on layers 0–1. This is a live defect, not a hypothetical |
+| F7 | **The enumerable path is not the synthesizable path** — Linux `listVoices()` returns `spd-say --list-synthesis-voices` output (`os-synth/index.ts:279`) while synthesis prefers `espeak-ng` (`LINUX_WAV_BACKENDS`, `:167`). Assigning one of those names produces the wrong voice or none | assign, synthesize the probe, compare checksums — F3's probe catches it | `listVoices()` must return only voices the **selected backend** accepts. Until it does, treat Linux as `V = 1` and rely on layers 0–1. This is a live defect, not a hypothetical |
 | F8 | The overflow announcement itself becomes noise — six agents, every reply prefixed | count of T3 sessions ≥ 3 | Escalate from prefix to **grouping**: batch a session's replies and name once per batch. Also the point at which the UI should offer "download more voices" (macOS Enhanced/Premium, Windows natural voices, `apt install espeak-ng`) |
 | F9 | Earcon inaudible — bad output device, gain too low, or the listener finds it grating | the listener says so; no automatic detection | Earcon is disableable. **Disabling it promotes the call-sign to mandatory**, because layer 1 was carrying differentiation |
 | F10 | Rate calibration not yet complete, or wrong | compare the measured wpm of a probe utterance against `targetWpm` | Fall back to the seed formula and show the discrepancy in the Voice Lab. Never let a mis-tuned rate be the only thing separating two agents — which is why rate is tier 2, behind a mandatory call-sign |
@@ -682,7 +682,7 @@ turn, and `tts` is read as letters. So: **two levels.**
 | **Long** — the full name | the registry `name`, run through the normalizer | `~/.claude/sessions/<pid>.json` | on switch, on status, on request |
 
 This replaces `sessionLabel()`'s eight-hex-character UUID slice
-(`packages/plugin/src/huddle/index.ts:55-60`), which is the thing that prompted this milestone:
+(`packages/plugin/src/huddle/index.ts:106`), which is the thing that prompted this milestone:
 reading `111693de` aloud to a dyslexic listener is a non-answer to "who is speaking".
 
 > **Confirmed as the project's one call-sign, 2026-08-21 (round 3 reconciliation), by X-04 and
@@ -756,7 +756,7 @@ speech-dispatcher backends). We cannot install any of them, and should not try.
    > System Settings, Accessibility, Spoken Content, Manage Voices."*
 
    Spoken once, never repeated, dismissible. This is the same never-fail-silently obligation as
-   `LINUX_INSTALL_HINT` (`os-synth/index.ts:148`), which already does exactly this for the
+   `LINUX_INSTALL_HINT` (`os-synth/index.ts:169`), which already does exactly this for the
    missing `espeak-ng` binary. Quietly sounding bad is a silent degradation, and R015 forbids it.
 
 **One honest gap:** `say -v '?'` does not report quality. Reading it on macOS requires
@@ -801,7 +801,7 @@ setting, with no code change.
 | Option | What it sounds like | Costs | Fails when |
 |---|---|---|---|
 | **A — Never** | voices alone carry identity | zero time cost; maximum flow | the listener has not yet learned the mapping; any tier-≥1 or overflow identity; `V = 1` |
-| **B — On switch only** (today: `switchTo()`, `huddle/index.ts:165` — **and no caller invokes it**, 007 C8) | *"Now reading from orca-plugin-tts, session 111693de."* | one announcement per switch | long gaps — after five minutes of one speaker, the listener has forgotten who it was |
+| **B — On switch only** (today: `switchTo()`, `huddle/index.ts:244` — **and no caller invokes it**, 007 C8) | *"Now reading from orca-plugin-tts, session 111693de."* | one announcement per switch | long gaps — after five minutes of one speaker, the listener has forgotten who it was |
 | **C — Call-sign prefix, every turn** | *"Cedar. The tests pass."* | ~350 ms every turn `[claimed]` — **nobody has synthesized a call-sign and timed it**, and if it is emitted as its own chunk on v1 it pays the same ~870 ms as D | tiring in a fast back-and-forth with one agent |
 | **D — Earcon only** | two notes, then speech | **p50 ~870 ms on v1 macOS** `[measured-here]` (874 / 862, n=10 ×2, `latency-measurements.md` 1.4), of which 140 ms is tone — until M9 holds the audio device open (§11.1d); needs learning | a listener who has not learned it, or who has disabled it |
 | **E — Earcon always, call-sign on switch** | notes every turn, name when the speaker changes | as D — **~870 ms `[measured-here]` every turn, the slowest row in this table on v1, not the cheapest** (§11.1d) — plus C's cost on switches | the long-gap case, same as B |
@@ -947,7 +947,7 @@ R1.** Compare the naive design: three identical voices, indistinguishable, gate 
 > **One honest gap in this row, recorded 2026-08-21 (round 3 reconciliation), from `006` §15b X3.**
 > The earcon above is generated PCM handed to a sink — and on this exact rung **we do not own
 > playback**: `#speakDirect()` gives the text to speech-dispatcher and yields nothing
-> (`os-synth/index.ts:321`, `#speakDirect()` at `:407`). So the *voice* comes from the daemon and the *earcon* would have to
+> (`os-synth/index.ts:400-405`, `#speakDirect()` at `:491`). So the *voice* comes from the daemon and the *earcon* would have to
 > come from somewhere else, and no document says from where. The delivery mechanism for an earcon on
 > the `spd-say` floor is **unspecified**, and it is unspecified in the one case this section calls
 > the proof of R1. It is not fatal — the **call-sign** is spoken by the daemon along with everything
@@ -1050,8 +1050,8 @@ listener-chosen set; it is not a return to "whatever transcript was touched last
 | 6 | Rate calibration table (section 8.3) | otherwise one rate number means three things | open; needs M11 |
 | 7 | Roster from `~/.claude/sessions/*.json` replacing the newest-transcript heuristic | Q27; also fixes P22 properly and answers Q28 | open |
 | 9 | **M16's followed set** — more than one session must be able to speak, or gate M15 cannot be run at all (§15.1, 007 C5) | the gate says *"with two agents running"*; the lock says one. **This is a scheduling dependency: M15 after M16** | open, **blocking the gate** |
-| 10 | **`switchTo()` must have a caller.** `huddle/index.ts:165` implements P22's *"announce switches aloud"* — sets the lock, notifies, speaks *"Now reading from {label}."* — and **nothing anywhere invokes it** (007 C8). No `follow` command in the manifest, no palette entry, no event path | every identity announcement this document designs rides on a switch that cannot be triggered. P26's shape exactly. Wire it to a `follow` command with a reachability test, or delete it — an unreachable implementation reads to the next agent as a shipped feature | open, **live defect** |
-| 8 | H25 — Linux rate | closed by `linuxCommand()` (`os-synth/index.ts:175`) | **done** |
+| 10 | **`switchTo()` must have a caller.** `huddle/index.ts:244` implements P22's *"announce switches aloud"* — sets the lock, notifies, speaks *"Now reading from {label}."* — and **nothing anywhere invokes it** (007 C8). No `follow` command in the manifest, no palette entry, no event path | every identity announcement this document designs rides on a switch that cannot be triggered. P26's shape exactly. Wire it to a `follow` command with a reachability test, or delete it — an unreachable implementation reads to the next agent as a shipped feature | open, **live defect** |
+| 8 | H25 — Linux rate | closed by `linuxCommand()` (`os-synth/index.ts:196`) | **done** |
 
 ---
 
@@ -1082,4 +1082,4 @@ To append to `docs/.discussion/000-open-questions.md`.
 | Adds or changes a flow | yes — assignment flow (section 7.4), overflow announcement, switch announcement |
 | Adds a failure mode | yes — F1–F10, of which F2b, F3, F4, F5, F7 have distinct causes not previously listed |
 | Opens or resolves a question | yes — Q32, Q33 resolved; Q31/H26 design half resolved; Q34 framed; Q43–Q52 opened |
-| Invalidates a v1 decision | yes — `sessionLabel()`'s eight-hex-character UUID slice (`huddle/index.ts:55-60`), and the linear Windows rate formula (`os-synth/index.ts:366`) |
+| Invalidates a v1 decision | yes — `sessionLabel()`'s eight-hex-character UUID slice (`huddle/index.ts:106`), and the linear Windows rate formula (`os-synth/index.ts:366`) |

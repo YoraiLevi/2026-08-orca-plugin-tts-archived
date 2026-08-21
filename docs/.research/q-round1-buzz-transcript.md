@@ -237,7 +237,7 @@ Code. **Exact probe:** start a Codex / Grok / omp session through ORCA and re-ru
 **Design consequence.** The P22 fix can move from "lock onto one file and hope" to a real roster:
 enumerate `~/.claude/sessions/*.json`, filter to `kill(pid,0)` survivors, prefer the one whose `cwd`
 matches the event's worktree, and speak `name` (`"orca-plugin-tts-13"`) as the session identity
-instead of `sessionLabel()`'s UUID slice at `packages/plugin/src/huddle/index.ts:55-60`. This also
+instead of `sessionLabel()`'s UUID slice at `packages/plugin/src/huddle/index.ts:106`. This also
 answers the harder half of Q28 for free.
 
 ---

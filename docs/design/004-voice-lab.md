@@ -83,7 +83,7 @@ single time the listener presses Play. That does not meet a two-second gate on t
 
 The provider already yields a `wav` buffer, not an OS-specific stream:
 
-- `packages/providers/src/os-synth/index.ts:338` — `yield { data, format: 'wav', sampleRate: …, channels: 1 }`
+- `packages/providers/src/os-synth/index.ts:53` — `yield { data, format: 'wav', sampleRate: …, channels: 1 }`
 - `packages/providers/src/os-synth/index.ts:436` — the darwin command forces
   `--data-format=LEI16@22050` with the comment *"WAV, never the default AIFF: decodeAudioData
   rejects AIFF-C (measured, E6e)"*.
@@ -162,7 +162,7 @@ already requires.
 |---|---|---|
 | **bytes** | yields audio chunks (`os-synth/index.ts:338`; every rung except the one below) | decode, cache, play in the browser — the design above |
 | **throw** | `provider.generate()` throws, or the platform has no synthesizer at all | `POST /speak` returns **`503`** with the provider's error text, and the page **says so aloud and in text**. Never a silent dead Play button (constitution: never fail silently; PITFALLS P18) |
-| **spoke-elsewhere** | `packages/providers/src/os-synth/index.ts:321`: the backend is not in `LINUX_WAV_BACKENDS` (`:146`), so `#speakDirect()` (`:407`) hands the text to speech-dispatcher, **the daemon speaks it, and nothing is yielded** | a **named state**, below |
+| **spoke-elsewhere** | `packages/providers/src/os-synth/index.ts:491`: the backend is not in `LINUX_WAV_BACKENDS` (`:491`), so `#speakDirect()` (`:407`) hands the text to speech-dispatcher, **the daemon speaks it, and nothing is yielded** | a **named state**, below |
 
 **The `spoke-elsewhere` state is a capability read, not a guess.** The provider already knows which
 rung it is on — `get linuxBackend()` (`os-synth/index.ts:256`) — so `POST /speak` returns
@@ -172,8 +172,8 @@ rung it is on — `get linuxBackend()` (`os-synth/index.ts:256`) — so `POST /s
    only audio channel that works on this machine:
    > *"This machine's speech service played that. The lab cannot replay, compare or scrub it.
    > Install espeak-ng to use the lab: `sudo apt install espeak-ng`."*
-   The install hint is the one already written at `os-synth/index.ts:148`
-   (`LINUX_INSTALL_HINT`, used at `:160`, `:267`) — not a second copy of it.
+   The install hint is the one already written at `os-synth/index.ts:169`
+   (`LINUX_INSTALL_HINT`, used at `:160`, `:169`) — not a second copy of it.
 2. **disables, with the reason attached and never hides**, the four affordances that depend on
    owning the bytes: Compare (A/B), replay, per-stage play, and the cold/warm timing readout. A
    disabled control with a stated reason is 003 §5's rule; a control that silently does nothing is
@@ -360,7 +360,7 @@ have it. The lab splits them, and the split must land in the schema **before M12
 > **H24** — *"`SpeechService` calls `provider.generate(chunk.text)` with no options at all"*, called
 > *"the single largest gap found in the audit"* — as a current defect. **It was already fixed when
 > this document was written.** Commit `6b776d4` landed the wire; `speech-service.ts:257` reads
-> `this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())`, built by `#synthesizeOptions()` at `:232` from
+> `this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())`, built by `#synthesizeOptions()` at `:250` from
 > `SpeechServiceDeps.voice` and `.rate` (`:57-58`). PITFALLS **P26** records the fix *and* the
 > reachability test that pins it. Two more claims in this panel were stale in the same way and are
 > corrected in place: row 29's *"Linux drops it entirely"* and row 33's *"never forwarded"*. Three
@@ -384,11 +384,11 @@ for darwin and win32; the Linux branch is `linuxCommand()`, `:175`) and are now 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
 | 28 | `voice.id` | select | populated at runtime from `provider.listVoices()` — never a hard-coded name | **reachable, unset** — the wire landed in `6b776d4`; nothing chooses a value yet | Common | `SynthesizeOptions.voice` | `speech-service.ts:257`; `os-synth/index.ts:445` (darwin `-v`), `:365` (win32 `SelectVoice`), `:175` `linuxCommand` (linux) | **EP** |
-| 29 | `voice.rate` | slider | 0.5–2.0, step 0.05 | **reachable, unset, and honoured on all three** — Linux no longer drops it (`5cab7eb`/`6b776d4`) | Common | `SynthesizeOptions.rate` | `os-synth/index.ts:450` (win32 `$s.Rate`); darwin `-r` and the Linux `-r`/`-s` are in `#command()` `:346-372` and `linuxCommand` `:175` | **EP** |
+| 29 | `voice.rate` | slider | 0.5–2.0, step 0.05 | **reachable, unset, and honoured on all three** — Linux no longer drops it (`5cab7eb`/`6b776d4`) | Common | `SynthesizeOptions.rate` | `os-synth/index.ts:450` (win32 `$s.Rate`); darwin `-r` and the Linux `-r`/`-s` are in `#command()` `:346-372` and `linuxCommand` `:450` | **EP** |
 | 30 | `voice.pitch` | slider | −50…+50, `engine` default | no field exists | More | needs `[[pbas]]` / SSML `<prosody>` / `-p` | `q-round1-platform.md` Q33 | **EP** |
 | 31 | `voice.volume` | slider | 0–100 | no field exists | More | `[[volm]]` / `Volume` / `-a` | `q-round1-platform.md` Q33 | **EP** |
 | 32 | `pace.chunkMaxUnits` | slider | 40–600, step 20 | 200 | Common | `ChunkerOptions.maxUnits` | `core/src/chunker/index.ts:53` | **PP** |
-| 33 | `pace.isolateFirstSentence` | toggle | on · off | `true`, **and forwarded** — `speech-service.ts:245-246` passes it alongside `maxUnits` (`6b776d4`) | More | `ChunkerOptions.isolateFirstSentence` | `chunker/index.ts:66`; `speech-service.ts:245-246` | **PP** |
+| 33 | `pace.isolateFirstSentence` | toggle | on · off | `true`, **and forwarded** — `speech-service.ts:38` passes it alongside `maxUnits` (`6b776d4`) | More | `ChunkerOptions.isolateFirstSentence` | `chunker/index.ts:66`; `speech-service.ts:245-246` | **PP** |
 | 34 | `pace.simulateChunkGapMs` | slider | 0–1500; presets `0` (M9 target), `950` (v1 macOS, `[measured-here]` — p50 950/937/897 ms, n=18 ×3, `docs/.research/latency-measurements.md` 1.1) | n/a — lab-only | Common | lab playback scheduler only | `sinks/subprocess-sink.ts:8-10` | **PP** |
 | 35 | `pace.sentencePauseMs` | slider | 0–800 ms, step 25 | none — pauses come only from emitted punctuation | More | pause token → rendering stage (6a) | H39 | **EP** |
 | 44 | `pace.pauseBackend` | select | `punctuation` (today, all platforms) · `ssml` (`<break time>`; macOS `AVSpeechUtterance`, Windows `SpeakSsml`, Linux `espeak-ng -m`) · `in-band` (macOS `[[slnc]]`, MEASURED) | `punctuation` — the only one implemented | Common | how rows 9 and 35 are encoded (6a) | `q-round1-platform.md` Q33 / "Unused capabilities" 3 | **EP** |
@@ -477,7 +477,7 @@ that the decision was made, not overlooked.
 > **Amended 2026-08-21 (round 3 reconciliation), forced by X-07.** This paragraph listed H25 —
 > *"rate … silently dropped on Linux"* — as a live R1 parity defect to be fixed during M11.
 > **It was closed before this document was written.** `linuxCommand()`
-> (`packages/providers/src/os-synth/index.ts:175`, called at `:374`) pushes `-r` on the `spd-say`
+> (`packages/providers/src/os-synth/index.ts:196`, called at `:374`) pushes `-r` on the `spd-say`
 > rung and `-s <wpm>` on the espeak rungs. `005` §2 said so in the same commit, so the two
 > designs disagreed with each other about the same line of code. Nothing here needs fixing;
 > row 29's "Today" column is corrected accordingly.
@@ -550,7 +550,7 @@ For a dyslexic listener who is also watching the screen, a cursor moving word by
 spoken text is plausibly the most useful thing a display can do — nine words in, nine
 `willSpeakRangeOfSpeechString` callbacks out, each with the exact `NSRange`, MEASURED headless.
 It is also unreachable from what we ship: `OsSynthProvider` spawns a CLI and reads a finished WAV
-(`os-synth/index.ts:310-345`; the `readFile` is at `:336`). There is no callback to subscribe to. Reaching it means the macOS
+(`os-synth/index.ts:310-345`; the `readFile` is at `:418`). There is no callback to subscribe to. Reaching it means the macOS
 Swift sidecar, `SetOutputToAudioStream` + `SpeakProgress` on Windows, and the SSIP socket on Linux —
 three new integrations, which is a milestone, not a task.
 

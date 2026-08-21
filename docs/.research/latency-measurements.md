@@ -196,7 +196,7 @@ provider: **p50 487 ms / p95 591 ms** (run 1, n=6) and **p50 472 ms / p95 547 ms
 conclusion is unchanged and slightly strengthened. The cache P28 demands is not optional.
 
 Note the shape of the bug this creates: `OsSynthProvider.prepare()` calls `listVoices()` on
-darwin/win32 (`packages/providers/src/os-synth/index.ts:230-233`). A cold `prepare()` therefore adds
+darwin/win32 (`packages/providers/src/os-synth/index.ts:277`). A cold `prepare()` therefore adds
 ~480 ms in front of the ~1,100 ms first-audio path unless it is warmed off the critical path.
 
 ---
@@ -235,7 +235,7 @@ Measured side by side on 2026-08-21 the two agree — 0.42 s for the `-o` form a
 ### 2.2 How the inter-chunk gap is defined and why this definition is the listener's
 
 `SubprocessSink.enqueue()` is strictly sequential: chunk N+1's `mkdtemp` cannot begin until chunk N's
-player process has closed (`subprocess-sink.ts:52-88`, `#play` resolves on `child.on('close')`).
+player process has closed (`subprocess-sink.ts:132`, `#play` resolves on `child.on('close')`).
 So the silence a listener hears between sentence N and sentence N+1 is exactly
 
 ```

@@ -228,7 +228,7 @@ precisely the mechanism that detects "the user started talking" **without STT**.
 
 - **Same dependency, no new one.** `sherpa-onnx-node`'s JS layer ships `vad.js` and
   `keyword-spotter.js` beside `non-streaming-tts.js`, over **exactly one** `sherpa-onnx.node`
-  **[documented]** (`docs/.research/q-round1-platform.md:462-468`, `:478`). The constitution names
+  **[documented]** (`docs/.research/q-round1-platform.md:462-468`, `:438`). The constitution names
   this explicitly as the reason the dependency was chosen: *"`sherpa-onnx-node` covering TTS, **STT,
   VAD and keyword spotting** is worth more than four narrower packages"*
   (`.specify/memory/constitution.md:128-129`). **The project's own Complexity principle argued for

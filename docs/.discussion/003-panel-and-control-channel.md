@@ -1049,15 +1049,15 @@ Rules:
 > **Status: IMPLEMENTED while this section was being written.** Commit `393248f` *"gate dedup on a
 > per-file high-water mark, not an evictable id set"* landed part 2 below —
 > `#highWater = new Map<string, number>()` (`packages/plugin/src/huddle/index.ts:138`), persisted
-> under `HUDDLE_HIGH_WATER_KEY` (`:42`, read at `:112`, written at `:296`). The gate itself is
-> `packages/plugin/src/huddle/index.ts:266-268`: *"The high-water mark is the gate. The id set is
+> under `HUDDLE_HIGH_WATER_KEY` (`:138`, read at `:68`, written at `:68`). The gate itself is
+> `packages/plugin/src/huddle/index.ts:68`: *"The high-water mark is the gate. The id set is
 > only a secondary filter for duplicates within…"*. `MAX_REMEMBERED_IDS` is now
-> explicitly **not** load-bearing (`:44-47`). This section stays as the design record, and the two
+> explicitly **not** load-bearing (`:80`). This section stays as the design record, and the two
 > replay-buffer rules at the end are **not** covered by that commit — check them before closing
 > B-01.
 
-`MAX_REMEMBERED_IDS = 300` (`packages/plugin/src/huddle/index.ts:44`) caps the set of
-already-spoken reply uuids, and `#spoken` is trimmed to the last 300 (`:293-294`). Reply 1's id is
+`MAX_REMEMBERED_IDS = 300` (`packages/plugin/src/huddle/index.ts:80`) caps the set of
+already-spoken reply uuids, and `#spoken` is trimmed to the last 300 (`:87`). Reply 1's id is
 then **evicted while its transcript line is still on disk**. `WATCH_WINDOW_MS` re-opens the watch on
 every `agent.status.changed`, and ORCA re-forks the worker after five minutes idle (P20/P6), at
 which point `#spoken` is restored from storage — with at most 300 entries, or rebuilt empty. A long
