@@ -959,6 +959,28 @@ if (REFUSAL !== null) {
   console.error(`\nREFUSED:   ${REFUSAL}`)
 }
 
+/**
+ * WRITTEN FOR THE STRANGER WHO HITS THIS FIRST.
+ *
+ * When the gate finally goes red, the run prints a long list of stale citations and exits 1 — and
+ * almost none of that list is the reason. The reason is a single number, LOST, and without this
+ * sentence the reader's first move is to start re-numbering pointers, which is both the wrong work
+ * and the harmful work.
+ */
+if (REFUSAL === null && lost > LOST_LIMIT) {
+  console.error(
+    `\nGATE FAILED: ${lost} LOST, ratchet is ${LOST_LIMIT}.\n` +
+    '           A LOST citation is one whose anchor is NOWHERE in the file it points at — renamed,\n' +
+    '           moved, or deleted — so the CLAIM is in question, not just the line number.\n' +
+    `           The ${drifted} DRIFTED and ${quoteGone.length} QUOTE-GONE above are NOT why this failed and must not be\n` +
+    '           "fixed" to make it green: re-pointing a QUOTE-GONE row lands the pointer on a\n' +
+    '           remedy while the sentence beside it still describes the defect.\n' +
+    '           Find the LOST rows with --list (they are the ones with no "fix:" line), read the\n' +
+    '           claim, and correct the DOCUMENT. Then lower the ratchet in\n' +
+    '           docs/.research/citation-ratchet.json — it may only go down; see "gateChangedWhy".',
+  )
+}
+
 /* ---------------------------------------------------------------- drift vs loss
  *
  * WHY THE TOTAL IS THE WRONG THING TO RATCHET ON, stated with the number that showed it.

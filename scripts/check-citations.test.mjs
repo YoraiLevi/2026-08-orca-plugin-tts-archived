@@ -345,3 +345,30 @@ describe('the LOST gate can go red', () => {
     expect(code).toBe(0)
   })
 })
+
+/**
+ * The message a stranger meets the first time this gate goes red. Everything else in the output is
+ * a list of things they must NOT fix, so the run has to say which number failed it and why the
+ * long list is not the answer.
+ */
+describe('a failed gate explains itself', () => {
+  it('names LOST as the cause and warns off the buckets that are not', () => {
+    const { code, out } = fixture(
+      'See `packages/core/src/thing.ts:500` — `noSuchSymbolAnywhere` handles it.\n',
+      SOURCE_SHORT,
+    )(['--max-lost=0'])
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/^GATE FAILED: 1 LOST, ratchet is 0\./m)
+    expect(out).toContain('must not be')
+    expect(out).toContain('citation-ratchet.json')
+  })
+
+  it('CONTROL: a passing run does not print the failure explanation', () => {
+    const { code, out } = fixture(
+      'See `packages/core/src/thing.ts:500` — `noSuchSymbolAnywhere` handles it.\n',
+      SOURCE_SHORT,
+    )(['--max-lost=1'])
+    expect(code).toBe(0)
+    expect(out).not.toContain('GATE FAILED')
+  })
+})
