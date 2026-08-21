@@ -355,6 +355,35 @@ async function main() {
       console.log('                near-tie would be inventing one. The claim stays `[claimed]` here.')
       return 4
     }
+    /* The two signals can disagree, and when they do neither one gets to win quietly.
+     *
+     * `position` is a MARGIN measurement against a measured noise floor; `millionSpoken` is an
+     * EXACT checksum identity. Exact identity is the stronger evidence when it holds and the more
+     * brittle when it does not: a different voice build renders "one million" a few hundred bytes
+     * apart and the identity fails while the margin is untouched.
+     *
+     * Measured, CI run 32506050161 on the hosted macOS runner `[measured-here]`: position 0.013 —
+     * as deep in the words end as the axis goes, Δ744 from the words against Δ58,132 from
+     * digit-by-digit — while `millionSpoken` was false. The code fell through to "DOES NOT read
+     * as a number" and told the reader to extend numberToWords past 999,999. That is real work,
+     * on evidence that says the opposite.
+     *
+     * So: disagreement is INCONCLUSIVE, which is what the fourth outcome is for. A probe with two
+     * signals that silently prefers the harsher one is not being careful, it is guessing with a
+     * stern voice. */
+    if (position <= DEAD_BAND[0] && !millionSpoken) {
+      console.log(`  INCONCLUSIVE  ${engine.name}'s two signals DISAGREE, so this probe will not rule.`)
+      console.log(`                POSITION says number: ${position.toFixed(3)} on the axis, decisively`)
+      console.log('                nearer the spelled-out words than the digit-by-digit reference.')
+      console.log('                IDENTITY says otherwise: "1000000" and "one million" did NOT render')
+      console.log('                to the same checksum, which they do on an engine that speaks both')
+      console.log('                the same way. A voice build can break the identity while leaving the')
+      console.log('                margin intact, so this is not evidence of a defect — it is evidence')
+      console.log('                that these two tests are measuring different things here.')
+      console.log('                The claim stays `[claimed]` on this platform. Do NOT extend')
+      console.log('                numberToWords on the strength of this run.')
+      return 4
+    }
     if (position <= DEAD_BAND[0] && millionSpoken) {
       console.log(`  VERDICT  ${engine.name} reads a bare "${DIGITS}" AS A NUMBER, not as seven digits.`)
       console.log('           The normalizer\'s million ceiling is SAFE on this engine: handing the')
