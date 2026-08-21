@@ -17,7 +17,7 @@
  *
  *  1. **The downstream requirement is RESTATED here, never imported** (P36, P33). A seam test that
  *     imported the provider's own guard would compare that guard against itself and could not
- *     fail. `SPEAKABLE`, `providerWouldSpeak` and `argvIsSafeForBareExec` below are independent
+ *     fail. `SPEAKABLE` and `providerWouldSpeak` below are independent
  *     claims about what the far side needs, written from its documented behaviour and, where the
  *     behaviour was measured, from the measurement.
  *
@@ -110,23 +110,6 @@ function providerWouldSpeak (text: string): boolean {
   return SPEAKABLE.test(text)
 }
 
-/**
- * Is this string safe to hand to a bare `exec`-style argv, with no `--` end-of-options separator
- * in front of it?
- *
- * Restated from MEASUREMENT, not from the provider source (which is J24's live working set):
- *
- *   say -o t.wav --data-format=LEI16@22050 "<!"             -> exit 0, 4,332 bytes
- *   say -o t.wav --data-format=LEI16@22050 "--- Heading. "  -> exit 1, no file
- *       say: unrecognized option `--- Heading. '
- *
- * `[measured-here]`, n=3 on the failing case, macOS 26.5 (`017` R8-04). The Linux builder in the
- * same file passes `--` and is therefore immune; Windows interpolates into PowerShell and is immune
- * for a different reason. That asymmetry is the R1 parity defect this contract exists to pin.
- */
-function argvIsSafeForBareExec (text: string): boolean {
-  return !text.startsWith('-')
-}
 
 /* ================================================================== SC-1
  * seam: normalize() -> Chunker
@@ -204,39 +187,19 @@ describe('SC-2 — every chunk the Chunker mints carries a speakable glyph', () 
 })
 
 /* ================================================================== SC-3
- * seam: Chunker -> the spawned engine's ARGUMENT VECTOR
+ *
+ * MOVED AND REWRITTEN in round 10 -> `packages/providers/src/seams/argv-seam.test.ts`.
+ *
+ * The row that stood here asserted `argvIsSafeForBareExec(chunk.text)` -- a property of the CHUNK --
+ * and it was wrong. Chunk text will never be safe for a bare exec: an agent reply may legitimately
+ * open with a markdown horizontal rule and `normalize()` is right to keep it, so NOTHING THE CHUNKER
+ * COULD EVER DO would make that assertion pass. Once J24 fixed the real defect with the POSIX `--`
+ * separator, the row sat `it.fails`-green forever: an indicator that cannot go red for the thing it
+ * was built to detect, which is P32's shape inside the instrument rather than inside the code.
+ *
+ * The contract belongs to the ARGUMENT VECTOR THE PROVIDER BUILDS, not to the text it was handed,
+ * and it lives with the builders. See `019-review-round10.md` R10-07.
  */
-describe('SC-3 — no chunk begins with a character an argv parser reads as an option', () => {
-  /**
-   * VIOLATED TODAY (017 R8-04), and this is the one that costs a whole reply.
-   *
-   * A markdown horizontal rule survives `normalize()` -- "---\n\n# Heading" becomes
-   * "--- Heading. Body text here." -- so chunk 0 begins with '-'. macOS `say` parses it as an
-   * option and exits 1; `#synthesizeToFile` ignores the exit code, `readFile` then returns null,
-   * and `#speakOne` returns 'synthesis-failed' and RETURNS -- so the listener hears "A reply was
-   * cut short" and none of the reply.
-   *
-   * The fix belongs in the provider (`--`), not here: stripping '---' in the normalizer would close
-   * this trigger and leave the class open. This row stays until the argv is safe by construction.
-   */
-  it.fails('holds for every corpus input [OPEN: R8-04]', () => {
-    for (const [name, src] of corpus()) {
-      const spoken = normalize(src, {})
-      if (spoken.length === 0) continue
-      for (const [i, chunk] of chunksOf(spoken).entries()) {
-        expect(argvIsSafeForBareExec(chunk.text), `${name} chunk ${i}: ${JSON.stringify(chunk.text.slice(0, 40))}`).toBe(true)
-      }
-    }
-  })
-
-  it('holds for the six committed fixtures', () => {
-    for (const [name, src] of fixtureCorpus()) {
-      for (const [i, chunk] of chunksOf(normalize(src, {})).entries()) {
-        expect(argvIsSafeForBareExec(chunk.text), `${name} chunk ${i}`).toBe(true)
-      }
-    }
-  })
-})
 
 /* ================================================================== SC-4
  * seam: normalize() -> Chunker, token conservation ACROSS the seam

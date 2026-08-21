@@ -50,7 +50,7 @@ The bar makes the counter measure convergence rather than enthusiasm.
 | 7 | Adversarial review of everything rounds 4–6 produced | 1 | **31** | **no** | see `014-review-round7.md` |
 | 8 | Adversarial review of `PLAN.md`, `TASKS.md`, the constitution's budget table, `006` and `packages/core/src/**` — run, not read | 1 | **26** | **no** | see `017-review-round8.md`. 22 of 26 came from executing the code, 2 from a peer's implementation work re-verified here; **0** from reading a document |
 | 9 | **Build**, not review: `006` section 22 — seam contracts, one row per adjacent pair, each seen red | 1 | **7** | **no** | see `018-review-round9.md`. 10 rows, 3 seams asked-and-empty, 6 rows OPEN. Every row proved red; the mutation log is `018` section 4 |
-| 10 | Close section 22.5's own list; extend section 22 to the seams **into ORCA** | 1 | **6** | **no** | see `019-review-round10.md`. Seam 10 closed; the decoder gets rows; a 32,525-record census of the real transcript format, never taken before. **Recommends continuing past 10** — see below |
+| 10 | Close section 22.5's own list; extend section 22 to the seams **into ORCA** | 1 | **7** | **no** | see `019-review-round10.md`. Seam 10 closed; the decoder gets rows; a 32,525-record census of the real transcript format, never taken before. **Recommends continuing past 10** — see below |
 
 ## Parking lot
 
@@ -202,7 +202,7 @@ is necessary for a dry signal; on its own it is not sufficient.
 Round 10 closed the row round 9 called its own weakest, opened the first seam into ORCA, and took a
 census of the transcript format that ten rounds had only ever reasoned about.
 
-**6 items clear the bar**, against 7 and 26:
+**7 items clear the bar**, against 7 and 26:
 
 | Item | Clause |
 |---|---|
@@ -211,9 +211,10 @@ census of the transcript format that ten rounds had only ever reasoned about.
 | **R10-03** — the huddle fixture corpus models **2 of the 18** record types the real format emits, and omits the most common one entirely, so it cannot raise the question it would need to answer | 5 |
 | **R10-04** — seam 10 closed (SC-11); and a control assertion that could only recognise a report whose words it already knew, which mutation M11b walked straight through | 1 |
 | **R10-05** — the normalizer's *"DEPENDENCY-FREE"* header is load-bearing infrastructure for the Voice Lab's data-URL compile, written as prose with no instrument. **Violated during this round** and the Lab stopped booting; SC-13 is now the instrument | 3 |
-| **R10-06** — vitest resolves a `.js` specifier onto a `.ts` file and plain node does not, so **21 tests are green while `pnpm voice-lab` cannot start.** The suite never loads the code the way the product loads it; SC-14 is now the instrument, and it is red as committed | 3 |
+| **R10-06** — **three** resolvers disagree (vitest, plain node, `tsc`) and **no specifier satisfies all three**, so **21 tests are green while `pnpm voice-lab` cannot start.** The suite never loads the code the way the product loads it; SC-14 is now the instrument, and it is red as committed | 3 |
+| **R10-07** — **SC-3 was mis-specified by this round's own author** into an indicator that could not go red (P32 inside the instrument). The rewrite asserts the argv rather than the chunk, closes SC-3's platform gap on one machine, and finds **R8-06's residual**: the three exported builders still disagree, now about neutralisation | 3 |
 
-**Provenance, so the count can be read honestly:** R10-01 to R10-04 came from this round's own probing; **R10-05 and R10-06 arrived from peers' live work** and were verified here with controls before being written down. **Excluded and named**, so the count can be checked: mutation **M9** survived and the repo already
+**Provenance, so the count can be read honestly:** R10-01 to R10-04 came from this round's own probing; **R10-05, R10-06 and R10-07 arrived from peers' live work** and were verified here with controls before being written down. **Excluded and named**, so the count can be checked: mutation **M9** survived and the repo already
 knew why — `scripts/mutation-check.mjs` carries it as `thinking-continue-only`, marked
 `equivalent: true` with a better explanation than this round reached independently. And **three
 census hypotheses came back empty** (unknown block types 0 of 6,022; the 200-line prefix 0 of 60;
@@ -227,7 +228,7 @@ non-assistant prose 0 of 17 types), which is why R10-01 is filed as latent rathe
 |---|---|---|
 | 8 | 26 | running the pipeline over real and hostile input, first time ever |
 | 9 | 7 | seam instruments for the audio path |
-| 10 | **6** | seam instruments for the first ORCA-facing seam |
+| 10 | **7** | seam instruments for the first ORCA-facing seam |
 
 The bend is real. It is still not a dry signal, for two reasons the record states plainly:
 

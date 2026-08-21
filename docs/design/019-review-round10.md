@@ -15,7 +15,7 @@ is outside the repo entirely and cannot be perturbed by a peer. **No duration is
 this document**: the machine was at load 51 with six agents running, so every timing read today is
 noise, and none was taken.
 
-**Round 10 is NOT dry. 6 items clear the ledger bar.** Section 6 says so plainly, says what was
+**Round 10 is NOT dry. 7 items clear the ledger bar.** Section 6 says so plainly, says what was
 excluded, and argues — with the reason — that **the protocol should continue past round 10.**
 
 ---
@@ -181,7 +181,7 @@ before huddle can act on it, which is the same shape as R10-01's fix and should 
 **S2 for the tuning instrument** · `normalizer/index.ts:5`, `scripts/voice-lab.mjs` `stageFns()`, clause 3
 
 **Provenance, stated because it differs from everything else in this round.** R10-01 through R10-04
-came from this round's own probing. **R10-05 and R10-06 did not**: it arrived out of a peer's live work — J26
+came from this round's own probing. **R10-05, R10-06 and R10-07 did not**: it arrived out of a peer's live work — J26
 landed the import while closing SC-1/SC-2, and SC-7 and SC-8 went red mid-round. It is counted, and
 it is labelled, for the same reason round 9 labelled the J21/P37 items: a count is only trustworthy
 if it says where each item came from. What this round contributes is not the discovery that the Lab
@@ -276,12 +276,72 @@ This is section 22's thesis in its purest form: two components, two predicates f
 resolve"*, each correct for its own component's job, never compared — and the one that is wrong is
 the one everybody reads for reassurance.
 
+**It is THREE resolvers, not two, and no specifier satisfies all of them.** Measured after J26
+changed the specifier to `.ts` `[measured-here]`:
+
+| specifier | vitest | plain node | `tsc -b` |
+|---|---|---|---|
+| `'../speakable.js'` | passes | **`ERR_MODULE_NOT_FOUND`** | passes |
+| `'../speakable.ts'` | passes | passes | **`TS5097`** — *"an import path can only end with '.ts' when `allowImportingTsExtensions` is enabled"* |
+
+**So the fix is not a specifier.** Changing `.js` to `.ts` moves the failure from the product to the
+typechecker; changing it back moves it to the product. **Inlining the predicate — keeping the module
+free of cross-directory imports — is the only option that satisfies all three without a config
+change**, which is what the team lead had already told J26 to do for a different reason. This is the
+measurement that makes it the only option rather than the preferred one.
+
 **Resolution.** **SC-14**, added this round: import each module the Lab depends on in a **fresh plain
 node process** and require it to load. It carries **two** controls that must pass first — a clean
 module loads, and a module that does not exist is detected — so a probe that had stopped being able
 to fail could not deliver a verdict. **Deliberately NOT marked `it.fails`**, for SC-13's reason: this
 one means the Lab does not launch. It is **red as committed**, which is the correct state for an
 instrument whose subject is broken, and it turns green by itself when the specifier is fixed.
+
+### R10-07 — SC-3 was mis-specified by this round's own author, and the rewrite found R8-06's residual
+**S5 for the instrument; S2 latent for the seam** · `os-synth/index.ts`, clause 3
+
+**Provenance: the team lead, from J24's fix.** Counted, and labelled.
+
+**The instrument was wrong, and wrong in the way section 22 exists to catch.** SC-3 as written in
+round 9 asserted `argvIsSafeForBareExec(chunk.text)` — a property of the **chunk**. Chunk text will
+never be safe for a bare exec: an agent reply may legitimately open with a markdown horizontal rule,
+and `normalize()` is right to keep it. **Nothing the chunker could ever do would make that assertion
+pass.** Once J24 fixed the real defect the row sat `it.fails`-green forever — **an indicator that
+cannot go red for the thing it was built to detect, which is P32's shape inside the instrument
+rather than inside the code.**
+
+**The correct contract is a property of the argument vector the provider BUILDS**, not of the text it
+was handed: *for every chunk in the hostile corpus, on every platform branch, the constructed argv
+delivers the text as an operand and never as an option.* SC-3 (v2) is that, in
+`packages/providers/src/seams/argv-seam.test.ts`, over eight hostile rows × three platforms × three
+Linux rungs. Because J24 made the builders pure and exported *"so ONE hostile corpus can be run
+through ALL THREE"*, this **also closes section 22.5's "Windows and Linux are reasoned from source"
+gap for this row** — not by finding a real box, but by moving the claim to something a pure function
+can answer on any machine.
+
+**And running one corpus through all three found that they still do not agree.** `linuxCommand`
+neutralises `[[` itself, and its source says why: *"this builder is exported and is what the tests
+(and any future caller) reach"*. **That reasoning applies word for word to `darwinCommand` and
+`win32Command`, which are now also exported, and neither does it.** Production is safe —
+`#command` neutralises once at the spawn boundary before dispatching — so nothing a listener hears
+is wrong today. The hazard is in the **seam the exports created**: a direct caller of
+`darwinCommand`, the exact caller the Linux builder's comment anticipates, gets an argv carrying
+live `[[volm 0.2]]`, which is **NM14** — an agent reply that silently sets the assistive tool's
+volume to zero.
+
+**This is R8-06's residual, and its shape is why R8-06 was a row rather than a footnote**: one
+concept, three implementations, and fixing the *separator* asymmetry left the *neutralisation*
+asymmetry standing. Marked `it.fails`, unlike SC-13 and SC-14, because nothing audible is wrong yet.
+
+**The old row is not kept.** It asserted a property that cannot hold and would be a permanently-amber
+signal — the thing `PITFALLS` P32 says will camouflage the real failure when it comes. The marker
+came off because the new row genuinely passes, not as a shortcut.
+
+**The control is permanent, not a one-off mutation.** Proving this row can go red normally means
+editing `os-synth`, which belongs to another agent — and a temporary mutation in a tree five agents
+share is how P34 happens. So the assertion is run against a deliberately broken builder defined in
+the test file and required to fail; giving that builder a `--` makes the control itself go red,
+verified `[measured-here]`.
 
 ---
 
@@ -332,9 +392,10 @@ filed as *latent* rather than live.
 | **R10-03** — the fixture corpus models 2 of the 18 record types the format emits, so it cannot raise the question it would need to answer | 5 |
 | **R10-04** — seam 10 closed, the row round 9 called its weakest; and a control assertion that could not see a report whose words it did not know | 1 |
 | **R10-05** — the normalizer's *"DEPENDENCY-FREE"* header is load-bearing infrastructure for `stageFns()`'s data-URL compile, written as prose with no instrument; violated during this round, and the Voice Lab stopped booting | 3 |
-| **R10-06** — vitest resolves `.js`→`.ts` and plain node does not, so 21 tests are green while `pnpm voice-lab` cannot start. The suite never loads the code the way the product loads it | 3 |
+| **R10-06** — **three** resolvers disagree — vitest, plain node and `tsc` — and **no specifier satisfies all three**, so 21 tests are green while `pnpm voice-lab` cannot start. The suite never loads the code the way the product loads it | 3 |
+| **R10-07** — SC-3 was mis-specified by this round's own author into an indicator that could not go red; the rewrite closes SC-3's platform gap on one machine and finds R8-06's residual, the three exported builders still disagreeing about neutralisation | 3 |
 
-**6 clear the bar. Round 10 is not dry.** Excluded and named in section 6: the M9 equivalent mutant
+**7 clear the bar. Round 10 is not dry.** Excluded and named in section 6: the M9 equivalent mutant
 and the three empty census hypotheses.
 
 ### The yield curve
@@ -343,7 +404,7 @@ and the three empty census hypotheses.
 |---|---|---|
 | 8 | 26 | running the pipeline over real and hostile input, first time ever |
 | 9 | 7 | building seam instruments for the audio path |
-| 10 | **6** | building seam instruments for the first ORCA-facing seam |
+| 10 | **7** | building seam instruments for the first ORCA-facing seam |
 
 **That is a real bend, and it is still not a dry signal.** Two things say the protocol should
 continue past ten, and the author asked to be told plainly:
