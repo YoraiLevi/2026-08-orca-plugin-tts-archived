@@ -189,9 +189,11 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
         if (truncated) host.notify('Read Aloud', 'clipboard was long; reading the first part')
         s.speak(text)
       } catch (err) {
+        // Site 38: every non-ClipboardUnavailableError collapsed into one sentence, so a timeout,
+        // a permission prompt and a crashed helper were the same unactionable message.
         host.notify('Read Aloud', err instanceof ClipboardUnavailableError
           ? err.message
-          : 'could not read the clipboard')
+          : `could not read the clipboard: ${String(err)}`)
       }
     })
   })

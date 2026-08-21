@@ -324,3 +324,60 @@ describe('006 TT4/site 15 — a record with no uuid gets a STABLE id', () => {
     expect(decodeClaudeLine(mk('alpha'))?.id).not.toBe(decodeClaudeLine(mk('bravo'))?.id)
   })
 })
+
+/**
+ * 006 TT3 / site 14 — the race that survives P20's fix.
+ *
+ * The 250 ms debounce does not guarantee the writer finished a line, and `decodeClaudeLine` returns
+ * null for a half-flushed one — at which point it is indistinguishable from a user turn or tool
+ * traffic. If no further write ever touches the file, `fs.watch` never fires again and the FINAL
+ * REPLY OF A TURN is lost permanently. That is the most common reply to lose: the one the listener
+ * was actually waiting for.
+ */
+describe('006 TT3 — a half-written final line is re-read, not concluded on', () => {
+  it('speaks the reply that arrives as a half-flushed line', async () => {
+    const { root, worktree, file } = await scaffold()
+    const speech = new FakeSpeech()
+    const c = boot(root, new MemoryStore(), speech)
+    c.toggle()
+    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(20)
+
+    const line = JSON.stringify({
+      type: 'assistant', uuid: 'half-1',
+      message: { content: [{ type: 'text', text: 'the last reply of the turn' }] }
+    })
+    // Exactly what the agent CLI produces mid-flush: a prefix of the record, no newline.
+    await appendFile(file, line.slice(0, 40))
+    await settle()
+    expect(speech.spoken.join(' '), 'a partial line must not be spoken as if it were complete')
+      .not.toContain('the last reply')
+
+    // THE FIXTURE THAT MAKES THIS FAIL FOR THE RIGHT REASON (P33).
+    //
+    // Simply appending the rest would fire `fs.watch` again, and the reply would be spoken with or
+    // without this fix — a test that could not have failed. The failure TT3 describes is precisely
+    // "no further write touches the file, so fs.watch never fires again and it is lost
+    // permanently". So the watcher is closed FIRST: after this line, the scheduled re-read is the
+    // only thing left that can find the rest of the record.
+    c.dispose()
+    await appendFile(file, line.slice(40) + '\n')
+    await settle()
+    expect(speech.spoken.join(' '), 'the final reply of the turn was lost permanently')
+      .toContain('the last reply of the turn')
+    c.dispose()
+  })
+
+  it('CONTROL: a complete line is spoken without waiting for a retry', async () => {
+    const { root, worktree, file } = await scaffold()
+    const speech = new FakeSpeech()
+    const c = boot(root, new MemoryStore(), speech)
+    c.toggle()
+    c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
+    await settle(20)
+    await appendFile(file, record(1) + '\n')
+    await settle()
+    expect(speech.spoken).toContain('reply 1')
+    c.dispose()
+  })
+})

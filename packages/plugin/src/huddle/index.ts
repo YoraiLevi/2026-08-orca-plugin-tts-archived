@@ -81,6 +81,12 @@ export const MAX_TRACKED_FILES = 50
 /** The transcript flush lags the done event; keep watching this long after it. */
 export const WATCH_WINDOW_MS = 20_000
 const DEBOUNCE_MS = 250
+/**
+ * How many times a transcript ending mid-line is re-read before the line is called corrupt.
+ * Six x 250 ms = 1.5 s, comfortably longer than an agent CLI's flush and short enough that a
+ * genuinely broken record does not delay the next real reply.
+ */
+export const MAX_TRUNCATED_RETRIES = 6
 
 export interface HuddleDeps {
   readonly speech: SpeechPort
@@ -182,7 +188,9 @@ export class HuddleController {
 
   toggle(): boolean {
     this.#enabled = !this.#enabled
-    void this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled)
+    // Site 9: `void store.set(...)` — if storage is denied, the mode silently reverts on the next
+    // worker fork and the listener is never told why huddle "turned itself off".
+    this.#observe(this.#deps.store?.set(HUDDLE_STATE_KEY, this.#enabled), 'save the huddle setting')
     if (this.#enabled) {
       this.#primed.clear()          // re-prime every session on enable; never dump a backlog
       this.#reprime = true
@@ -190,7 +198,8 @@ export class HuddleController {
       void this.#persistFollowing()
     } else {
       this.#stopWatching()
-      void this.#deps.speech.stop()
+      // Site 10: a sink that cannot stop means huddle-off does not actually go quiet.
+      this.#observe(this.#deps.speech.stop(), 'stop speaking')
     }
     return this.#enabled
   }
@@ -209,7 +218,9 @@ export class HuddleController {
     // event payload of its own.
     if (worktreePath !== null) this.#lastWorktree = worktreePath
     if (!this.#enabled) return
-    void this.#ensureWatching(worktreePath)
+    // Site 11: the ENTIRE tailing path was launched unobserved, so any of sites 1-7 rejecting here
+    // produced an unhandled rejection and no sound.
+    this.#observe(this.#ensureWatching(worktreePath), 'start watching for replies')
   }
 
   dispose(): void { this.#stopWatching() }
@@ -330,12 +341,29 @@ export class HuddleController {
 
   #onChange(file: string): void {
     if (this.#debounce !== null) clearTimeout(this.#debounce)
-    this.#debounce = setTimeout(() => { void this.#speakNew(file) }, DEBOUNCE_MS)
+    // Site 12: `void this.#speakNew(file)` inside a setTimeout — a decode or persist failure
+    // rejected into nothing at all, from a callback with no caller to catch it.
+    this.#debounce = setTimeout(() => { this.#observe(this.#speakNew(file), 'read new replies') }, DEBOUNCE_MS)
   }
 
   async #speakNew(file: string): Promise<void> {
     if (!this.#enabled) return
-    const { replies, format } = await this.#read(file)
+    const { replies, format, truncated } = await this.#read(file)
+    if (truncated) {
+      const spent = this.#truncatedRetries.get(file) ?? 0
+      if (spent < MAX_TRUNCATED_RETRIES) {
+        // The writer is mid-line. Come back on our OWN timer, not on the next `fs.watch` event —
+        // the whole point of TT3 is that if no further write touches the file, that event never
+        // arrives. This timer survives `#stopWatching`, deliberately, for the same reason.
+        this.#truncatedRetries.set(file, spent + 1)
+        this.#deps.log(`read-aloud: transcript ends mid-line, re-read ${spent + 1}`)
+        setTimeout(() => { this.#observe(this.#speakNew(file), 'read new replies') }, DEBOUNCE_MS).unref?.()
+        return
+      }
+      // Out of retries: the line really is corrupt. Fall through and treat it as absent.
+      this.#deps.log('read-aloud: transcript last line is unreadable; treating it as absent')
+    }
+    this.#truncatedRetries.delete(file)
     if (format === 'unknown') {
       // Once per session, not per file change: an unreadable transcript is touched constantly.
       if (!this.#warnedUnreadable.has(file)) {
@@ -411,6 +439,20 @@ export class HuddleController {
     this.#watching = null
     if (this.#stopTimer !== null) { clearTimeout(this.#stopTimer); this.#stopTimer = null }
     if (this.#debounce !== null) { clearTimeout(this.#debounce); this.#debounce = null }
+  }
+
+  /**
+   * The one place a fire-and-forget promise is allowed, because it is not fire-and-forget any more.
+   *
+   * Sites 9-12 were four `void somePromise()` calls with no `.catch`. Each one is a whole subsystem
+   * — persistence, playback, tailing, decoding — failing into an unhandled rejection, which for
+   * this listener is exactly the same experience as the plugin not existing.
+   */
+  #observe(p: Promise<unknown> | undefined, what: string): void {
+    void Promise.resolve(p).catch((err: unknown) => {
+      this.#deps.log(`read-aloud: could not ${what}: ${String(err)}`)
+      this.#deps.notify(`Huddle could not ${what}, so replies may stop being spoken.`)
+    })
   }
 
   #projectsRoot(): string {
@@ -493,6 +535,13 @@ export class HuddleController {
   }
 
   /**
+   * Re-reads spent on a file whose last line was mid-write. Bounded, because a genuinely corrupt
+   * final line must not spin forever — after this many attempts the line really is unreadable and
+   * is treated as absent, which is what it now is.
+   */
+  #truncatedRetries = new Map<string, number>()
+
+  /**
    * Read a transcript with the decoder its own records call for.
    *
    * This used to call `decodeClaudeLine` unconditionally, so every non-Claude agent produced total
@@ -500,11 +549,27 @@ export class HuddleController {
    * supported (006 DC1). `format` is returned rather than swallowed so the caller can SAY that it
    * could not read the file — "unreadable" and "nothing new" were previously the same empty array.
    */
-  async #read(file: string): Promise<{ replies: DecodedReply[]; format: TranscriptFormat }> {
+  async #read(
+    file: string
+  ): Promise<{ replies: DecodedReply[]; format: TranscriptFormat; truncated: boolean }> {
     let raw: string
-    try { raw = await readFile(file, 'utf8') } catch { return { replies: [], format: 'unknown' } }
+    try {
+      raw = await readFile(file, 'utf8')
+    } catch (err) {
+      // Site 4: an unreadable transcript was indistinguishable from an empty one. `'unknown'`
+      // routes it to the spoken "cannot read this transcript" sentence instead of silence.
+      this.#deps.log(`read-aloud: cannot read ${file}: ${String(err)}`)
+      return { replies: [], format: 'unknown', truncated: false }
+    }
+    let lastNonEmpty = ''
+    for (const line of raw.split('\n')) if (line.trim().length > 0) lastNonEmpty = line
+    // Computed BEFORE the format check, deliberately. A transcript whose very first record is
+    // still mid-write parses as no known format, and returning 'unknown' here would announce
+    // "huddle cannot read this agent's transcript" — a false alarm, in the one channel the
+    // listener has, about a file that is perfectly readable a quarter of a second later.
+    const truncated = lastNonEmpty.length > 0 && !this.#isCompleteJson(lastNonEmpty)
     const format = detectTranscriptFormat(raw)
-    if (format === 'unknown') return { replies: [], format }
+    if (format === 'unknown') return { replies: [], format, truncated }
     const decode = decoderFor(format === 'claude' ? 'claude' : 'codex')
     const replies: DecodedReply[] = []
     for (const line of raw.split('\n')) {
@@ -512,6 +577,16 @@ export class HuddleController {
       const decoded = decode(line)
       if (decoded !== null) replies.push(decoded)
     }
-    return { replies, format }
+    // 006 TT3 / site 14, the race that survives P20's fix. The 250 ms debounce does not guarantee
+    // the writer finished a line, and `decodeClaudeLine` returns null for a half-flushed one — at
+    // which point it is indistinguishable from a user turn or tool traffic. If the LAST line of the
+    // file is not valid JSON, the file is very likely mid-write; if no further write ever touches
+    // it, `fs.watch` never fires again and that reply is lost permanently. Instrument exactly as
+    // the FMA specifies: detect it and re-read, rather than concluding there is nothing new.
+    return { replies, format, truncated }
+  }
+
+  #isCompleteJson(line: string): boolean {
+    try { JSON.parse(line); return true } catch { return false }
   }
 }

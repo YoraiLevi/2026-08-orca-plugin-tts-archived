@@ -155,6 +155,7 @@ export class SpeechService {
   #dropTimer: ReturnType<typeof setTimeout> | null = null
   #losses = new Map<LossKind, number>()
   #lossTimer: ReturnType<typeof setTimeout> | null = null
+  #reportingFailure = false
 
   constructor(deps: SpeechServiceDeps) {
     this.#deps = deps
@@ -194,7 +195,7 @@ export class SpeechService {
       // deleted the queue would be the C5 fault ("asking what is happening destroys what is
       // happening") wearing the uniform of the fix for it.
       this.#skip = true
-      void this.#playback.bargeIn()
+      this.#observe(this.#playback.bargeIn(), 'stop the current sentence')
     }
     // Ahead of queued replies, behind any announcement already waiting, so a run of announcements
     // is heard in the order it was generated.
@@ -202,7 +203,7 @@ export class SpeechService {
     while (this.#pending[at]?.announcement === true) at++
     this.#pending.splice(at, 0, { text, announcement: true })
     this.#cancelled = false
-    void this.#drain()
+    this.#observe(this.#drain(), 'read that text')
   }
 
   /**
@@ -253,7 +254,9 @@ export class SpeechService {
       // agent replies the listener was waiting for. Report the loss before speaking over it.
       const discarded = this.#pending.filter((p) => p.announcement !== true).length
       this.#pending = this.#pending.filter((p) => p.announcement === true)
-      void this.#playback.bargeIn()
+      // Site 29: `void this.#playback.bargeIn()` — a sink that cannot stop rejected into nothing,
+      // so the new text was spoken OVER the old one with no signal.
+      this.#observe(this.#playback.bargeIn(), 'stop the current sentence')
       if (discarded > 0) this.#noteDropped(discarded)
     }
     this.#pending.push(label === undefined ? { text } : { text, label })
@@ -279,6 +282,24 @@ export class SpeechService {
    * mid-word. Interrupting the sentence the listener is currently following to tell them about a
    * sentence they already lost is a second loss, not a fix for the first (P30).
    */
+  /**
+   * Sites 29 and 30: two `void somePromise()` calls with no handler. `#drain` in particular can
+   * reject from `normalize()` or the `Chunker` (NM11), and an unhandled rejection is, to this
+   * listener, indistinguishable from the agent never having answered.
+   *
+   * Reported through `announce`, not through `log`: the log is not a channel they have. Guarded
+   * against recursion — if announcing the failure fails too, it stops there rather than looping.
+   */
+  #observe(p: Promise<unknown>, what: string): void {
+    void p.catch((err: unknown) => {
+      this.#deps.log?.(`could not ${what}: ${String(err)}`)
+      if (this.#reportingFailure) return
+      this.#reportingFailure = true
+      try { this.announce(`Speech failed: could not ${what}.`, 'next') }
+      finally { this.#reportingFailure = false }
+    })
+  }
+
   #noteLoss(kind: LossKind, count = 1): void {
     this.#losses.set(kind, (this.#losses.get(kind) ?? 0) + count)
     if (this.#lossTimer !== null) return   // one flush per window; do NOT restart the timer
