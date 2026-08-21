@@ -13,7 +13,8 @@ import { pathToFileURL } from 'node:url'
 
 import {
   STAGES, computeStages, assertSourceModule, assertLoadedModuleIsOnDiskSource,
-  speak, providerError, SPOKE_ELSEWHERE_DISABLED,
+  speak, speakStream, providerError, installHintFor, lossAnnouncement, countWord,
+  isProviderUnavailable, parseArgs, createLabServer, SPOKE_ELSEWHERE_DISABLED,
   settingsPathFor, stripJsonComments, checkRevision, readSettings, writeSettings,
   safeJoin, REPO_ROOT
 } from './voice-lab.mjs'
@@ -22,18 +23,18 @@ const NORMALIZER = join(REPO_ROOT, 'packages/core/src/normalizer/index.ts')
 
 /* ------------------------------------------------------------------ the stage ladder */
 
-describe('the 15-stage ladder is the pipeline, not a description of it', () => {
-  it('has exactly 15 stages, in the order normalize() calls them', () => {
+describe('the 16-stage ladder is the pipeline, not a description of it', () => {
+  it('has exactly 16 stages, in the order normalize() calls them', () => {
     // 004 section 4 corrects three documents that disagreed. The source was counted:
     // packages/core/src/normalizer/index.ts:96-109.
-    expect(STAGES).toHaveLength(15)
+    expect(STAGES).toHaveLength(16)
     expect(STAGES.map((s) => s.name)).toEqual([
-      'stripFencedCode', 'stripInlineCode', 'expandMarkdownLinks', 'stripUrls',
+      'stripFencedCode', 'stripHtmlComments', 'stripInlineCode', 'expandMarkdownLinks', 'stripUrls',
       'headingsToPauses', 'listItemsToSentences', 'tablesToRows', 'speakFilePaths',
       'stripMarkdownMarkers', 'speakKeyGlyphs', 'stripEmoji', 'expandUnits',
       'expandNumbers', 'collapseWhitespace', 'tidyPunctuation'
     ])
-    expect(STAGES.map((s) => s.n)).toEqual([...Array(15)].map((_, i) => i + 1))
+    expect(STAGES.map((s) => s.n)).toEqual([...Array(16)].map((_, i) => i + 1))
   })
 
   it('the incremental ladder reproduces normalize() on every committed fixture', async () => {
@@ -59,9 +60,9 @@ describe('the 15-stage ladder is the pipeline, not a description of it', () => {
     expect(stages[6].text).toContain('normalizer/index.ts')
   })
 
-  it('keeps 15 rows when a stage is switched off, and marks it not-applied', async () => {
+  it('keeps 16 rows when a stage is switched off, and marks it not-applied', async () => {
     const { stages } = await computeStages('a/b/c.ts\n', { pathStyle: 'verbatim', expandNumbers: false })
-    expect(stages).toHaveLength(15)
+    expect(stages).toHaveLength(16)
     expect(stages.find((s) => s.name === 'speakFilePaths').applied).toBe(false)
     expect(stages.find((s) => s.name === 'expandUnits').applied).toBe(false)
     expect(stages.find((s) => s.name === 'expandNumbers').applied).toBe(false)
@@ -193,6 +194,336 @@ describe('004 section 2 — there are three provider outcomes, not two', () => {
     expect(providerError('boom').body.message).toBe('boom')
   })
 })
+
+
+/* ------------------------------------------------------------------ FR-024: the stream */
+
+/** One sentence per chunk, so "chunk 1 while chunk 2 synthesizes" is about the sentences we wrote
+ *  and not about where the chunker happened to draw its boundaries. Units are CHARACTERS. */
+const ONE_PER_CHUNK = { chunk: { maxUnits: 60 } }
+const S1 = 'The first sentence is exactly this long here.'
+const S2 = 'The second sentence is exactly this long too.'
+const S3 = 'The third sentence is also about this long.'
+const THREE = `${S1} ${S2} ${S3}`
+const TWO = `${S1} ${S2}`
+
+/**
+ * A provider whose `generate()` can be held open, so "chunk 1 was delivered while chunk 2 was
+ * still being synthesized" is a fact the test can WATCH rather than infer from a duration.
+ */
+function gatedProvider ({ backend = null, fail = () => null } = {}) {
+  const calls = []
+  const gates = []
+  const self = {
+    linuxBackend: backend,
+    calls,
+    completed: 0,          // generate() calls that have RUN TO COMPLETION, not merely started
+    /** Release the i-th `generate()` call, letting it yield its bytes. */
+    release (i) { gates[i] ??= makeGate(); gates[i].open() },
+    /** Resolves when the i-th `generate()` has been ENTERED. */
+    entered (i) {
+      gates[i] ??= makeGate()
+      return gates[i].enteredPromise
+    },
+    async prepare () {},
+    async * generate (text) {
+      const i = calls.length
+      calls.push(text)
+      gates[i] ??= makeGate()
+      gates[i].enter()
+      await gates[i].openPromise
+      const err = fail(text, i)
+      if (err) throw err
+      yield { data: new Uint8Array([82, 73, 70, 70, i]), format: 'wav', sampleRate: 22050, channels: 1 }
+      self.completed++
+    },
+    cancel () {}
+  }
+  return self
+}
+
+/** Release each `generate()` as soon as it is entered — for tests that stage failures, not timing. */
+function pump (p, n = 8) { for (let i = 0; i < n; i++) void p.entered(i).then(() => p.release(i)) }
+
+function makeGate () {
+  let enter, open
+  const enteredPromise = new Promise((r) => { enter = r })
+  const openPromise = new Promise((r) => { open = r })
+  return { enter: () => enter(), open: () => open(), enteredPromise, openPromise }
+}
+
+describe('FR-024 — chunk 1 is delivered while chunk 2 is still being synthesized', () => {
+  it('yields the first chunk before generate() has been called for the second', async () => {
+    const p = gatedProvider()
+    const it = speakStream(p, THREE, ONE_PER_CHUNK)
+
+    const head = await it.next()
+    expect(head.value.kind).toBe('head')
+    expect(head.value.chunkCount).toBe(3)
+    expect(p.calls).toEqual([])                       // nothing synthesized to answer the head
+
+    // Ask for the next record, THEN let only the first `generate()` finish.
+    const pending = it.next()
+    await p.entered(0)
+    p.release(0)
+    const first = await pending
+
+    // THE ASSERTION THIS FILE EXISTS FOR. Chunk 1 is in the consumer's hands and the provider has
+    // been asked for exactly one chunk: chunk 2 has not been synthesized, and is not waited for.
+    expect(first.value.kind).toBe('chunk')
+    expect(first.value.i).toBe(0)
+    expect(p.calls).toHaveLength(1)
+
+    p.release(1); p.release(2)
+    const rest = []
+    for await (const rec of it) rest.push(rec)
+    expect(rest.map((r) => r.kind)).toEqual(['chunk', 'chunk', 'end'])
+    expect(rest.at(-1).delivered).toBe(3)
+  })
+
+  it('over HTTP: the first NDJSON line reaches the client before the last chunk is synthesized',
+    async () => {
+      const p = gatedProvider()
+      const { base, close } = await listen(createLabServer({ provider: p }))
+      try {
+        const posted = fetch(base + '/speak', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: TWO, options: ONE_PER_CHUNK })
+        })
+        // The head is not written until the first chunk exists, so releasing chunk 1 is what makes
+        // the response arrive at all — and what arrives is a STREAM, not an envelope.
+        await p.entered(0)
+        p.release(0)
+        const res = await posted
+        expect(res.headers.get('content-type')).toMatch(/ndjson/)
+
+        const lines = readLines(res)
+        expect((await lines.next()).value.kind).toBe('head')
+        const chunk = (await lines.next()).value
+        expect(chunk.kind).toBe('chunk')
+        // The client is HOLDING chunk 1 and exactly one `generate()` has finished: the second
+        // sentence is still inside the synthesizer. That is FR-024, watched rather than timed.
+        expect(p.completed).toBe(1)
+        expect(p.calls).toHaveLength(2)     // started, not finished — the overlap is the point
+
+        p.release(1)
+        const seen = [chunk.kind]
+        for await (const rec of lines) seen.push(rec.kind)
+        expect(seen).toEqual(['chunk', 'chunk', 'end'])
+      } finally { await close() }
+    })
+
+  it('{ stream: false } still returns the single envelope — FR-026 needs a disabled path',
+    async () => {
+      const p = fakeProvider({ backend: 'espeak-ng' })
+      const { base, close } = await listen(createLabServer({ provider: p }))
+      try {
+        const res = await fetch(base + '/speak', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: TWO, options: ONE_PER_CHUNK, stream: false })
+        })
+        expect(res.headers.get('content-type')).toMatch(/application\/json/)
+        const body = await res.json()
+        expect(body.chunks).toHaveLength(2)
+        expect(body.chunkCount).toBe(2)
+      } finally { await close() }
+    })
+
+  it('an abort between chunks stops the synthesizer — Stop is pushed, not polled', async () => {
+    const p = fakeProvider({ backend: 'espeak-ng' })
+    const ac = new AbortController()
+    const recs = []
+    for await (const rec of speakStream(p, THREE, ONE_PER_CHUNK, { signal: ac.signal })) {
+      recs.push(rec)
+      if (rec.kind === 'chunk' && rec.i === 0) ac.abort()
+    }
+    expect(p.calls).toHaveLength(1)                       // chunks 2 and 3 were never synthesized
+    expect(recs.at(-1).kind).toBe('end')
+    expect(recs.at(-1).aborted).toBe(true)
+  })
+})
+
+/* ------------------------------------------------------------------ one unspeakable chunk */
+
+describe('one unspeakable chunk does not kill the utterance (P30: the loss is SPOKEN)', () => {
+  const empty = () => Object.assign(new Error('say exited successfully but its audio file could not be read'), { name: 'OsSynthEmptyOutputError' })
+
+  it('delivers the chunks that worked, names the one that did not, and speaks the loss', async () => {
+    const p = gatedProvider({ fail: (_t, i) => (i === 1 ? empty() : null) })
+    const recs = []
+    pump(p)
+    for await (const r of speakStream(p, THREE, ONE_PER_CHUNK)) recs.push(r)
+
+    expect(recs.map((r) => r.kind)).toEqual(['head', 'chunk', 'chunk-error', 'chunk', 'chunk', 'end'])
+    const errRec = recs.find((r) => r.kind === 'chunk-error')
+    expect(errRec.i).toBe(1)
+    expect(errRec.name).toBe('OsSynthEmptyOutputError')
+    expect(errRec.message).toMatch(/could not be read/)
+
+    // The listener HEARS the loss: the last chunk is a synthesized sentence, not a log line.
+    const spokenChunks = recs.filter((r) => r.kind === 'chunk')
+    expect(spokenChunks).toHaveLength(3)                  // two survivors plus the announcement
+    expect(spokenChunks.at(-1).announcement).toBe(true)
+    expect(spokenChunks.at(-1).text).toBe('one of three parts could not be spoken and was skipped.')
+    expect(p.calls.at(-1)).toBe('one of three parts could not be spoken and was skipped.')
+
+    const end = recs.at(-1)
+    expect(end.ok).toBe(true)
+    expect(end.lost).toBe(1)
+    expect(end.delivered).toBe(3)
+    expect(end.announcementSpoken).toBe(true)
+  })
+
+  it('CONTROL: with nothing failing there is no announcement and nothing extra is synthesized',
+    async () => {
+      const p = fakeProvider({ backend: 'espeak-ng' })
+      const recs = []
+      for await (const r of speakStream(p, THREE, ONE_PER_CHUNK)) recs.push(r)
+      expect(recs.at(-1).lost).toBe(0)
+      expect(recs.at(-1).announcement).toBe(null)
+      expect(p.calls).toHaveLength(3)                     // exactly the three sentences
+    })
+
+  it('the loss sentence coalesces and is written in WORDS, since it bypasses normalize()', () => {
+    // Restated here as an independent claim, not imported from the source (PITFALLS P36).
+    expect(lossAnnouncement(1, 3)).toBe('one of three parts could not be spoken and was skipped.')
+    expect(lossAnnouncement(3, 13)).toBe('three of thirteen parts could not be spoken and were skipped.')
+    expect(lossAnnouncement(0, 13)).toBe(null)
+    expect(countWord(2)).toBe('two')
+    expect(countWord(21)).toBe('21')
+    expect(lossAnnouncement(1, 3)).not.toMatch(/[0-9]/)   // a numeral here is read by the synth raw
+  })
+
+  it('if the announcement itself cannot be synthesized, the loss is still reported, not dropped',
+    async () => {
+      const p = gatedProvider({ fail: (t, i) => (i === 1 || i === 3 ? empty() : null) })
+      const recs = []
+      pump(p)
+      for await (const r of speakStream(p, THREE, ONE_PER_CHUNK)) recs.push(r)
+      const end = recs.at(-1)
+      expect(end.announcement).toBe('one of three parts could not be spoken and was skipped.')
+      expect(end.announcementSpoken).toBe(false)          // the page says it through its other channels
+      expect(end.ok).toBe(true)
+    })
+
+  it('a provider that is genuinely unavailable is STILL a real 503, mid-utterance', async () => {
+    const gone = Object.assign(new Error('No OS speech synthesizer found on darwin. Tried: say'), { name: 'OsSynthUnavailableError' })
+    const p = gatedProvider({ fail: (_t, i) => (i === 1 ? gone : null) })
+    const recs = []
+    pump(p)
+    for await (const r of speakStream(p, THREE, ONE_PER_CHUNK)) recs.push(r)
+    expect(recs.at(-1).kind).toBe('fatal')
+    expect(recs.at(-1).status).toBe(503)
+    expect(recs.at(-1).body.message).toMatch(/No OS speech synthesizer/)
+    expect(p.calls).toHaveLength(2)                       // it did not keep trying
+    expect(isProviderUnavailable(gone)).toBe(true)
+    expect(isProviderUnavailable(empty())).toBe(false)    // the control: one chunk, not the machine
+  })
+
+  it('EVERY chunk failing is a 503 over HTTP, not a 200 with no audio', async () => {
+    const p = fakeProvider({ backend: 'espeak-ng', throwOnGenerate: empty() })
+    const { base, close } = await listen(createLabServer({ provider: p }))
+    try {
+      const res = await fetch(base + '/speak', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: TWO, options: ONE_PER_CHUNK })
+      })
+      expect(res.status).toBe(503)
+      const body = await res.json()
+      expect(body.failedChunks).toBe(2)
+      expect(body.message).toMatch(/all 2 chunks failed/)
+    } finally { await close() }
+  })
+
+  it('CONTROL: one failure of two over HTTP is a 200 stream, and the survivor is delivered',
+    async () => {
+      const p = gatedProvider({ backend: 'espeak-ng', fail: (_t, i) => (i === 0 ? empty() : null) })
+      const { base, close } = await listen(createLabServer({ provider: p }))
+      try {
+        const post = fetch(base + '/speak', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: TWO, options: ONE_PER_CHUNK })
+        })
+        pump(p)
+        const res = await post
+        expect(res.status).toBe(200)
+        const recs = []
+        for await (const rec of readLines(res)) recs.push(rec)
+        expect(recs.map((r) => r.kind)).toEqual(['head', 'chunk-error', 'chunk', 'chunk', 'end'])
+        expect(recs.at(-1).lost).toBe(1)
+        expect(recs.at(-1).delivered).toBe(2)
+      } finally { await close() }
+    })
+})
+
+/* ------------------------------------------------------------------ the remedy must fit */
+
+describe('the 503 hands out a remedy for THIS platform, or none at all (P18)', () => {
+  it('offers no install hint on macOS: `say` is part of the operating system', () => {
+    const err = Object.assign(new Error('say exited successfully but its audio file could not be read'), { name: 'OsSynthEmptyOutputError' })
+    const { body } = providerError(err, 'darwin')
+    expect(body.installHint).toBe(null)
+    expect(body.platform).toBe('darwin')
+    expect(JSON.stringify(body)).not.toMatch(/apt install/)   // the actual G-1 defect
+  })
+
+  it('offers none on Windows either — SAPI is not installable', () => {
+    expect(installHintFor('win32', 'anything')).toBe(null)
+  })
+
+  it('CONTROL: on Linux the hint IS the remedy, because there it really is a missing package', () => {
+    const hint = installHintFor('linux', 'No Linux speech synthesizer found. Tried: espeak-ng')
+    expect(hint).toMatch(/apt install espeak-ng/)
+    // and it is not repeated when the provider's own message already carries it
+    expect(installHintFor('linux', hint)).toBe(null)
+  })
+})
+
+/* ------------------------------------------------------------------ the flag */
+
+describe('--port is honoured, or refused loudly — never ignored', () => {
+  it('accepts both spellings', () => {
+    expect(parseArgs(['--port=7399']).port).toBe(7399)
+    expect(parseArgs(['--port', '7399']).port).toBe(7399)   // silently ignored before this fix
+    expect(parseArgs([]).port).toBe(7311)
+  })
+
+  it('refuses what it does not understand, by name', () => {
+    expect(() => parseArgs(['--prot=7399'])).toThrow(/unrecognised argument/)
+    expect(() => parseArgs(['--port', 'seven'])).toThrow(/integer from 0 to 65535/)
+    expect(() => parseArgs(['--port=99999'])).toThrow(/integer from 0 to 65535/)
+  })
+})
+
+/** Listen on an ephemeral port and hand back the base URL plus a closer. */
+async function listen (server) {
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok))
+  return {
+    base: `http://127.0.0.1:${server.address().port}`,
+    close: () => new Promise((ok) => server.close(ok))
+  }
+}
+
+/** Iterate an NDJSON response as parsed records. */
+async function * readLines (res) {
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    let nl
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+      if (line.trim()) yield JSON.parse(line)
+    }
+  }
+  if (buf.trim()) yield JSON.parse(buf)
+}
 
 /* ------------------------------------------------------------------ the settings inbox */
 

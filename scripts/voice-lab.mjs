@@ -84,9 +84,9 @@ export function assertSourceModule (moduleUrl, label = 'module') {
   return path
 }
 
-/* ================================================================= the 15 stages
+/* ================================================================= the 16 stages
  *
- * `normalize()` composes 15 transforms (`packages/core/src/normalizer/index.ts:96-109`). 004
+ * `normalize()` composes 16 transforms — J21 added `stripHtmlComments` at 2. 004
  * section 4 corrects three documents that disagreed; the count below was taken from the source,
  * and `assertLoadedModuleIsOnDiskSource()` keeps it that way.
  *
@@ -100,20 +100,23 @@ export function assertSourceModule (moduleUrl, label = 'module') {
  */
 export const STAGES = [
   { n: 1, name: 'stripFencedCode', controlIds: ['omit.codeBlocks', 'omit.codeBlockPhrase', 'omit.codeBlockDetail'] },
-  { n: 2, name: 'stripInlineCode', controlIds: ['omit.inlineCode', 'ident.style', 'ident.parens'] },
-  { n: 3, name: 'expandMarkdownLinks', controlIds: [] },
-  { n: 4, name: 'stripUrls', controlIds: ['omit.urls', 'omit.urlPhrase'] },
-  { n: 5, name: 'headingsToPauses', controlIds: ['struct.headingCue', 'struct.headingPauseMs'] },
-  { n: 6, name: 'listItemsToSentences', controlIds: ['struct.orderedLists', 'struct.bulletMarker'] },
-  { n: 7, name: 'tablesToRows', controlIds: ['struct.tableLeadIn', 'struct.tableHeaderRepeat', 'struct.tableFirstCellHeader'] },
-  { n: 8, name: 'speakFilePaths', controlIds: ['path.style', 'path.extensionStyle', 'path.namePhrase', 'path.folderPhrase', 'path.depthPolicy', 'path.depthN', 'path.extensionWords'] },
-  { n: 9, name: 'stripMarkdownMarkers', controlIds: ['ident.style', 'ident.parens'] },
-  { n: 10, name: 'speakKeyGlyphs', controlIds: [] },
-  { n: 11, name: 'stripEmoji', controlIds: ['omit.emoji'] },
-  { n: 12, name: 'expandUnits', controlIds: ['num.expandUnits', 'num.unitWords'] },
-  { n: 13, name: 'expandNumbers', controlIds: ['num.expandIntegers', 'num.decimals'] },
-  { n: 14, name: 'collapseWhitespace', controlIds: [] },
-  { n: 15, name: 'tidyPunctuation', controlIds: [] }
+  // J21 bug 1. No control governs it: whether an HTML comment is spoken is not taste. It is
+  // source markup addressed to a reader of the FILE, and the listener is not that reader.
+  { n: 2, name: 'stripHtmlComments', controlIds: [] },
+  { n: 3, name: 'stripInlineCode', controlIds: ['omit.inlineCode', 'ident.style', 'ident.parens'] },
+  { n: 4, name: 'expandMarkdownLinks', controlIds: [] },
+  { n: 5, name: 'stripUrls', controlIds: ['omit.urls', 'omit.urlPhrase'] },
+  { n: 6, name: 'headingsToPauses', controlIds: ['struct.headingCue', 'struct.headingPauseMs'] },
+  { n: 7, name: 'listItemsToSentences', controlIds: ['struct.orderedLists', 'struct.bulletMarker'] },
+  { n: 8, name: 'tablesToRows', controlIds: ['struct.tableLeadIn', 'struct.tableHeaderRepeat', 'struct.tableFirstCellHeader'] },
+  { n: 9, name: 'speakFilePaths', controlIds: ['path.style', 'path.extensionStyle', 'path.namePhrase', 'path.folderPhrase', 'path.depthPolicy', 'path.depthN', 'path.extensionWords'] },
+  { n: 10, name: 'stripMarkdownMarkers', controlIds: ['ident.style', 'ident.parens'] },
+  { n: 11, name: 'speakKeyGlyphs', controlIds: [] },
+  { n: 12, name: 'stripEmoji', controlIds: ['omit.emoji'] },
+  { n: 13, name: 'expandUnits', controlIds: ['num.expandUnits', 'num.unitWords'] },
+  { n: 14, name: 'expandNumbers', controlIds: ['num.expandIntegers', 'num.decimals'] },
+  { n: 15, name: 'collapseWhitespace', controlIds: [] },
+  { n: 16, name: 'tidyPunctuation', controlIds: [] }
 ]
 
 const STAGE_EXPORT = `
@@ -137,7 +140,7 @@ export async function stageFns () {
 }
 
 /**
- * Run the 15 transforms incrementally and record what each one produced.
+ * Run the 16 transforms incrementally and record what each one produced.
  *
  * A stage the options switch off is still a row — it reports `applied: false` and unchanged text,
  * because a ladder that silently shortens is a ladder whose numbers stop meaning anything.
@@ -154,6 +157,7 @@ export async function computeStages (md, opts = {}) {
   // `assertLoadedModuleIsOnDiskSource()` is what stops it from drifting silently.
   const apply = [
     (s) => fn.stripFencedCode(s, codeBlocks),
+    (s) => fn.stripHtmlComments(s),
     (s) => fn.stripInlineCode(s),
     (s) => fn.expandMarkdownLinks(s),
     (s) => fn.stripUrls(s),
@@ -213,7 +217,7 @@ export async function assertLoadedModuleIsOnDiskSource (fixtureDir = join(REPO_R
     const { spoken, ladderSpoken } = await computeStages(text)
     if (spoken !== ladderSpoken) {
       throw new Error(
-        `SOURCE/IMPORT MISMATCH on fixture ${name}. The 15-stage ladder (compiled from ` +
+        `SOURCE/IMPORT MISMATCH on fixture ${name}. The 16-stage ladder (compiled from ` +
         `${NORMALIZER_SRC}) and the imported normalize() disagree. Either the import is resolving ` +
         'to a BUILT copy (PITFALLS P17) or the stage list in scripts/voice-lab.mjs has drifted ' +
         'from normalize(). Refusing to start: the listener would be tuning a normalizer that is ' +
@@ -230,15 +234,113 @@ export async function assertLoadedModuleIsOnDiskSource (fixtureDir = join(REPO_R
  */
 export const SPOKE_ELSEWHERE_DISABLED = ['compare', 'replay', 'stage-play', 'timing']
 
+/* ================================================================= the wire format
+ *
+ * `POST /speak` streams **NDJSON over one chunked response**: one JSON object per line, flushed the
+ * instant it exists. Chunk 1 reaches the page while chunk 2 is still in the synthesizer — FR-024,
+ * and the reason Gate M11 was measured at p95 3,401 ms on a two-chunk fixture and 22,755 ms on a
+ * thirteen-chunk one (`docs/.research/m11-gate.md` section 0). Serialized synthesis WAS the reading.
+ *
+ * WHY NDJSON-OVER-CHUNKED, and what it was chosen against:
+ *
+ *   SSE (`text/event-stream`).  Rejected. `EventSource` is GET-only, so the options object would
+ *     have to travel in a query string or in a separate POST — a two-call handle by the back door.
+ *     Driving SSE over `fetch` instead means parsing `data:` framing by hand, which is strictly
+ *     more work than splitting on `\n`, and buys only auto-reconnect — a misfeature here, because
+ *     a reconnect would silently re-synthesize an utterance the listener already interrupted.
+ *
+ *   Two-call handle + poll (`POST /speak` -> id, then `GET /speak/<id>/<i>`).  Rejected. It adds a
+ *     round trip per chunk and a poll interval to a budget where one sentence already costs 1,138 ms,
+ *     and it needs server-side state with a lifetime, which is a second thing to get wrong. Its one
+ *     real advantage — surviving a dropped connection — is worthless for a lab on 127.0.0.1.
+ *
+ *   NDJSON over chunked transfer.  Taken. Abort is the transport's own: the page's `AbortController`
+ *     aborts the `fetch`, the socket closes, the server sees `close` and aborts the synthesizer, so
+ *     Stop stays PUSHED and never polled (HANDOFF: p50 120 ms / p99 250 ms). Backpressure is TCP's,
+ *     honoured by awaiting `drain` before synthesizing the next chunk, so a slow page cannot make
+ *     the server buffer a whole fixture of WAVs in memory. Error-mid-stream is a RECORD, not a
+ *     status code, which is the one thing this format must do that a single envelope cannot.
+ *
+ * The records, in order:
+ *   { kind: 'head',        played, backend, spoken, chunkCount, timings }   exactly one, first
+ *   { kind: 'chunk',       i, text, boundary, isFirst, format, ... base64 } zero or more
+ *   { kind: 'chunk-error', i, text, name, message }                        zero or more
+ *   { kind: 'end',         ok, delivered, lost, announcement, timings }     exactly one, last
+ *
+ * THE HTTP STATUS IS STILL HONEST. The response head is held back until the first chunk actually
+ * synthesizes. A provider that is genuinely unavailable — or that fails on every chunk — therefore
+ * still answers a real `503` with the provider's own words, exactly as before. Once the first bytes
+ * are out the status is spent, and later trouble is reported in-band. That is the whole reason the
+ * head is deferred rather than written eagerly.
+ *
+ * `{ stream: false }` opts out and returns the old single envelope. Two callers genuinely need it:
+ * FR-026's negative control (the harness must be able to run the gate with streaming DISABLED and
+ * watch it exceed 2,000 ms — without this flag that control is unrunnable, finding G-4), and
+ * `scripts/ci/voice-lab-ci.mjs`, which asserts one platform outcome and wants one object.
+ */
+
 /**
- * normalize -> chunk -> synthesize, returning base64 WAV chunks. No player, ever.
+ * Errors that mean THE PROVIDER IS UNAVAILABLE, not that one chunk was unspeakable.
+ *
+ * The distinction is the whole of Fix 2. `say` exiting successfully with an unreadable audio file
+ * is a fact about THAT TEXT — the next chunk is very likely fine, and 503-ing the request throws
+ * away audio the listener could have heard. "There is no synthesizer on this machine" is a fact
+ * about the MACHINE, and every chunk after it will fail the same way.
+ *
+ * Named by class rather than by message, and the list is short on purpose: anything not on it is
+ * treated as chunk-level and therefore SURVIVABLE, with rule C below as the backstop.
+ */
+export const PROVIDER_UNAVAILABLE_ERRORS = [
+  'OsSynthUnavailableError',
+  'LinuxSpeechUnavailableError'
+]
+
+export function isProviderUnavailable (err) {
+  const name = err?.name ?? err?.constructor?.name ?? ''
+  return PROVIDER_UNAVAILABLE_ERRORS.includes(name)
+}
+
+const COUNT_WORDS = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen',
+  'nineteen', 'twenty'
+]
+/** Words, not numerals: this sentence goes STRAIGHT to the synthesizer and never through `normalize()`. */
+export function countWord (n) { return COUNT_WORDS[n] ?? String(n) }
+
+/**
+ * What the listener HEARS when a chunk yields no audio (PITFALLS P30).
+ *
+ * P30 is the entry this exists for: an announcement that terminates in a log, a banner or a desktop
+ * notification is an announcement a voice-first listener never receives. So the loss is spoken, in
+ * the audio stream that just lost it, by the same synthesizer, in the same voice.
+ *
+ * P30 also sets the URGENCY: losses DEFER to the end of the current utterance and COALESCE. One
+ * sentence at the end, naming the count and the total — never an interruption per loss, which
+ * would make a three-chunk failure worse to listen to than silence.
+ */
+export function lossAnnouncement (lost, total) {
+  if (lost <= 0) return null
+  const parts = total === 1 ? 'part' : 'parts'   // "one of three PARTS": the noun follows the total
+  const verb = lost === 1 ? 'was' : 'were'
+  return `${countWord(lost)} of ${countWord(total)} ${parts} could not be spoken and ${verb} skipped.`
+}
+
+/**
+ * normalize -> chunk -> synthesize, yielding records as they exist. No player, ever.
  *
  * @param provider  anything with `prepare()`, `generate()`, `linuxBackend`. Injected so the
  *                  spoke-elsewhere branch is testable without a Linux desktop.
  * @param allowElsewhere  opt-in. On the `spd-say` rung `generate()` makes the DAEMON speak; that
  *                  is the one sanctioned exception (P25) and it is never the default (P31).
+
+ * Backpressure is the consumer's: the generator is suspended at every `yield` until the consumer
+ * asks for the next record, so a consumer that awaits its socket write before iterating again
+ * stops the next chunk from being synthesized. Nothing extra is needed for that.
  */
-export async function speak (provider, text, opts = {}, { allowElsewhere = false, signal } = {}) {
+export async function * speakStream (
+  provider, text, opts = {}, { allowElsewhere = false, signal } = {}
+) {
   const t0 = performance.now()
   const spoken = normalize(text, opts.normalize ?? {})
   const tNorm = performance.now()
@@ -250,7 +352,9 @@ export async function speak (provider, text, opts = {}, { allowElsewhere = false
   try {
     await provider.prepare()
   } catch (err) {
-    return providerError(err)
+    // Rule A, before anything: prepare() failing is always about the machine, never about the text.
+    yield ({ kind: 'fatal', ...providerError(err) })
+    return
   }
 
   const backend = provider.linuxBackend ?? null
@@ -259,85 +363,216 @@ export async function speak (provider, text, opts = {}, { allowElsewhere = false
   if (elsewhere && !allowElsewhere) {
     // Named outcome, returned BEFORE synthesizing (004 section 2). Nothing is spoken: making the
     // daemon talk is an explicit act, not something a page load does.
-    return {
-      status: 200,
-      body: {
-        played: 'elsewhere',
-        backend,
-        spoken,
-        chunks: [],
-        disabled: SPOKE_ELSEWHERE_DISABLED,
-        reason:
-          `This machine's speech service (${backend}) plays the audio itself, so the lab never ` +
-          'receives any bytes. It cannot replay, compare or scrub what you just heard.',
-        installHint: LINUX_INSTALL_HINT,
-        announcement:
-          `This machine's speech service played that. The lab cannot replay, compare or scrub ` +
-          `it. ${LINUX_INSTALL_HINT}`,
-        timings: { normalizeMs: tNorm - t0, chunkMs: tChunk - tNorm, synthMs: 0, totalMs: performance.now() - t0 }
-      }
-    }
+    yield ({ kind: 'elsewhere', status: 200, body: elsewhereBody(backend, spoken, t0, tNorm, tChunk) })
+    return
   }
 
-  const out = []
+  yield ({
+    kind: 'head',
+    played: elsewhere ? 'elsewhere-forced' : 'browser',
+    backend,
+    spoken,
+    chunkCount: chunks.length,
+    timings: { normalizeMs: tNorm - t0, chunkMs: tChunk - tNorm }
+  })
+
   const tSynth0 = performance.now()
-  try {
-    for (const chunk of chunks) {
-      if (signal?.aborted === true) break
+  let delivered = 0
+  const losses = []
+  let i = 0
+  for (const chunk of chunks) {
+    if (signal?.aborted === true) break
+    try {
       for await (const audio of provider.generate(chunk.text, { ...opts.synthesize, signal })) {
-        out.push({
-          i: out.length,
+        yield ({
+          kind: 'chunk',
+          i: delivered,
+          chunkIndex: i,
           text: chunk.text,
           boundary: chunk.boundary,
           isFirst: chunk.isFirst,
-          format: audio.format,          // 004 section 2: branch on format, never assume WAV.
+          format: audio.format,        // 004 section 2: branch on format, never assume WAV.
           sampleRate: audio.sampleRate,
           channels: audio.channels,
           bytes: audio.data.byteLength,
           base64: Buffer.from(audio.data).toString('base64')
         })
+        delivered++
       }
+    } catch (err) {
+      if (isProviderUnavailable(err)) {
+        // Rule A: the machine, not the text. Nothing after this can succeed.
+        yield ({ kind: 'fatal', ...providerError(err) })
+        return
+      }
+      // Rule B: this chunk produced nothing. The others are fine and the listener hears them.
+      losses.push({ i, text: chunk.text, err })
+      yield ({
+        kind: 'chunk-error',
+        i,
+        text: chunk.text,
+        name: err?.name ?? err?.constructor?.name ?? 'Error',
+        message: err instanceof Error ? err.message : String(err)
+      })
     }
-  } catch (err) {
-    return providerError(err)
+    i++
   }
-  const tSynth = performance.now()
 
+  // Rule C: every chunk failed. In effect the provider produced no audio at all, so this is the
+  // unavailable case however each individual failure was classified — and it is still a real 503,
+  // because the head has not been written yet (nothing was delivered to write it for).
+  if (delivered === 0 && losses.length > 0) {
+    const { status, body } = providerError(losses[0].err)
+    yield ({
+      kind: 'fatal',
+      status,
+      body: {
+        ...body,
+        message: losses.length === 1
+          ? body.message
+          : `all ${losses.length} chunks failed to synthesize; the first said: ${body.message}`,
+        failedChunks: losses.length
+      }
+    })
+    return
+  }
+
+  const announcement = lossAnnouncement(losses.length, chunks.length)
+  let announcementSpoken = false
+  if (announcement !== null) {
+    // P30: the loss is SPOKEN, in the stream that lost it. Synthesized with the same options, so it
+    // is the same voice at the same rate — a loss reported in a different voice sounds like a
+    // different speaker, which is the confusion P22 is about.
+    try {
+      for await (const audio of provider.generate(announcement, { ...opts.synthesize, signal })) {
+        yield ({
+          kind: 'chunk',
+          i: delivered,
+          chunkIndex: null,
+          text: announcement,
+          boundary: 'announcement',
+          isFirst: false,
+          announcement: true,
+          format: audio.format,
+          sampleRate: audio.sampleRate,
+          channels: audio.channels,
+          bytes: audio.data.byteLength,
+          base64: Buffer.from(audio.data).toString('base64')
+        })
+        delivered++
+        announcementSpoken = true
+      }
+    } catch {
+      // The spoken channel failed too. `end.announcementSpoken: false` tells the page to say it
+      // through the channels it has left — never to drop it. A loss is never silent (P30).
+    }
+  }
+  yield ({
+    kind: 'end',
+    ok: true,
+    delivered,
+    lost: losses.length,
+    chunkCount: chunks.length,
+    announcement,
+    announcementSpoken: announcement === null ? null : announcementSpoken,
+    aborted: signal?.aborted === true,
+    timings: {
+      normalizeMs: tNorm - t0,
+      chunkMs: tChunk - tNorm,
+      synthMs: performance.now() - tSynth0,
+      totalMs: performance.now() - t0
+    }
+  })
+}
+
+function elsewhereBody (backend, spoken, t0, tNorm, tChunk) {
+  return {
+    played: 'elsewhere',
+    backend,
+    spoken,
+    chunks: [],
+    disabled: SPOKE_ELSEWHERE_DISABLED,
+    reason:
+      `This machine's speech service (${backend}) plays the audio itself, so the lab never ` +
+      'receives any bytes. It cannot replay, compare or scrub what you just heard.',
+    installHint: LINUX_INSTALL_HINT,
+    announcement:
+      `This machine's speech service played that. The lab cannot replay, compare or scrub ` +
+      `it. ${LINUX_INSTALL_HINT}`,
+    timings: { normalizeMs: tNorm - t0, chunkMs: tChunk - tNorm, synthMs: 0, totalMs: performance.now() - t0 }
+  }
+}
+
+/**
+ * The non-streaming path: collect `speakStream()` into the single envelope this endpoint used to
+ * return. It is the SAME code path — one generator, two shapes — so the negative control in FR-026
+ * measures the streaming defect and nothing else.
+ */
+export async function speak (provider, text, opts = {}, { allowElsewhere = false, signal } = {}) {
+  const chunks = []
+  let head = null
+  let end = null
+  for await (const rec of speakStream(provider, text, opts, { allowElsewhere, signal })) {
+    if (rec.kind === 'fatal') return { status: rec.status, body: rec.body }
+    if (rec.kind === 'elsewhere') return { status: rec.status, body: rec.body }
+    if (rec.kind === 'head') head = rec
+    if (rec.kind === 'chunk') chunks.push(chunkPayload(rec))
+    if (rec.kind === 'end') end = rec
+  }
   return {
     status: 200,
     body: {
-      played: elsewhere ? 'elsewhere-forced' : 'browser',
-      backend,
-      spoken,
-      chunkCount: chunks.length,
-      chunks: out,
-      timings: {
-        normalizeMs: tNorm - t0,
-        chunkMs: tChunk - tNorm,
-        synthMs: tSynth - tSynth0,
-        totalMs: performance.now() - t0
-      }
+      played: head.played,
+      backend: head.backend,
+      spoken: head.spoken,
+      chunkCount: head.chunkCount,
+      chunks,
+      lost: end?.lost ?? 0,
+      announcement: end?.announcement ?? null,
+      timings: end?.timings ?? head.timings
     }
   }
+}
+
+/** A `chunk` record minus its record-keeping fields — what the old envelope carried per chunk. */
+function chunkPayload (rec) {
+  const { kind, chunkIndex, ...rest } = rec
+  return rest
 }
 
 /**
  * 503, with the PROVIDER'S OWN words. On a stock Ubuntu desktop with no synthesizer this is the
  * expected path, and `LinuxSpeechUnavailableError`'s message already carries the install remedy
  * (`os-synth/index.ts:148,157-165`). A generic "synthesis failed" here would be P18 exactly.
+ *
+ * THE HINT IS PLATFORM-SPECIFIC, and absent when there is no honest remedy — PITFALLS P18's own
+ * shape, which this function used to have: it answered `sudo apt install espeak-ng` to a macOS
+ * `say` failure (`docs/.research/m11-gate.md` G-1). Wrong package manager, wrong package, wrong
+ * operating system. On macOS and Windows the synthesizer is part of the OS: there is nothing to
+ * install, so nothing is offered. A remedy the reader cannot act on is worse than none, because it
+ * sends them somewhere that cannot help.
  */
-export function providerError (err) {
+export function providerError (err, platform = process.platform) {
   const message = err instanceof Error ? err.message : String(err)
   return {
     status: 503,
     body: {
       played: 'nothing',
       error: 'provider_error',
-      name: err?.constructor?.name ?? 'Error',
+      name: err?.name ?? err?.constructor?.name ?? 'Error',
       message,
-      installHint: message.includes(LINUX_INSTALL_HINT) ? null : LINUX_INSTALL_HINT
+      platform,
+      installHint: installHintFor(platform, message)
     }
   }
+}
+
+export function installHintFor (platform, message = '') {
+  // Linux is the only platform where a missing synthesizer is a missing PACKAGE.
+  if (platform === 'linux') return message.includes(LINUX_INSTALL_HINT) ? null : LINUX_INSTALL_HINT
+  // macOS ships `say`; Windows ships SAPI. Neither is installable and neither is uninstallable, so
+  // a failure here is not a missing package and must not be dressed as one.
+  return null
 }
 
 /* ================================================================= the settings inbox
@@ -466,6 +701,63 @@ async function readBody (req, limit = 8 * 1024 * 1024) {
   return JSON.parse(Buffer.concat(parts).toString('utf8'))
 }
 
+/** `{ stream: false }` — one envelope, the shape this endpoint returned before FR-024. */
+async function speakOnce (res, prov, text, options, ac, allowElsewhere = false) {
+  const { status, body } = await speak(prov, text, options, { allowElsewhere, signal: ac.signal })
+  return json(res, status, body)
+}
+
+/** Write one NDJSON record and RESOLVE ONLY WHEN THE SOCKET HAS TAKEN IT — that is the backpressure. */
+function writeRecord (res, rec) {
+  const line = JSON.stringify(rec) + '\n'
+  return new Promise((resolve) => {
+    if (res.write(line)) resolve()
+    else res.once('drain', resolve)
+  })
+}
+
+/**
+ * The streaming path. The response head is DEFERRED until the first chunk exists, so a provider
+ * that never produces audio still answers a real 503 with the provider's own words — see "the wire
+ * format" above. Records produced before that point (a `head`, any early `chunk-error`) are held
+ * and flushed together with the first chunk, in order.
+ */
+async function speakStreaming (res, prov, text, options, { allowElsewhere, signal }) {
+  let started = false
+  const pending = []
+
+  // BACKPRESSURE IS THE `await` IN THIS LOOP. `speakStream` is suspended at its `yield` until the
+  // loop asks for the next record, and the loop does not ask until the socket has taken the bytes
+  // of the last one — so a slow page cannot make the server hold a whole fixture of WAVs.
+  for await (const rec of speakStream(prov, text, options, { allowElsewhere, signal })) {
+    if (rec.kind === 'fatal' || rec.kind === 'elsewhere') {
+      // By construction nothing has been written yet: `fatal` is only reached before the first
+      // chunk (after one, a failure is a `chunk-error` record instead).
+      if (started) { await writeRecord(res, rec); res.end(); return }
+      return json(res, rec.status, rec.body)
+    }
+    if (!started) {
+      pending.push(rec)
+      if (rec.kind !== 'chunk') continue
+      started = true
+      res.writeHead(200, {
+        'content-type': 'application/x-ndjson; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff'
+      })
+      for (const held of pending) await writeRecord(res, held)
+      pending.length = 0
+      continue
+    }
+    await writeRecord(res, rec)
+  }
+  if (!started) {
+    // No chunks and no fatal: the utterance was empty, or Stop landed before the first chunk.
+    return json(res, 200, { played: 'browser', chunks: [], chunkCount: 0, spoken: pending.find((r) => r.kind === 'head')?.spoken ?? '', empty: true })
+  }
+  res.end()
+}
+
 export function createLabServer ({ provider, fixtureDir, pageDir, settingsPath } = {}) {
   const prov = provider ?? new OsSynthProvider()
   const fixtures = fixtureDir ?? join(REPO_ROOT, 'fixtures')
@@ -488,13 +780,19 @@ export function createLabServer ({ provider, fixtureDir, pageDir, settingsPath }
       }
 
       if (req.method === 'POST' && path === '/speak') {
-        const { text = '', options = {}, allowElsewhere = false } = await readBody(req)
+        const { text = '', options = {}, allowElsewhere = false, stream = true } = await readBody(req)
         inflight?.abort()
         const ac = new AbortController()
         inflight = ac
-        const { status, body } = await speak(prov, text, options, { allowElsewhere, signal: ac.signal })
+        // Abort is PUSHED by the transport: the page's own AbortController closes the socket, and
+        // the synthesizer is cancelled here rather than at the next poll. `writableEnded` keeps a
+        // NORMAL end (which also emits 'close') from looking like a listener pressing Stop.
+        res.on('close', () => { if (!res.writableEnded) ac.abort() })
+        const done = stream === false
+          ? await speakOnce(res, prov, text, options, ac)
+          : await speakStreaming(res, prov, text, options, { allowElsewhere, signal: ac.signal })
         if (inflight === ac) inflight = null
-        return json(res, status, body)
+        return done
       }
 
       if (req.method === 'POST' && path === '/stop') {
@@ -554,9 +852,34 @@ export function createLabServer ({ provider, fixtureDir, pageDir, settingsPath }
 }
 
 /* ================================================================= entry point */
+/**
+ * Argument parsing that REFUSES what it does not understand.
+ *
+ * `--port 7399` used to be accepted in silence and ignored: only `--port=7399` was ever read, so
+ * the server bound 7311 anyway and then died `EADDRINUSE` against the lab already running there.
+ * A flag that is accepted and ignored is the same class of defect as everything else this file was
+ * fixed for — the caller is told they got what they asked for and they did not. Both spellings now
+ * work, and anything unrecognised is a loud, named refusal rather than a default.
+ */
+export function parseArgs (argv) {
+  let port = 7311
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    let raw = null
+    if (a.startsWith('--port=')) raw = a.slice('--port='.length)
+    else if (a === '--port') { raw = argv[i + 1] ?? ''; i++ }
+    else throw new Error(`unrecognised argument ${JSON.stringify(a)}. The only flag is --port=<n> (or --port <n>).`)
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n < 0 || n > 65535) {
+      throw new Error(`--port wants an integer from 0 to 65535, got ${JSON.stringify(raw)}.`)
+    }
+    port = n
+  }
+  return { port }
+}
+
 export async function main (argv = process.argv.slice(2)) {
-  const portArg = argv.find((a) => a.startsWith('--port='))
-  const port = portArg ? Number(portArg.slice('--port='.length)) : 7311
+  const { port } = parseArgs(argv)
 
   const proof = await assertLoadedModuleIsOnDiskSource()
   const server = createLabServer()

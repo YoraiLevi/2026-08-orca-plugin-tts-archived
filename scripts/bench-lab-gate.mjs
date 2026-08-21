@@ -71,6 +71,7 @@
  *   node scripts/bench-lab-gate.mjs                 human-readable
  *   node scripts/bench-lab-gate.mjs --json          machine-readable, full raw arrays
  *   node scripts/bench-lab-gate.mjs --trials=20     default 20, per FR-020
+ *   node scripts/bench-lab-gate.mjs --no-stream     FR-026's negative control: streaming OFF
  *
  * NOT A CI GATE, for the same reason `bench-latency.mjs` is not: absolute latency is machine- and
  * OS-dependent by more than the differences we care about, and CI has no synthesizer on two of the
@@ -96,6 +97,13 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const JSON_OUT = process.argv.includes('--json')
 const TRIALS = Number(process.argv.find((a) => a.startsWith('--trials='))?.slice(9) ?? 20)
 const GATE_MS = 2000
+/**
+ * FR-026: run the SAME harness with first-chunk streaming disabled and watch the reading exceed
+ * 2,000 ms. Before FR-024 landed this control was unrunnable — the shipped path WAS the disabled
+ * path (`docs/.research/m11-gate.md` finding G-4). It is a flag, not a code edit, so the two
+ * readings come from one binary on one machine minutes apart.
+ */
+const NO_STREAM = process.argv.includes('--no-stream')
 
 /* ------------------------------------------------------------------------------ small helpers */
 
@@ -208,6 +216,10 @@ const PROBE_SOURCE = String.raw`
 (() => {
   const g = { keys: [], starts: [], contexts: 0, fetches: 0, errors: [] };
   window.__gate = g;
+  // FR-026's negative control. Set by --no-stream, read by the page's streamSpeak(): the request
+  // carries { stream: false } and the server answers ONE envelope, so nothing plays until the last
+  // chunk has been synthesized — the behaviour that measured p95 3,401 ms before FR-024 landed.
+  window.__labNoStream = __NO_STREAM__;
 
   addEventListener('keydown', (e) => {
     // e.timeStamp is on the document's performance clock — the same clock
@@ -454,7 +466,10 @@ async function settle (cdp) {
 async function main () {
   if (!JSON_OUT) {
     console.log('')
-    console.log('  bench-lab-gate — Gate M11 / FR-020, measured. Silent: headless, muted,')
+    console.log(NO_STREAM
+      ? '  bench-lab-gate — FR-026 NEGATIVE CONTROL: first-chunk streaming DISABLED.'
+      : '  bench-lab-gate — Gate M11 / FR-020, measured. Streaming ON (FR-024).')
+    console.log('  Silent: headless, muted,')
     console.log('  audio output disabled, and every destination connection routed through gain 0.')
     console.log('')
   }
@@ -473,7 +488,7 @@ async function main () {
   let server = null
   let chrome = null
   let cdp = null
-  const meta = {}
+  const meta = { streaming: !NO_STREAM }
 
   try {
     const fixtureDir = join(dir, 'fixtures')
@@ -485,7 +500,7 @@ async function main () {
 
     await cdp.send('Page.enable')
     await cdp.send('Runtime.enable')
-    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: PROBE_SOURCE })
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: PROBE_SOURCE.replace('__NO_STREAM__', String(NO_STREAM)) })
     await cdp.send('Page.navigate', { url: server.base + '/' })
 
     // The page is ready when its own start() has finished: the status line says so and the
@@ -812,7 +827,7 @@ function report (meta) {
 
   if (JSON_OUT) {
     console.log(JSON.stringify({
-      gateMs: GATE_MS, trials: TRIALS, node: process.version, meta,
+      gateMs: GATE_MS, trials: TRIALS, streaming: !NO_STREAM, node: process.version, meta,
       expected: PROBE_IDS.length, reported: RESULTS.length, missing, results: RESULTS
     }, null, 2))
   } else {
