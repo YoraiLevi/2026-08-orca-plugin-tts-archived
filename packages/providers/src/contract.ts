@@ -23,9 +23,15 @@ export function runProviderContract(
   make: () => TtsProvider,
   opts: ContractOptions = {}
 ): void {
-  const d = opts.skipReason ? describe.skip : describe
+  // The reason goes in the SUITE TITLE, so a skipped platform prints it in the reporter. It used
+  // to be carried by an extra `it` asserting `skipReason.length > 0` — inside `if (opts.skipReason)`,
+  // where that is unconditionally true. A test that cannot fail is not a test; a visible title is.
+  const title = opts.skipReason === undefined
+    ? `provider contract: ${name}`
+    : `provider contract: ${name} — SKIPPED: ${opts.skipReason}`
+  const d = opts.skipReason === undefined ? describe : describe.skip
 
-  d(`provider contract: ${name}`, () => {
+  d(title, () => {
     it('T041a yields at least one non-empty audio chunk', async () => {
       const p = make()
       await p.prepare()
@@ -65,11 +71,13 @@ export function runProviderContract(
       const elapsed = Date.now() - t0
 
       console.info(`[measured] ${name}: cancel -> stopped in ${elapsed} ms`)
-      // Hard ceiling keeps a wedged provider from hanging CI; the tight budget is reported.
-      expect(elapsed, `cancel took ${elapsed} ms`).toBeLessThanOrEqual(CANCEL_BUDGET_MS * 20)
-      if (elapsed > CANCEL_BUDGET_MS) {
-        console.warn(`[contract] ${name}: cancel took ${elapsed} ms (budget ${CANCEL_BUDGET_MS} ms)`)
-      }
+      // The gate IS the budget. It used to be `CANCEL_BUDGET_MS * 20` = 1,000 ms with a
+      // console.warn above 50, which is why nine documents could quote "measured within 50 ms"
+      // while a 904 ms cancel stayed green (verified by mutation, docs/.research/test-audit.md).
+      // A wedged provider is stopped by the test TIMEOUT below, which is what a timeout is for;
+      // conflating "don't hang CI" with "meet the budget" is what produced the 20x.
+      expect(elapsed, `cancel took ${elapsed} ms, budget ${CANCEL_BUDGET_MS} ms`)
+        .toBeLessThanOrEqual(CANCEL_BUDGET_MS)
     }, 120_000)
 
     it('T041d capabilities describe actual behaviour', async () => {
@@ -91,20 +99,16 @@ export function runProviderContract(
       expect(p.isWarm).toBe(true)
     }, 120_000)
 
-    it('lists voices without throwing', async () => {
+    it('lists voices as strings the settings UI can render', async () => {
       const p = make()
       await p.prepare()
       const voices = await p.listVoices()
-      expect(Array.isArray(voices)).toBe(true)
+      // `Array.isArray` alone passed for any array, including one of nulls. The UI renders these.
+      expect(voices).toBeInstanceOf(Array)
+      for (const v of voices) {
+        expect(typeof v, `a non-string voice (${String(v)}) would render as [object Object]`).toBe('string')
+        expect(v.length, 'an empty voice name is unselectable').toBeGreaterThan(0)
+      }
     }, 120_000)
   })
-
-  if (opts.skipReason) {
-    describe(`provider contract: ${name}`, () => {
-      it('is skipped on this platform, and says why', () => {
-        expect(opts.skipReason!.length).toBeGreaterThan(0)
-        console.warn(`[contract] ${name} skipped: ${opts.skipReason}`)
-      })
-    })
-  }
 }

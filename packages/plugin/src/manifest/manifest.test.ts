@@ -25,6 +25,9 @@ describe('orca-plugin.json matches the host manifest schema', () => {
   it('declares capabilities as objects, never bare strings', () => {
     const caps = manifest['capabilities'] as Array<Record<string, unknown>>
     expect(Array.isArray(caps)).toBe(true)
+    // A zero-length array satisfies every assertion in the loop below without running one of them,
+    // and this plugin cannot function without capabilities. Assert the fixture, then the shape.
+    expect(caps.length, 'no capabilities declared: the loop below checks nothing').toBeGreaterThan(0)
     for (const c of caps) {
       expect(typeof c, 'a bare string capability is silently rejected by the host').toBe('object')
       expect(c['kind']).toBeTypeOf('string')
@@ -47,6 +50,7 @@ describe('orca-plugin.json matches the host manifest schema', () => {
   it('uses portable command ids, and every keybinding targets a declared command', () => {
     const c = manifest['contributes'] as Record<string, unknown>
     const commands = (c['commands'] as Array<{ id: string }>).map((x) => x.id)
+    expect(commands.length, 'no commands declared: both loops below are vacuous').toBeGreaterThan(0)
     for (const id of commands) expect(id).toMatch(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/)
     for (const k of c['keybindings'] as Array<{ command: string }>) {
       expect(commands, `keybinding targets undeclared command ${k.command}`).toContain(k.command)
@@ -57,6 +61,7 @@ describe('orca-plugin.json matches the host manifest schema', () => {
     const paths = [manifest['main'] as string,
       ...((manifest['contributes'] as Record<string, unknown>)['panels'] as Array<{ entry: string }>)
         .map((p) => p.entry)]
+    expect(paths.length, 'no artifact paths to check').toBeGreaterThan(1)
     for (const p of paths) {
       expect(p).not.toMatch(/^[/\\]/)
       expect(p).not.toContain('..')

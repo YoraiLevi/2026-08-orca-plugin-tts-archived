@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import { OsSynthProvider, linuxCommand, neutralizeInBandCommands } from './index.js'
-import { runProviderContract } from '../contract.js'  // test-only entry, never via the barrel
+import { runProviderContract, CANCEL_BUDGET_MS } from '../contract.js'  // test-only entry, never via the barrel
 
 // T045: the contract runs against the real OS synthesizer on whatever platform CI is on.
 runProviderContract('OsSynthProvider', () => new OsSynthProvider())
@@ -10,9 +10,20 @@ describe('T042 per-platform command construction', () => {
 
   it('T042e reports unavailability rather than failing silently', async () => {
     // A platform whose binary does not exist must yield no voices, not throw into the caller.
+    // `Array.isArray(voices)` alone could not fail: it is true for the empty list, for a populated
+    // list, and for a list produced by a completely different platform's binary. Assert the
+    // CONTENT, and assert both halves of "reports": no throw, AND a named reason for the UI.
     const p = new OsSynthProvider({ platform: 'linux' })
     const voices = await p.listVoices()
-    expect(Array.isArray(voices)).toBe(true)
+    expect(voices, 'voices must be a list, never null/undefined').toBeInstanceOf(Array)
+    for (const v of voices) expect(typeof v, 'a non-string voice would break the settings UI').toBe('string')
+    if (voices.length === 0) {
+      // The interesting case, and the one this test is named for: nothing on the box can speak.
+      // Silence with no reason is the failure; a reason the UI can show is the requirement (R015).
+      await p.prepare().catch(() => undefined)
+      expect(p.unavailableReason, 'no voices AND no reason — this is silent failure').toBeTruthy()
+      expect(String(p.unavailableReason)).toContain('espeak-ng')
+    }
   })
 
   it('produces real audio bytes on this platform', async () => {
@@ -23,8 +34,11 @@ describe('T042 per-platform command construction', () => {
     expect(bytes, 'the OS synthesizer produced no audio').toBeGreaterThan(1000)
   }, 120_000)
 
-  it('T042a macOS output is WAV, never AIFF — decodeAudioData rejects AIFF-C', async () => {
-    if (process.platform !== 'darwin') return
+  // `if (platform !== 'darwin') return` reported PASS on Linux and Windows for a test that did
+  // nothing there. skipIf reports SKIPPED, so the reporter tells the truth about coverage on the
+  // OS it is running on (constitution: an indicator that never changes is a broken indicator).
+  it.skipIf(process.platform !== 'darwin')(
+    'T042a macOS output is WAV, never AIFF — decodeAudioData rejects AIFF-C', async () => {
     const p = new OsSynthProvider()
     await p.prepare()
     for await (const c of p.generate('hello')) {
@@ -37,7 +51,7 @@ describe('T042 per-platform command construction', () => {
 })
 
 describe('T042d cancel latency is measured, not assumed', () => {
-  it('cancel stops the child process promptly', async () => {
+  it(`cancel stops the child process within ${CANCEL_BUDGET_MS} ms and yields no audio`, async () => {
     const p = new OsSynthProvider()
     await p.prepare()
     const iter = p.generate('This is a long sentence. '.repeat(30))[Symbol.asyncIterator]()
@@ -45,10 +59,17 @@ describe('T042d cancel latency is measured, not assumed', () => {
     await new Promise((r) => setTimeout(r, 50))
     const t0 = Date.now()
     p.cancel()
-    await pending
+    const first = await pending
     const elapsed = Date.now() - t0
     console.info(`[measured] OsSynthProvider cancel -> return: ${elapsed} ms`)
-    expect(elapsed).toBeLessThan(2000)
+    // Was `toBeLessThan(2000)` while the test's own name said "promptly" and nine documents said
+    // 50 ms. Mutation-checked: delaying the SIGKILL by 900 ms left this green.
+    expect(elapsed, `cancel took ${elapsed} ms, budget ${CANCEL_BUDGET_MS} ms`)
+      .toBeLessThanOrEqual(CANCEL_BUDGET_MS)
+    // Two-sided (R014): the point is not that the call returned, it is that no audio escaped for
+    // text the listener has already interrupted. A fast return that still yielded a chunk would
+    // satisfy a latency-only assertion and be exactly the bug.
+    expect(first.done, 'cancel returned promptly but still produced audio').toBe(true)
   }, 120_000)
 })
 
@@ -60,6 +81,11 @@ describe('T042d cancel latency is measured, not assumed', () => {
  * is exactly the case that used to produce silence).
  */
 describe('T042f Linux is never silently silent', () => {
+  // The two pure command-builder cases below run everywhere. The three that follow need a box with
+  // NONE of the three binaries — that is the stock-Ubuntu-desktop condition they exist to model, so
+  // they are gated, and gated VISIBLY: on a Linux runner that has espeak-ng installed they report
+  // SKIPPED rather than PASSED. Cross-platform parity (principle III) is not served by a green tick
+  // for a body that never ran.
   const noLinuxBinaries = process.platform !== 'win32' &&
     ['espeak-ng', 'espeak', 'spd-say'].every(
       (b) => spawnSync('which', [b], { stdio: 'ignore' }).status !== 0
@@ -85,8 +111,8 @@ describe('T042f Linux is never silently silent', () => {
     expect(args.join(' ')).toContain('-y en')
   })
 
-  it('detection failure is named and actionable, not a swallowed exception', async () => {
-    if (!noLinuxBinaries) return
+  it.skipIf(!noLinuxBinaries)(
+    'detection failure is named and actionable, not a swallowed exception', async () => {
     const p = new OsSynthProvider({ platform: 'linux' })
     const err = await p.generate('hello')[Symbol.asyncIterator]().next().then(
       () => null,
@@ -100,15 +126,15 @@ describe('T042f Linux is never silently silent', () => {
     expect(p.unavailableReason).toBe(msg)
   })
 
-  it('prepare() refuses to report warm when nothing on the box can speak', async () => {
-    if (!noLinuxBinaries) return
+  it.skipIf(!noLinuxBinaries)(
+    'prepare() refuses to report warm when nothing on the box can speak', async () => {
     const p = new OsSynthProvider({ platform: 'linux' })
     await expect(p.prepare()).rejects.toThrow(/No Linux speech synthesizer/)
     expect(p.isWarm, 'reported warm while unable to make a sound').toBe(false)
   })
 
-  it('tells the user, through notify, which binary is missing', async () => {
-    if (!noLinuxBinaries) return
+  it.skipIf(!noLinuxBinaries)(
+    'tells the user, through notify, which binary is missing', async () => {
     const said: string[] = []
     const p = new OsSynthProvider({ platform: 'linux', notify: (m) => said.push(m) })
     await p.prepare().catch(() => undefined)
@@ -146,8 +172,8 @@ describe('E-06 in-band synthesizer commands never reach the engine', () => {
     }
   })
 
-  it('VERIFY BY EFFECT: bracketed text is spoken, not executed (macOS)', async () => {
-    if (process.platform !== 'darwin') return
+  it.skipIf(process.platform !== 'darwin')(
+    'VERIFY BY EFFECT: bracketed text is spoken, not executed (macOS)', async () => {
     const p = new OsSynthProvider()
     const bytes = async (text: string): Promise<number> => {
       let n = 0

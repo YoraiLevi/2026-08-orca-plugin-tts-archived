@@ -119,6 +119,18 @@ describe('T066 pipeline integration', () => {
     for (let i = 0; i < 6; i++) s.speak(`Reply number ${i}.`, 'queue')
     await settle()
     expect(log).toHaveBeenCalledWith(expect.stringContaining('queue full'))
+    // The log line alone could not fail for the reason this test is named for. Mutating
+    // `replies.slice(-max)` to `replies.slice(0, max)` — i.e. dropping the NEWEST replies, the
+    // exact opposite of the documented policy — left this test, and the whole file, green.
+    // So assert WHICH end was discarded (docs/.research/test-audit.md, finding 2).
+    const said = provider.synthesized.join(' ')
+    expect(said, 'the newest reply was dropped — the queue discarded the wrong end')
+      .toContain('Reply number five')
+    expect(said, 'a middle reply survived a queue capped at two')
+      .not.toContain('Reply number two')
+    // ...and something WAS dropped, so "kept everything" cannot pass either.
+    expect(said, 'nothing was actually dropped, so the policy was never exercised')
+      .not.toContain('Reply number one')
   })
 })
 

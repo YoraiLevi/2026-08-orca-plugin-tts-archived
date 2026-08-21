@@ -3,11 +3,11 @@
  *
  * Why a subprocess and not an npm audio package: `npm speaker`'s `end()` is documented to hang for
  * seconds, so it cannot do barge-in, and `naudiodon` is abandoned (see tts-engine-landscape.md).
- * Killing a player process, by contrast, was measured at 0.9-1.5 ms.
+ * Killing a player, by contrast, is ~3 ms kill-to-exit (`afplay`, n=10 x2; P9 - not audio-stop).
  *
- * Known limitation, stated rather than hidden: one process per chunk gives a ~970 ms inter-sentence
- * gap on macOS (`afplay`). That is why M9 moves playback into the resident service, which holds one
- * player open. This sink is correct, cross-platform, and slow between sentences.
+ * Known limitation: ~950 ms of silence between sentences on macOS (p50 950/937/897 ms, n=18 x3,
+ * latency-measurements.md 1.1). NOT process spawn (2.3 ms) - it is CoreAudio device open/teardown,
+ * ~893 ms. So M9 must hold the DEVICE open across chunks; pooling processes saves 2 ms of 950.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'

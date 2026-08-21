@@ -120,6 +120,11 @@ describe('every manifest command is actually registered', () => {
       await (await import('node:fs/promises')).readFile(
         new URL('../orca-plugin.json', import.meta.url), 'utf8')
     ) as { contributes: { commands: Array<{ id: string }> } }
+    // The test's own name promises it "counts the manifest". It did not: an empty command list
+    // would have made the loop vacuous and the guard green while activate() registered nothing.
+    expect(manifest.contributes.commands.length,
+      'the manifest declares no commands, so this guard checked nothing').toBeGreaterThan(0)
+    expect(h.commands.size, 'activate() registered nothing at all').toBeGreaterThan(0)
     for (const c of manifest.contributes.commands) {
       expect(h.commands.has(c.id), `manifest declares ${c.id} and activate() never registers it`)
         .toBe(true)

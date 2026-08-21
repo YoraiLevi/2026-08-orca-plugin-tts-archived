@@ -60,6 +60,18 @@ export interface ClipboardResult {
   readonly truncated: boolean
 }
 
+/**
+ * The cap, as a pure function, so it can be tested without a clipboard.
+ *
+ * It used to be inline in `readClipboard`, and its only test early-returned whenever the runner
+ * had no readable clipboard — which is every headless CI runner, i.e. the machine the gate
+ * actually runs on. A cap that is only checked on a developer's laptop is not a gate.
+ */
+export function capText(raw: string, maxChars: number): ClipboardResult {
+  if (raw.length <= maxChars) return { text: raw, truncated: false }
+  return { text: raw.slice(0, maxChars), truncated: true }
+}
+
 export const DEFAULT_MAX_CHARS = 20_000
 export const DEFAULT_CLIPBOARD_TIMEOUT_MS = 20_000
 
@@ -73,9 +85,7 @@ export async function readClipboard(opts: ClipboardOptions = {}): Promise<Clipbo
   for (const c of candidates) {
     tried.push(c.cmd)
     try {
-      const raw = await capture(c.cmd, c.args, timeoutMs)
-      if (raw.length <= maxChars) return { text: raw, truncated: false }
-      return { text: raw.slice(0, maxChars), truncated: true }
+      return capText(await capture(c.cmd, c.args, timeoutMs), maxChars)
     } catch { continue }
   }
   throw new ClipboardUnavailableError(platform, tried)

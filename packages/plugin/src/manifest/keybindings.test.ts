@@ -23,6 +23,14 @@ const ORCA_DEFAULT_MOD_SHIFT = new Set([
 ])
 
 describe('keybindings do not collide with ORCA defaults', () => {
+  // Every assertion here is inside a `for` over the manifest. An empty (or renamed) `keybindings`
+  // array would make all of them vacuous and green — the fixture would no longer exercise the
+  // branch the test is named for. Assert the fixture first (docs/.research/test-audit.md).
+  it('the manifest actually declares chords, so the loops below are not vacuous', () => {
+    expect(manifest.contributes.keybindings.length,
+      'no keybindings in the manifest: every collision check below is a no-op').toBeGreaterThan(0)
+  })
+
   it('no declared chord is already claimed by the host', () => {
     for (const kb of manifest.contributes.keybindings) {
       const key = kb.key.toLowerCase()
