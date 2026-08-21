@@ -43,7 +43,11 @@ The bar makes the counter measure convergence rather than enthusiasm.
 |---|---|---|---|---|---|
 | 1 | Resolve empirical questions (kind **E**) | 4 | **18 resolved, 5 new** | no | 5 design options closed permanently; M13 unblocked; a shipping bug found |
 | 2 | Design: spoken channel · panel+control · Voice Lab · agent identity. Plus a fix agent on the three bugs. | 5 | **4 designs, 3 fixes, 8 new questions** | no | M13 reframed; identity inverted to earcon+call-sign; Linux floor fixed |
-| 3 | FMA · user stories and flows · adversarial cross-review of all four designs | 3 | — | — | in flight |
+| 3 | FMA · user stories and flows · adversarial cross-review of all four designs | 3 | **27 + 8 + 130 modes** | no | 55 silent-failure sites, zero reaching audio; X-01 would have made Stop produce speech |
+| 4 | Reconcile the 8 blockers into 002–005 · fix the silent failures · build the citation checker | 3 | **8 resolved, 6 conflicts decided, 6 fixes shipped** | no | the correction table in 008 was itself 16 lines stale |
+| 5 | Provider seam v2 + M9 · settings · **measure what was never measured** | 3 | **3 new designs, 5 measurement contradictions** | no | the ~970 ms was real; the mechanism cited for it everywhere was wrong |
+| 6 | Fold the measurements · audit tests that cannot fail · design M16 + M17 | 3 | **9 unfailable tests, 3 live mutants, 2 designs** | no | M17 declared not buildable to R1 parity, with evidence |
+| 7 | Adversarial review of everything rounds 4–6 produced | 1 | **31** | **no** | see `014-review-round7.md` |
 
 ## Parking lot
 
@@ -69,3 +73,29 @@ Recorded here so a later round does not re-open them without cause. Each links t
 | Stop is **pushed, never polled**; p50 120 ms, p99 250 ms, >400 ms fails CI | 003 | The poll floor alone is 345 ms, so a polled Stop is double the budget by construction |
 | Spoken identity is a **call-sign, never hex** | 003, 005 | Eight hex characters read aloud to a dyslexic listener is close to worst-case |
 | Identity is `(callSign, earcon, voiceTuple)`, designed for **N=1** | 005 | Voice-based identity guaranteed on all three platforms is exactly 1; the portable axes are the ones we generate |
+
+## Backfill note — 2026-08-21
+
+Rounds 4 through 7 were run without this table being updated, and round 7's reviewer
+flagged it as a blocking defect on the process itself:
+
+> **A dry-round counter that is not being kept cannot end the process it exists to end** —
+> and on this round's evidence, the process is not close to ending.
+
+That is correct and the fault is the architect's. The rows above are backfilled from the
+commit log and the round artifacts. **Dry counter: 0 of 3.** No round has yet been dry.
+
+## What round 7 says to do next, and why it is not more of the same
+
+Round 7's most useful output is not a finding, it is a **map of where findings came from**:
+
+| Source | Findings | Reading |
+|---|---|---|
+| `002`–`005`, reviewed in every round since round 3 | **1** | **This set has converged.** Stop re-reading it. |
+| `010`–`013`, never read by anyone but their authors | **18** | A document's quality does not substitute for a second reader. Two of `010`'s block implementation, and `010` is the strongest document in the repo. |
+| `PLAN.md`, `TASKS.md`, and the non-author user's experience | **6** | **P32's propagation list omitted `PLAN.md` and `TASKS.md`, so six rounds of folding never opened them.** |
+
+**Rounds 8–10 therefore do not re-read `002`–`005`.** They read `PLAN.md`, `TASKS.md`, the
+constitution's budget table and `006`; run `check-citations` over `011`–`013`, which has
+never been done; and each keeps **one probe asking a question the brief did not** — both
+findings that landed that way in round 7 came from exactly that.
