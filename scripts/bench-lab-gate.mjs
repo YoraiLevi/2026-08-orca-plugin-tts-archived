@@ -719,13 +719,15 @@ async function arrowSeries (cdp, n) {
   return { trials, ms: trials.filter((t) => t.ok).map((t) => t.ms) }
 }
 
-/** The server reports its own synthesis time; read it out of the page's status line contract. */
+/** The server reports its own synthesis time; read it out of the page's status line contract.
+ *  `stream: false` here on purpose: this probe wants ONE number for a whole sentence, and
+ *  `res.json()` cannot parse the NDJSON stream FR-024 added. Same for `asCommittedProbe` below. */
 async function serverComponent (cdp, n) {
   const out = []
   for (let i = 0; i < n; i++) {
     const r = await cdp.evaluate(`(async () => {
       const res = await fetch('/speak', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'The quick brown fox jumps over the lazy dog.', options: { synthesize: { rate: ${1 + i * 0.01} } } }) });
+        body: JSON.stringify({ text: 'The quick brown fox jumps over the lazy dog.', options: { synthesize: { rate: ${1 + i * 0.01} } }, stream: false }) });
       const j = await res.json();
       return j && j.timings ? j.timings.synthMs : null;
     })()`)
@@ -782,7 +784,7 @@ async function asCommittedProbe (cdp, fixtures) {
     const r = await cdp.evaluate(`(async () => {
       const text = await (await fetch('/fixtures/' + encodeURIComponent(${JSON.stringify(name)}))).text();
       const res = await fetch('/speak', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, options: {} }) });
+        body: JSON.stringify({ text, options: {}, stream: false }) });
       const j = await res.json().catch(() => null);
       return { status: res.status, chunks: (j && j.chunkCount) ?? null, message: (j && j.message) ?? null };
     })()`)
