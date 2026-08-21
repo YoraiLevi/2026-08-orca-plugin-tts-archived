@@ -379,7 +379,10 @@ async function main () {
      * or a generic error message, is red.
      */
     const speakText = 'The Voice Lab is checking that this machine can speak.'
-    const { status, body } = await post(port, '/speak', { text: speakText })
+    // `stream: false` on purpose: this check asserts ONE platform outcome and wants one object.
+    // The streaming path (FR-024, NDJSON) is exercised by scripts/voice-lab.test.mjs and by
+    // bench-lab-gate.mjs; `res.json()` here would choke on a multi-record stream.
+    const { status, body } = await post(port, '/speak', { text: speakText, stream: false })
     const outcome = `${status} played=${JSON.stringify(body?.played)}`
     if (status === 503) {
       const msg = String(body?.message ?? '')
