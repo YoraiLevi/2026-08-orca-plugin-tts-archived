@@ -388,6 +388,43 @@ describe('one unspeakable chunk does not kill the utterance (P30: the loss is SP
     expect(end.announcementSpoken).toBe(true)
   })
 
+  it('the unspeakable chunk is a CLASS, not the HTML comment: a bare `---` rule survives too',
+    async () => {
+      // Named against a moving target on purpose. The HTML comment that produced the 503 in
+      // docs/.research/m11-gate.md G-1 is gone — the normalizer strips comments now — so an input
+      // shaped like THAT is a test of someone else's fix. This one is shaped like the class that
+      // remains: a chunk whose text a synthesizer refuses. A markdown horizontal rule between two
+      // paragraphs is the live instance (`say` reads a leading `--` as an option), and
+      // punctuation-only and whitespace-only chunks are the others. The provider fails on the
+      // chunk BY ITS TEXT, so this test asserts our resilience and never the normalizer's.
+      const p = gatedProvider({
+        backend: 'espeak-ng',
+        fail: (text) => (text.trimStart().startsWith('-')
+          ? Object.assign(new Error("say: unrecognized option `--- '"), { name: 'OsSynthEmptyOutputError' })
+          : null)
+      })
+      pump(p)
+      const recs = []
+      for await (const rec of speakStream(p, `${S1} --- ${S2}`, ONE_PER_CHUNK)) recs.push(rec)
+
+      const failed = recs.find((r) => r.kind === 'chunk-error')
+      expect(failed).toBeDefined()
+      expect(failed.text.trimStart().startsWith('-')).toBe(true)
+      expect(failed.text).not.toMatch(/<!--/)               // NOT the HTML-comment instance
+      const end = recs.at(-1)
+      expect(end.ok).toBe(true)
+      expect(end.lost).toBe(1)
+      expect(end.delivered).toBe(2)                         // the surviving sentence, plus the notice
+      expect(end.announcementSpoken).toBe(true)
+      // The listener HEARS what survived and is TOLD what did not — instead of a 503 and silence.
+      // This is the live shape of the defect: the rule takes the sentence it is glued to with it,
+      // which is why the notice matters more here than a count in a log would.
+      const spoken = recs.filter((r) => r.kind === 'chunk').map((r) => r.text)
+      expect(spoken[0]).toContain('first sentence')
+      expect(spoken.at(-1)).toBe(end.announcement)
+      expect(end.announcement).toBe('one of two parts could not be spoken and was skipped.')
+    })
+
   it('CONTROL: with nothing failing there is no announcement and nothing extra is synthesized',
     async () => {
       const p = fakeProvider({ backend: 'espeak-ng' })
