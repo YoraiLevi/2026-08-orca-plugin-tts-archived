@@ -410,7 +410,7 @@ Control ids are 004 section 6's, at `docs/design/004-voice-lab.md:236-400`.
 
 **The control count, and how the amendments move it.** 004 specifies **46**. This document ships
 **47** at `SCHEMA_VERSION = 2` — 46 plus `announce.reportChannel` (4.3a, R7-31), which is a control
-004 never had because 004 never specified a failure report. **`since: 3` reserves nine more** (4.2a),
+004 never had because 004 never specified a failure report. **`since: 3` reserves eleven more** (4.2a),
 which are counted by T124's `future` bucket (3.3 (d)) and rendered disabled by the lab; they are not
 part of the 47.
 
@@ -614,10 +614,15 @@ each milestone's to set; the ids are reserved now.**
 | `input.talkGesture` | `input` | `enum` | M17 — `013:202`, `013:437` (Q77) | |
 | `input.resumePolicy` | `input` | `enum` | M17 — `013:334` (Q19/Q78, *"ship all three behind one setting"*) | Exactly the shape this schema is for: three behaviours, one enum, `provisional`. |
 | `input.recognizerCommand` | `input` | `string` | M17b — `013:407` | A command path is `enginePersonal: true` and does not transfer between machines. |
+| `input.talkWindowIdleMs` | `input` | `int` | M17 — `013` section 3.3a, section 9a | **Added 2026-08-21** with `013` section 3.3a (finding R7-30): the window's clock when no evidence-based close is armed. Argued starting value 15 s. |
+| `input.paneFallbackWatch` | `input` | `bool` | M17 — `013` section 3.3a rule 2, section 9a | **Added 2026-08-21** with `013` section 3.3a (finding R7-30): may an `F = ∅` window watch the control pane's own cwd transcript, read-only, for the window's duration. Its `false` setting is gate M17a's negative control. |
 
-That is **nine reserved ids**, against R7-29's floor of seven — the extra two are `queue.perSessionFairness`
-(counted by R7-06 instead) and the split of `TALK_WINDOW_MS` from its gesture, which are two decisions
-and therefore two ids.
+That is **eleven reserved ids**, against R7-29's floor of seven. Four of the extras are named
+reasons, not padding: `queue.perSessionFairness` (counted by R7-06 instead), the split of
+`TALK_WINDOW_MS` from its gesture (two decisions, therefore two ids), and the two `013` section 3.3a
+added when finding R7-30 forced the `F = ∅` behaviour to be specified rather than left to a clock.
+**The register grew because a finding was resolved, which is the protocol working** — rule 3 says the
+design document writes one row and cites here; `013` section 9a is that row for both.
 
 > **Line numbers in `012` and `013` above were read 2026-08-21 while `012` was under concurrent
 > amendment by another pass.** Each citation carries the symbol it anchors on, so

@@ -102,7 +102,13 @@ is the work. Any future reconciliation should verify the body, as section 0 says
 
 ## 2. Resolved in this pass
 
-*(appended as each is closed)*
+| Finding | Severity | What changed, and where |
+|---|---|---|
+| **R7-06** (`013`'s half) | needs-decision | `013` section 4 step 4 read *"under the same `maxQueued = 8` cap"*. It now **cites `011`'s `queue.maxQueued` and names no value**, with a dated note saying why. `011` and `012` were already done; this closes the finding across all three documents, and `TASKS.md` T125 carries the code half. |
+| **R7-28** | needs-decision | `013` section 4's budget paragraph is **replaced by a two-row table**: press → last sample is `003`'s p99 ≤ 250 ms end-to-end; the **provider-cancel segment inside it stays `CANCEL_BUDGET_MS = 50`**, which is the constitution's row. Gate M17a gains a row asserting `cancel()` alone — *"a 200 ms cancel inside a 240 ms end-to-end pass leaves the old row green while regressing the constitution 4×"*. **No constitutional number was moved**; the note says plainly that moving it is a constitution amendment plus a constant change, not a design-doc sentence. Also cites `010`'s R7-18 resolution so the two budgets are not read as covering the unmeasurable drain. |
+| **R7-29** (`013`'s half) | needs-decision | **`013` section 9a is new** — it was referenced twice by a section that did not exist. Six rows, each an `011` `FieldDescriptor` at `since: 3`: the four `011`'s register already reserved, plus **`input.talkWindowIdleMs`** and **`input.paneFallbackWatch`**, which section 3.3a needs and which did not exist when that register was written. Both are added to `011` section 4.2a's register in the same change (nine → eleven), per its rule 3. It also says what is deliberately **not** a setting: the spoken clauses (`011`'s `announce.*`), the earcon ids (`005` section 11.1b) and the two budgets (R7-28). |
+| **R7-30** (gate half) | blocks-impl | `013` section 3.3a was complete; **gate M17a was not** — every close-condition row assumed `\|F\| ≥ 1`, the configuration section 3.3a shows is the unusual one. Two rows added: `F = ∅` with a control pane (closing on the pane's own cwd record, **negative control:** watch disabled must fall through to `input.talkWindowIdleMs` and not `input.talkWindowMs`), and `F = ∅` with nothing readable. |
+| **id drift** | — | `013` section 3.3a named the clock `session.talkWindowMs`; `011`'s register reserves **`input.talkWindowMs`**. Eight references renamed to `011`'s id. Two documents naming one control two ways is the shape R7-06 was. |
 
 ---
 

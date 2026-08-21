@@ -7,6 +7,7 @@
  * Bundled by esbuild into the self-contained artifact at dist/plugin/, because ORCA never runs a
  * build at install time and rejects any file escaping the plugin root (PITFALLS P17).
  */
+import { existsSync } from 'node:fs'
 import { OsSynthProvider, ProviderRegistry } from '@orca-tts/providers'
 import type { PlaybackSink, TtsProvider } from '@orca-tts/core'
 import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi } from './adapter/index.js'
@@ -153,6 +154,12 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       ...(options.announceDelayMs === undefined ? {} : { announceDelayMs: options.announceDelayMs }),
       // Supplement only. The spoken sentence naming the count comes from SpeechService itself, so
       // it cannot be lost by a notification channel that is muted, denied, or simply not looked at.
+      /**
+       * 006 section 19 rank 3 — "whose words are being spoken". Answered by asking the
+       * filesystem, not by re-reading the string we built: a session whose transcript is gone
+       * has ended, and C1's dead-agent-in-a-live-voice depends on nobody ever checking.
+       */
+      resolveLabel: (id) => (existsSync(id) ? sessionLabel(id) : null),
       onDropped: (n) => {
         host.notify('Read Aloud', `Skipped ${n} older repl${n === 1 ? 'y' : 'ies'} to keep up`)
       }
@@ -223,8 +230,8 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   const huddle = new HuddleController({
     speech: {
       // 'queue' is the whole point for huddle: replies must not cut each other off.
-      speak: (t: string, mode?: 'replace' | 'queue', label?: string) => {
-        speech?.speak(t, mode ?? 'queue', label)
+      speak: (t: string, mode?: 'replace' | 'queue', label?: string, sessionId?: string) => {
+        speech?.speak(t, mode ?? 'queue', label, sessionId)
       },
       stop: async () => { await speech?.stop() }
     },

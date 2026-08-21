@@ -22,6 +22,13 @@ Every number carries **[measured-here]**, **[documented]** or **[claimed]** (con
 > | **R7-39** worth-noting — unlabelled numbers against this document's own R006 promise | Labels added at section 0's model sizes, section 3.3's buzz earcon, section 5's restatement of it, section 6.1's 10 ms monitor and its *"up to 2,000 ms"*. |
 > | **R7-38** worth-noting — the stated search and the "Reproduce:" command are different greps | **One pattern**, used in both places, in section 0. |
 >
+> **Three of the seven above were applied in a second pass, 2026-08-21.** The pass that wrote this
+> table was killed by a session limit inside this document. **R7-06** (section 4 step 4), **R7-28**
+> (section 4's budget) and **R7-29** (section 9a) were claimed here and absent from the body; gate
+> M17a was also missing R7-30's `F = ∅` rows. All four are now in the body, and the gap itself is
+> recorded in `docs/design/016-reconciliation-round7.md` section 1.3 — **a header amendment table is
+> the plan, not the evidence; verify the section that owns the mechanism.**
+>
 > **Citations.** `scripts/check-citations.mjs` had never been run over this document. It was run for
 > this pass and reports **zero** flags against it, before and after these amendments.
 
@@ -375,7 +382,7 @@ non-empty followed set. It has no effect when `F = ∅`.**
 
 So **after every reap, every restart and every first run, `F` is empty.** In that state there is no
 followed transcript, the `type: 'user'` record has nowhere to be observed, and the window's primary
-close signal is dead. What is left is `session.talkWindowMs` — the 30 s clock — or a second tap the
+close signal is dead. What is left is `input.talkWindowMs` — the 30 s clock — or a second tap the
 listener has no reason to know is required. **Up to 30 seconds of dead air after the human finished
 speaking, on the accessibility path, for a listener who is voice-first and dyslexic.** That is
 `003` section 8.7 rule 4's exact concern — *a silence indistinguishable from a crash* — arriving
@@ -388,9 +395,9 @@ set — never a single signal.**
 
 | At press | Armed close conditions | Bound on the silence |
 |---|---|---|
-| `\|F\| ≥ 1` | a `type:'user'` record in **any** member of `F` · second tap · `session.talkWindowMs` | typically one turn |
-| `F = ∅`, a control pane is connected | **the control pane's own cwd transcript**, watched read-only for this window only · second tap · `session.talkWindowMs` **reduced to `session.talkWindowIdleMs`** | typically one turn |
-| `F = ∅`, no control pane, no readable transcript | second tap · `session.talkWindowIdleMs` | the reduced clock |
+| `\|F\| ≥ 1` | a `type:'user'` record in **any** member of `F` · second tap · `input.talkWindowMs` | typically one turn |
+| `F = ∅`, a control pane is connected | **the control pane's own cwd transcript**, watched read-only for this window only · second tap · `input.talkWindowMs` **reduced to `input.talkWindowIdleMs`** | typically one turn |
+| `F = ∅`, no control pane, no readable transcript | second tap · `input.talkWindowIdleMs` | the reduced clock |
 
 **2. The `F = ∅` fallback is a read-only watch, and it is bounded by the window.** When nothing is
 followed, the worker resolves the control pane's working directory (`003` section 2D's handshake
@@ -418,14 +425,14 @@ is told which of the three they are in.** A listening window whose end the liste
 the *"confusing what it is even reading… feel helpless"* failure (P22) inverted into silence, and
 P30's lesson applies unchanged: the announcement must reach the audio stream, not a log line.
 
-**Why a shorter clock rather than only a shorter clock.** `session.talkWindowIdleMs` exists because
+**Why a shorter clock rather than only a shorter clock.** `input.talkWindowIdleMs` exists because
 the clock-only row has no evidence to wait for, so the *only* honest bound is time; its argued
 starting value is **15 s** against the followed set's 30 s. It is a floor under the failure, not a
 fix — the fix is row 2, and the settings are section 9a's. Both values are the listener's (**P23**).
 
 **Verify by effect:** run the M17a window test with `F = ∅` and assert the window closes on the
 pane's user record — **and** run it with the pane watch disabled and assert it closes on
-`session.talkWindowIdleMs` and not on `session.talkWindowMs`. Without the second reading the test
+`input.talkWindowIdleMs` and not on `input.talkWindowMs`. Without the second reading the test
 passes on a build where the fallback never runs, which is exactly today's behaviour.
 
 ---
@@ -441,7 +448,7 @@ talk pressed
   2. wait for the sink to drain                                  (bounded; see the budget below)
   3. play control.mic.open                                       (section 5)
   4. LISTENING WINDOW: nothing is spoken. Replies keep arriving and keep queueing,
-     under the same maxQueued = 8 cap, drops announced and coalesced as usual.
+     under `011`'s `queue.maxQueued` (whatever it is set to), drops announced and coalesced as usual.
   5. window closes (user turn seen, timeout, or second tap)
   6. play control.mic.close
   7. announce what waited — "resuming; two replies waiting" — then resume
@@ -469,11 +476,38 @@ Six rules:
    not stop the daemon. Missing that makes the gate a no-op on exactly the platform with no dictation,
    which would be a quietly perfect failure.
 
-**The budget**, inherited rather than invented: `003` section 2's Stop budget is p50 ≤ 120 ms, p99 ≤
-250 ms, CI-failing above 400 ms, and its four segments already sum to 250 ms with the audio drain at
-50 ms. Barge-in **is** Stop with an earcon after it, so the gate is measured on the same budget and by
-the same probe: press at a known instant, assert **no samples after press + 250 ms**, not that a
-message was sent.
+> **Step 4 restates no number — amended 2026-08-21, forced by finding R7-06.** This step read
+> *"under the same `maxQueued = 8` cap"*. Four documents specified that one control three
+> incompatible ways and the code held a fourth (`speech-service.ts`'s `DEFAULT_MAX_QUEUED = 20`).
+> **`011` section 3.2a owns `queue.maxQueued`**; this document cites it and names no value. If the
+> listener sets it to 3, step 4 queues 3.
+
+**The budget — two quantities, named separately.**
+
+> **Rewritten 2026-08-21, forced by finding R7-28.** This paragraph read: *"Barge-in **is** Stop with
+> an earcon after it, so the gate is measured on the same budget."* That collapses two real numbers
+> into one, which is precisely what `packages/providers/src/budget-claims.test.ts:38-44` exists to
+> prevent — *"`003` … defines a **DIFFERENT quantity under the same word**"* — and it is P33's shape in
+> a document written after P33 was recorded. **A design document does not move a constitutional
+> number.** Doing so is a constitution amendment plus a change to `CANCEL_BUDGET_MS`, proposed and
+> decided somewhere the constitution can see it — not a sentence here.
+
+| Quantity | Value | Owner | Measured on |
+|---|---|---|---|
+| **press → last sample leaves the sink** (end to end) | p50 ≤ 120 ms, **p99 ≤ 250 ms**, CI-failing above 400 ms | `003` section 2 | the sink, by capture: *no samples after press + 250 ms* |
+| **provider-cancel segment**, one of that budget's four | **`CANCEL_BUDGET_MS = 50`** (`packages/providers/src/contract.ts`) | the constitution's Latency Budgets row *"Barge-in signal → audio stops"*, under *"A change that regresses one is a bug"* | `cancel()`'s resolution, not the sink |
+
+Both are inherited rather than invented, and **gate M17a asserts both** — the end-to-end bound on the
+sink, and the segment bound on `cancel()`. Asserting only the 250 ms would let a 200 ms provider
+cancel pass while regressing the constitutional number by 4×; asserting only the 50 ms would let the
+drain run long with the constitution still green. Neither reading alone can fail for the other's
+defect, which is the whole reason they are two rows.
+
+Note what `010` section 4 adds under the v2 seam (finding R7-18): `cancel()` now resolves on *sound
+stopped*, and device drain is `[claimed]` — unmeasurable today without a loopback capture. The 50 ms
+above gates **kill-to-exit**, which is what it has always measured (~3 ms `[measured-here]`); the
+drain is named as ungated. This document does not re-decide that; it cites it so the two budgets here
+are not read as covering a third quantity nobody can observe.
 
 ---
 
@@ -603,11 +637,20 @@ sequenceDiagram
 > *"Pressing talk produces silence within the barge-in budget, an audible mic-open, and no spoken
 > audio until the window closes; when it closes the listener is told what waited."*
 
+> **Rows added 2026-08-21, forced by findings R7-28 and R7-30.** Two of the rows below did not exist:
+> the gate asserted the end-to-end budget only, which cannot fail for a provider-cancel regression
+> (R7-28); and every close-condition row assumed a non-empty followed set, which section 3.3a shows is
+> the *un*usual configuration (R7-30). A gate that only tests the configuration the author happens to
+> run is the shape P32 named.
+
 | Test | What would prove us wrong |
 |---|---|
 | Press `talk` during a 30 s utterance | any sample leaving the sink after press + 250 ms (`003` section 2's probe, reused verbatim) |
+| **Press `talk` and time `cancel()` alone** (new — R7-28) | `cancel()` resolving later than `CANCEL_BUDGET_MS = 50` (`packages/providers/src/contract.ts`). This is the constitutional row and it is **not** implied by the row above: a 200 ms cancel inside a 240 ms end-to-end pass would leave that row green while regressing the constitution 4× |
 | Press `talk`, then let three replies arrive | any of them being spoken during the window; or none of them being announced at close |
 | Close the window by appending a `type:"user"` record to the followed transcript | the window not closing — *negative control:* the same fixture with the user record omitted must **not** close it until the timeout |
+| **`F = ∅`, control pane connected** (new — R7-30) | the window not closing when a `type:'user'` record appears in the **pane's own cwd** transcript — *negative control:* with the pane watch disabled, the same fixture must fall through to `input.talkWindowIdleMs` and **not** to `input.talkWindowMs`. Without that second reading the test passes on a build where the fallback never runs, which is today's behaviour |
+| **`F = ∅`, no pane, no readable transcript** (new — R7-30) | the press announcing a close condition that is not armed, or the silence outlasting `input.talkWindowIdleMs` |
 | Leave the window open 65 s | fewer than two heartbeat earcons on the sink, asserted on the sink and not on a log line |
 | Linux `spd-say` rung | audio continuing after the press, which is what happens if `--cancel` is missed |
 | Earcon disjointness | `005` section 11.1c's existing test, now including the two new ids |
@@ -636,6 +679,37 @@ listed below.
 | A plugin chord cannot carry `talk` | stablyai/orca#15642 merging, which would make row 3 of section 3.1 live — and would still leave the control pane faster |
 | Discard is the right default for Q19 | the listener choosing resume in Voice Lab, which is the entire point of shipping the option |
 | STT belongs on a separate seam | a design that puts recognition on `TtsProvider` without breaking `010`'s "the seam changes once" |
+
+---
+
+## 9a. Settings this milestone adds — R7-29
+
+**`014` R7-29 found this document inventing controls `011`'s frozen schema does not carry, while
+citing `011` nowhere.** Every one of them is registered below as an `011` `FieldDescriptor` at
+`since: 3`, through the protocol in `011` section 4.2a. **`011` owns the schema, the defaults rule
+and the migration policy; this document owns only what each field means here.** No default below is
+decided by this document — every one is `provisional` and every one is the listener's (**P23**).
+
+| Id | Kind | Effect | Argued at | What it means here |
+|---|---|---|---|---|
+| `input.talkWindowMs` | `int` | immediate | section 3.3, section 3.3a | The listening window's clock **when a close signal is armed**. Argued starting value 30 s. Was `TALK_WINDOW_MS`, a constant in prose. |
+| `input.talkGesture` | `enum` — `hold` · `tap-tap` · `tap-timeout` · `latch` | immediate | section 3.3 | Which gesture opens the window. Section 3.3 argues `tap-timeout` because its failure is bounded and audible; **Q77 is the listener's**, and all four ship. |
+| `input.resumePolicy` | `enum` — `discard` · `resume-sentence` · `resume-word` | next utterance | section 6.2 | Q19's answer. Section 6.2 recommends `discard` and says why word boundaries do not change it; **Q78 is the listener's**, and all three ship because the replay buffer makes every choice non-destructive. |
+| `input.recognizerCommand` | `string` | next utterance | section 7 (M17b) | The command M17b spawns, its stdout contract in `013` section 7. `enginePersonal: true` — a path does not transfer between machines. Absent is not an error; it is a **named refusal**. |
+| **`input.talkWindowIdleMs`** (new here) | `int` | immediate | section 3.3a | The clock when **no evidence-based close is armed** (`F = ∅`, no readable pane transcript). Argued starting value **15 s**, deliberately shorter than `input.talkWindowMs`, because the only honest bound on a silence with nothing to wait for is time. It is a floor under the failure, not a fix. |
+| **`input.paneFallbackWatch`** (new here) | `bool` | immediate | section 3.3a rule 2 | Whether the `F = ∅` window may watch the control pane's own cwd transcript, read-only, for the duration of the window. Argued starting value **on**. Its `false` setting is the **negative control** gate M17a runs; a listener who wants zero unfollowed reads turns it off and gets the reduced clock instead. |
+
+**Six ids, not the four `011`'s forward register listed** — `input.talkWindowIdleMs` and
+`input.paneFallbackWatch` are section 3.3a's, which did not exist when that register was written.
+Both are added to it in the same change, per rule 3 of `011` section 4.2a: **the design document
+writes one row and cites `011` for everything else.**
+
+**Not settings, deliberately.** The three spoken clauses in section 3.3a's press table are wording,
+and wording is `011`'s `announce.*` territory — this document does not register an id for a sentence.
+`control.mic.open` / `control.mic.close` are earcon ids owned by `005` section 11.1b, not settings.
+And **the barge-in budgets in section 4 are not settings at all**: one is `003`'s, one is the
+constitution's, and a constitutional number does not become tunable by being written down twice
+(R7-28).
 
 ---
 

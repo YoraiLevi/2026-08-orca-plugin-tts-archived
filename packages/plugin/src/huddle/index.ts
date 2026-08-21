@@ -49,7 +49,12 @@ export const NO_TRANSCRIPT_SENTENCE: Record<NoTranscriptReason, string> = {
 
 /** Minimal port, so huddle can be tested without a synthesizer. */
 export interface SpeechPort {
-  speak(text: string, mode?: 'replace' | 'queue', label?: string): void
+  /**
+   * `sessionId` is the transcript path — the stable identity behind `label`, carried so the
+   * speech service can re-resolve provenance at speak time instead of trusting a display string
+   * built when the reply was queued (006 section 19 rank 3, cascade C1).
+   */
+  speak(text: string, mode?: 'replace' | 'queue', label?: string, sessionId?: string): void
   stop(): Promise<void>
 }
 
@@ -391,7 +396,7 @@ export class HuddleController {
       this.#spoken.add(r.id)
       this.#lastReply = r.text
       // 'queue', not 'replace': a reply arriving mid-utterance must not cut the previous one off.
-      this.#deps.speech.speak(r.text, 'queue', sessionLabel(file))
+      this.#deps.speech.speak(r.text, 'queue', sessionLabel(file), file)
     }
     this.#deps.log(`read-aloud: spoke ${fresh.length} new repl${fresh.length === 1 ? 'y' : 'ies'}`)
     await this.#persistSpoken()

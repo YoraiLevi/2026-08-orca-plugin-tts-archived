@@ -357,3 +357,75 @@ describe('006 sites 31/32/33/53 — a loss inside a reply is spoken, not logged'
     expect(said.match(/cut mid-word/gi)?.length, 'one paste must not produce a dozen reports').toBe(1)
   })
 })
+
+/**
+ * 006 section 19 RANK THREE — "whose words are being spoken", and cascade C1.
+ *
+ * The queue entry was `{ text, label }`: a display string formatted at enqueue time, with nothing
+ * left to re-verify against. So a session that ends while its reply is queued has its words spoken
+ * under a label — and, once M15 lands, in a VOICE — that now belongs to a different, live agent.
+ * The listener is told whose words they are, confidently, and it is not true.
+ *
+ * Every assertion here is on SPOKEN TEXT. No audio device is opened: the provider is a fake that
+ * records strings (P31).
+ */
+describe('006 rank 3 — provenance is re-resolved at speak time, not trusted from enqueue time', () => {
+  it('a session that ended while queued is named, not silently spoken as somebody else', async () => {
+    const provider = new RecordingProvider()
+    // Alive at enqueue, gone by the time the drain reaches it — C1's whole sequence in one seam.
+    let alive = true
+    const s = new SpeechService({
+      provider,
+      sink: new FakeSink(),
+      resolveLabel: (id) => (alive ? `orca-plugin-tts, session ${id}` : null)
+    })
+    s.speak('the reply the dead agent wrote', 'queue', 'orca-plugin-tts, session aaaa1111', 'aaaa1111')
+    alive = false
+    await settle()
+    const spoken = provider.synthesized.join(' ')
+    expect(spoken, 'the reply itself must still be spoken — refusing it costs the listener the words')
+      .toContain('the reply the dead agent wrote')
+    expect(spoken, 'the listener must be told the session it came from has ended')
+      .toMatch(/has since ended/)
+  })
+
+  it('a label that changed under the queue is corrected aloud', async () => {
+    const provider = new RecordingProvider()
+    let current = 'project one, session aaaa1111'
+    const s = new SpeechService({
+      provider, sink: new FakeSink(), resolveLabel: () => current
+    })
+    s.speak('a reply', 'queue', 'project one, session aaaa1111', 'aaaa1111')
+    current = 'project two, session aaaa1111'
+    await settle()
+    expect(provider.synthesized.join(' ')).toContain('From project two, session aaaa1111.')
+  })
+
+  /**
+   * The harm on the other side. Narrating provenance on every utterance is exactly the
+   * self-narrating tool this audit exists to avoid, so the correction is spoken ONCE per session
+   * per change — and never at all while the answer has not changed.
+   */
+  it('says nothing when provenance still holds, and says it once when it does not', async () => {
+    const provider = new RecordingProvider()
+    let alive = true
+    const s = new SpeechService({
+      provider, sink: new FakeSink(),
+      resolveLabel: (id) => (alive ? `p, session ${id}` : null)
+    })
+    s.speak('one', 'queue', 'p, session s1', 's1')
+    s.speak('two', 'queue', 'p, session s1', 's1')
+    await settle()
+    expect(provider.synthesized.join(' '), 'a live session must not be narrated')
+      .not.toMatch(/From p, session/)
+
+    alive = false
+    s.speak('three', 'queue', 'p, session s1', 's1')
+    s.speak('four', 'queue', 'p, session s1', 's1')
+    await settle()
+    const said = provider.synthesized.join(' ')
+    expect(said.match(/has since ended/g) ?? [], 'once per session per change, not once per reply')
+      .toHaveLength(1)
+    expect(said).toContain('four')
+  })
+})

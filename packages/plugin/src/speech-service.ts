@@ -69,6 +69,21 @@ export interface SpeechServiceDeps {
    * itself flood the only channel the listener has. Default 500 ms; tests lower it.
    */
   readonly announceDelayMs?: number
+  /**
+   * Re-resolve the label for a session id, at the instant its words are about to be spoken.
+   * `null` means "that session no longer exists".
+   *
+   * 006 section 19 RANK THREE — *whose words are being spoken*. The queue entry was `{ text,
+   * label }`: a formatted display string built at enqueue time, with nothing left to re-verify
+   * against. Cascade C1 is the consequence — a session ends while its reply is queued, 005's
+   * authority rule reassigns voices, and the listener hears a dead agent's words in a live
+   * agent's voice, immediately after being told voices were reassigned. The misattribution
+   * arrives wearing an explanation.
+   *
+   * This is an EFFECT check by construction: the host answers it by asking the filesystem whether
+   * the transcript is still there, not by consulting the string it built a minute ago.
+   */
+  readonly resolveLabel?: (sessionId: string) => string | null
 }
 
 const DEFAULT_MAX_QUEUED = 20
@@ -77,6 +92,11 @@ const DEFAULT_ANNOUNCE_DELAY_MS = 500
 interface PendingUtterance {
   text: string
   label?: string
+  /**
+   * The stable identity behind `label` — the transcript path, not the display string. Carried so
+   * provenance can be RE-RESOLVED at speak time rather than trusted from enqueue time (C1).
+   */
+  sessionId?: string
   /** Announcements are exempt from overflow trimming: the report must outlive what it reports. */
   announcement?: true
 }
@@ -156,6 +176,8 @@ export class SpeechService {
   #losses = new Map<LossKind, number>()
   #lossTimer: ReturnType<typeof setTimeout> | null = null
   #reportingFailure = false
+  /** Sessions whose provenance change has already been spoken. Bounded by `stop()`. */
+  #reattributed = new Set<string>()
 
   constructor(deps: SpeechServiceDeps) {
     this.#deps = deps
@@ -248,7 +270,7 @@ export class SpeechService {
   }
 
   /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */
-  speak(text: string, mode: SpeakMode = 'replace', label?: string): void {
+  speak(text: string, mode: SpeakMode = 'replace', label?: string, sessionId?: string): void {
     if (mode === 'replace') {
       // 'replace' means "you asked for THIS text now" — but the things it silently deleted were
       // agent replies the listener was waiting for. Report the loss before speaking over it.
@@ -259,7 +281,10 @@ export class SpeechService {
       this.#observe(this.#playback.bargeIn(), 'stop the current sentence')
       if (discarded > 0) this.#noteDropped(discarded)
     }
-    this.#pending.push(label === undefined ? { text } : { text, label })
+    const entry: PendingUtterance = { text }
+    if (label !== undefined) entry.label = label
+    if (sessionId !== undefined) entry.sessionId = sessionId
+    this.#pending.push(entry)
     const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED
     const replies = this.#pending.filter((p) => p.announcement !== true)
     if (replies.length > max) {
@@ -348,6 +373,7 @@ export class SpeechService {
     if (this.#dropTimer !== null) { clearTimeout(this.#dropTimer); this.#dropTimer = null }
     if (this.#lossTimer !== null) { clearTimeout(this.#lossTimer); this.#lossTimer = null }
     this.#losses.clear()
+    this.#reattributed.clear()
     this.#droppedPendingAnnounce = 0
     await this.#playback.bargeIn()
   }
@@ -359,9 +385,12 @@ export class SpeechService {
       for (;;) {
         const next = this.#pending.shift()
         if (next === undefined) break
-        this.#current = next.label ?? null
+        const attribution = next.announcement === true ? null : this.#reattribute(next)
+        this.#current = attribution?.label ?? next.label ?? null
         this.#skip = false
-        const outcome = await this.#speakOne(next.text)
+        const outcome = await this.#speakOne(
+          attribution === null ? next.text : attribution.prefix + next.text
+        )
         this.#current = null
         // An announcement that cannot be spoken must never announce that it cannot be spoken: that
         // is an unbounded loop in the one channel the listener has.
@@ -374,6 +403,40 @@ export class SpeechService {
     } finally {
       this.#draining = false
     }
+  }
+
+  /**
+   * Ask, at the moment of speaking, whose words these actually are — and say so when the answer
+   * has changed since they were queued.
+   *
+   * 006 section 19 rank 3 / cascade C1. The queue carried a display string with no way to check
+   * it. Now it carries a session id, and this re-resolves it against the live system.
+   *
+   * **The judgement, stated, because it departs from the FMA's own prescription.** C1 says
+   * *"refuse to speak an entry whose identity generation is stale."* Refusing deletes an agent
+   * reply the listener was waiting for, to prevent a label being wrong — which today, with one
+   * voice for every session, is the smaller of the two harms by a wide margin. So we CORRECT the
+   * attribution instead: the reply is spoken, preceded by the session it really came from. The
+   * refusal becomes the right answer the moment M15 makes the VOICE carry identity, and at that
+   * point it is one conditional on this same, now-existing, field. The instrument is what was
+   * missing; the policy is cheap once the instrument exists.
+   *
+   * Spoken ONCE per session per change, not once per reply: five queued replies from a session
+   * that has ended get one provenance sentence, not five. Narrating provenance on every utterance
+   * is the harm on the other side of this one.
+   */
+  #reattribute(entry: PendingUtterance): { label: string; prefix: string } | null {
+    const id = entry.sessionId
+    const was = entry.label
+    if (id === undefined || was === undefined || this.#deps.resolveLabel === undefined) return null
+    const now = this.#deps.resolveLabel(id)
+    if (now === was) { this.#reattributed.delete(id); return null }
+    if (this.#reattributed.has(id)) return { label: now ?? was, prefix: '' }
+    this.#reattributed.add(id)
+    this.#deps.log?.(`attribution changed for ${id}: queued as "${was}", now ${now ?? 'gone'}`)
+    return now === null
+      ? { label: was, prefix: `From ${was}, which has since ended. ` }
+      : { label: now, prefix: `From ${now}. ` }
   }
 
   /**
