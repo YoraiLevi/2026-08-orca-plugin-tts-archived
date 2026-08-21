@@ -2,8 +2,8 @@
 
 **Status:** design. **Written:** 2026-08-21. **Milestone:** M16 (`docs/TASKS.md` "Phase M16 — Huddle
 presence", T160–T164).
-**Author had no session context.** Every claim about our own code cites `path:line` verified at
-`1161722`. Every number carries **[measured-here]**, **[documented]** or **[claimed]** (constitution
+**Author had no session context.** Every claim about our own code cites `path:line` **re-derived by
+symbol at `7d4b8a8`** (originally verified at `1161722`; re-pinned 2026-08-21, see the amendment note). Every number carries **[measured-here]**, **[documented]** or **[claimed]** (constitution
 R006).
 
 **What this document decides.**
@@ -43,14 +43,33 @@ control earcons. It writes no implementation code.
 > 2.4 row *"Session appears while `F` is empty"*, which now carries the forward pointer, because a
 > reader of `012` alone would not know that `F = ∅` disarms a close signal in another milestone.
 >
-> **On the citations.** `scripts/check-citations.mjs` had never been run over this document. It was
-> run for this pass: **28 flags, and all 28 are working-tree drift, not defects.** Every `path:line`
-> here was re-verified with `git show 1161722:<path>` — the SHA this document pins — and all but one
-> (R7-37) was correct at that commit. `packages/plugin/src/huddle/index.ts` has since moved by ~30
-> lines under concurrent commits (R7-13 is the same observation), so the checker, which reads the
-> working tree and knows nothing about a pinned SHA, reports every one of them. **Do not "fix" them
-> against a tree that moved three times during this pass** — re-pin the document deliberately, in one
-> change, when the tree is quiet, and re-derive by symbol lookup.
+> **On the citations — and the deliberate re-pin that followed.** `scripts/check-citations.mjs` had
+> never been run over this document. It was run for that pass: **28 flags, and all 28 were
+> working-tree drift, not defects.** Every `path:line` was re-verified with `git show 1161722:<path>`
+> — the SHA this document then pinned — and all but one (R7-37) was correct at that commit.
+> `packages/plugin/src/huddle/index.ts` had since moved by ~30 lines under concurrent commits (R7-13
+> is the same observation). That pass therefore refused to "fix" them, and said why: *re-pin the
+> document deliberately, in one change, when the tree is quiet, and re-derive by symbol lookup.*
+>
+> **Done 2026-08-21, in the round-7 reconciliation. This document now pins `7d4b8a8`.** Every
+> citation was re-derived **by symbol**, choosing the *declaration* site rather than the first use —
+> `#highWater` `:138`, `MAX_TRACKED_FILES` `:85`, `WATCH_WINDOW_MS` `:87`, `MAX_REMEMBERED_IDS` `:80`,
+> `#ensureWatching` `:278`, `#newestTranscript` `:467`, `followNewest` `:262`, and so on. `26 → 0`
+> stale. Two things were repaired that a line-number sweep would have missed:
+>
+> - **`#warnedAmbiguous` does not exist**; the field is **`#warnedAmbiguousPair`** (`:157`). The old
+>   citation was stale *and* named a symbol that had been renamed — the row is about retiring it, so
+>   the name mattered.
+> - **One bare `:NN` was inheriting the wrong file.** *"until `MAX_TRACKED_FILES` evicts it (`:49`)"*
+>   inherited `speech-service.ts` from an earlier citation, and after re-anchoring it would have gone
+>   **green against the wrong file**. It is now written out in full. A citation that passes while
+>   pointing somewhere else is worse than one that fails; the shorthand is the hazard, and `004`
+>   Panel E's rule — **cite a symbol plus the line** — is what catches it.
+>
+> **The instrument is honest about its own drift.** These numbers will go stale again the next time
+> `packages/` moves. That is not a defect in the documents; it is what R7-13 named. The durable
+> answer is the symbol, and the re-derivation command is one line:
+> `CITATION_LOCKED='docs/design/006-fma.md,docs/design/007-user-stories.md,docs/design/008-crossreview-round3.md,docs/design/014-review-round7.md' node scripts/check-citations.mjs --fix`.
 
 ---
 
@@ -71,12 +90,12 @@ Two facts from our own source, verified at `1161722`, are the starting position:
 
 - **The lock is one nullable string.** `#locked: string | null` at
   `packages/plugin/src/huddle/index.ts:118`, set by `switchTo()` (`:165-170`), cleared by `unlock()`
-  (`:189-192`), read by `#ensureWatching()` (`:199`). One watcher (`#watcher`, `:78`), one watched
-  file (`#watching`, `:79`).
+  (`:244-246`), read by `#ensureWatching()` (`:278`). One watcher (`#watcher`, `:119`), one watched
+  file (`#watching`, `:120`).
 - **Everything P22 actually fixed is already per-file.** `#primed` is a `Set<string>` keyed by file
-  (`:82`), `#highWater` a `Map<string, number>` keyed by file (`:97`), and every utterance is already
+  (`:123`), `#highWater` a `Map<string, number>` keyed by file (`:138`), and every utterance is already
   labelled with its session at the point of speaking —
-  `this.#deps.speech.speak(r.text, 'queue', sessionLabel(file))` (`:275`). **The P22 protections do
+  `this.#deps.speech.speak(r.text, 'queue', sessionLabel(file), file)` (`:399`). **The P22 protections do
   not assume one session. The lock does.** That asymmetry is what makes section 2 cheap.
 
 ---
@@ -115,8 +134,8 @@ Five rules define it, and each one is answerable to a specific failure:
 **R1 — Membership is explicit. A new session joins nothing.** A session that appears in the registry
 enters `PRESENT` and stops there. It is never auto-followed, never on the strength of being newest,
 busiest, or in the current worktree. This retires `#newestTranscript()`'s mtime pick
-(`packages/plugin/src/huddle/index.ts:311-345`) as an *automatic* selector; it survives only as the
-implementation of the explicit `followNewest()` command (`:181-186`).
+(`packages/plugin/src/huddle/index.ts:467-510`) as an *automatic* selector; it survives only as the
+implementation of the explicit `followNewest()` command (`:262-266`).
 
 *Why:* automatic membership is the whole of P22 and the whole of P31. Both were the machine choosing.
 
@@ -149,7 +168,7 @@ count announced, exactly as mute does. Unfollow is not stop: the other followed 
 
 **R5 — `F` is persisted by `sessionId`, and re-resolved on restore, never trusted.** ORCA reaps an
 idle worker after five minutes (P20/P6), so `F` lives in plugin storage beside
-`HUDDLE_HIGH_WATER_KEY` (`packages/plugin/src/huddle/index.ts:42`). On restore, every member is
+`HUDDLE_HIGH_WATER_KEY` (`packages/plugin/src/huddle/index.ts:68`). On restore, every member is
 re-checked against the live registry; a member that is gone is dropped **silently at restore** and
 its absence reported only if the listener asks. (Announcing five departures at every worker re-fork is
 the "announcement that interrupts is itself a harm" failure of P30.)
@@ -158,15 +177,15 @@ the "announcement that interrupts is itself a harm" failure of P30.)
 
 | P22 protection | Today | Under a followed set | Change needed |
 |---|---|---|---|
-| Per-file priming | `#primed: Set<string>` (`:82`), keyed by file | unchanged — one entry per followed file | **none** |
-| High-water mark | one integer per file, `#highWater` (`:97`) | unchanged — `MAX_TRACKED_FILES = 50` (`:49`) already bounds it | **none** |
+| Per-file priming | `#primed: Set<string>` (`:123`), keyed by file | unchanged — one entry per followed file | **none** |
+| High-water mark | one integer per file, `#highWater` (`:138`) | unchanged — `MAX_TRACKED_FILES = 50` (`:85`) already bounds it | **none** |
 | Shrink re-anchor | `:257-264` | unchanged, per file | **none** |
-| Utterance labelling | `speak(text,'queue',sessionLabel(file))` (`:275`) | now load-bearing rather than decorative | label must come from the identity chain (`003` section 6), not `sessionLabel()`'s hex slice (`:64-69`) |
-| One watcher | `#watcher` / `#watching` singletons (`:78-79`, `:206-231`) | **must become a map keyed by file** | the one real structural change |
-| One stop timer | `#stopTimer` (`:80`), `WATCH_WINDOW_MS` (`:51`) | per file — a done-edge in session A must not stop watching session B | per-file timer |
-| One debounce | `#debounce` (`:81`) | per file — a shared 250 ms debounce coalesces two sessions' changes into one read of the wrong file | per-file debounce |
-| Ambiguity warning | `#warnedAmbiguous` (`:76`), *"two agents are active… speaking the most recent"* (`:339-342`) | **retired.** It exists because the machine was guessing; under R1 it never guesses | delete, and delete its test |
-| Queue overflow | `maxQueued`, drop oldest, announce (`speech-service.ts:155-185`); the value is `011`'s `queue.maxQueued`, not this document's | **now the sharpest edge**: three followed sessions fill one queue three times faster | section 3.3 rule 3's per-session division, registered as `011`'s `queue.perSessionFairness` |
+| Utterance labelling | `speak(text,'queue',sessionLabel(file),file)` (`:399`) | now load-bearing rather than decorative | label must come from the identity chain (`003` section 6), not `sessionLabel()`'s hex slice (`:106-112`) |
+| One watcher | `#watcher` / `#watching` singletons (`:119-120`, `:305-331`) | **must become a map keyed by file** | the one real structural change |
+| One stop timer | `#stopTimer` (`:121`), `WATCH_WINDOW_MS` (`:87`) | per file — a done-edge in session A must not stop watching session B | per-file timer |
+| One debounce | `#debounce` (`:122`) | per file — a shared 250 ms debounce coalesces two sessions' changes into one read of the wrong file | per-file debounce |
+| Ambiguity warning | `#warnedAmbiguousPair` (`:157`), *"two agents are active… speaking the most recent"* (`:520-533`) | **retired.** It exists because the machine was guessing; under R1 it never guesses | delete, and delete its test |
+| Queue overflow | `maxQueued`, drop oldest, announce (`speech-service.ts:288`); the value is `011`'s `queue.maxQueued`, not this document's | **now the sharpest edge**: three followed sessions fill one queue three times faster | section 3.3 rule 3's per-session division, registered as `011`'s `queue.perSessionFairness` |
 
 **The one structural change is that four singletons become four per-file entries.** That is the whole
 of T160's mechanism. Everything else P22 bought us is already keyed by file and was always ready for
@@ -211,7 +230,7 @@ Four live transcripts, four agents genuinely producing assistant text, and **not
 registered session.** Total transcripts in this worktree's project directories: **31**.
 
 Today's selector sorts *every* `.jsonl` in the directory by mtime and takes the newest
-(`packages/plugin/src/huddle/index.ts:322-344`). In the snapshot above it would have picked
+(`packages/plugin/src/huddle/index.ts:467-510`). In the snapshot above it would have picked
 `8658881a` — a subagent — six seconds after that subagent wrote. **That is P31, reproduced as a
 selection, from data on disk, without playing any audio.**
 
@@ -400,7 +419,7 @@ how to announce a reassignment. Three rules:
 1. **A dead session that was the speaker is announced**: *"Cedar's session ended."* Once.
 2. **A dead session that was merely present is not announced.** It appears and disappears from the
    roster like any other row.
-3. **Its high-water mark is retained**, not pruned, until `MAX_TRACKED_FILES` evicts it (`:49`) — the
+3. **Its high-water mark is retained**, not pruned, until `MAX_TRACKED_FILES` evicts it (`packages/plugin/src/huddle/index.ts:85`) — the
    same pid may not come back, but the same `sessionId` can be resumed, and re-reading a resumed
    transcript from zero is P22's third fault.
 
@@ -423,8 +442,8 @@ presence look like on day two, and what prunes?*
 | Registry entries | **self-pruning** — the file is removed on clean exit; a named value moved and moved back in Q27's probe (5 → 6 → 5) | the OS |
 | Registry entries after a **crash** | the reaper (4.3), at the next poll | ours |
 | Transcript files — **31 in this worktree already** [measured-here] | never enumerated by presence | section 3.2 |
-| `#highWater` entries | `MAX_TRACKED_FILES = 50` (`packages/plugin/src/huddle/index.ts:85`), oldest-touched evicted (`:282-290`) | already shipped |
-| `#spoken` ids | `MAX_REMEMBERED_IDS = 300` (`:44`), and **explicitly no longer load-bearing** (`:45-47`) — the gate is `replies.slice(mark)` (`:268`) | already shipped |
+| `#highWater` entries | `MAX_TRACKED_FILES = 50` (`packages/plugin/src/huddle/index.ts:85`), oldest-touched evicted (`:409-413`) | already shipped |
+| `#spoken` ids | `MAX_REMEMBERED_IDS = 300` (`:80`), and **explicitly no longer load-bearing** (`:127-128`) — the gate is `replies.slice(mark)` (`:392`) | already shipped |
 | `F` membership | `session.followMax` (section 11a), and re-resolved against the live registry at restore (R5) | this document |
 | Identity assignments (`005` section 9) | pruned when the `sessionId` leaves the registry **and** its transcript is gone | `005` owns it; this document supplies the liveness input |
 | Replay buffer | last 20 (`003` section 4) | already designed |
@@ -530,7 +549,7 @@ P33 shape — a number in a document that is not the number in the running syste
 | `SOLO: off` and `loud room: 7 here` on row 22 | a state that changes what speaks must be visible; a solo the listener forgot is indistinguishable from a broken plugin |
 | `[ O ] solo` in the control row | section 6 |
 | QUEUE header shows `per-session cap 2+2 of 8` | section 3.3 rule 3 — the fairness rule is invisible otherwise, and an invisible cap reads as a bug. **The rendering is `base+bonus of C`**, so the sum across the roster is visibly `C` and never more. It previously read `cap 3 of 8`, which showed `3 × 3 = 9` against a cap of 8 on screen — **R7-36**, the arithmetic defect caught by its own wireframe |
-| Queue items labelled by **call-sign** | `005` section 11.2 owns the identity; `sessionLabel()`'s hex slice (`packages/plugin/src/huddle/index.ts:64-69`) is what M15 exists to replace |
+| Queue items labelled by **call-sign** | `005` section 11.2 owns the identity; `sessionLabel()`'s hex slice (`packages/plugin/src/huddle/index.ts:106-112`) is what M15 exists to replace |
 
 **The plugin panel is unchanged.** It is read-blind (`003` section 4), so it gains one button —
 `[ solo ]` in the secondary row — and nothing else. It cannot show a roster and must not pretend to.
