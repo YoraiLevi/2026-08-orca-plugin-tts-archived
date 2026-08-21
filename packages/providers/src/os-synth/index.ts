@@ -32,6 +32,12 @@ export interface OsSynthOptions {
    * naming the missing binary and the apt command that fixes it.
    */
   readonly notify?: (message: string) => void
+  /**
+   * Seed the Linux backend instead of probing for it. Override for tests ONLY — the real path is
+   * `#resolveLinuxBackend`, and seeding it is how the `spd-say` floor (which has no binary on a
+   * developer's machine and no audio capture anywhere) can be exercised at all.
+   */
+  readonly linuxBackend?: LinuxBackend
 }
 
 /** PowerShell + Add-Type of System.Speech is slow to start; be generous but never unbounded. */
@@ -87,6 +93,21 @@ export class OsSynthUnavailableError extends Error {
   constructor(platform: string, tried: readonly string[]) {
     super(`No OS speech synthesizer found on ${platform}. Tried: ${tried.join(', ')}`)
     this.name = 'OsSynthUnavailableError'
+  }
+}
+
+/**
+ * The synthesizer exited 0 and produced no usable audio. 006 site 43: an unreadable WAV and a
+ * zero-byte WAV both ended in one silent `return`, indistinguishable from "there was nothing to
+ * say" — a disk-full or a synthesizer that exits successfully without writing produced no sound
+ * and no word.
+ */
+export class OsSynthEmptyOutputError extends Error {
+  constructor(cmd: string, why: 'unreadable' | 'empty') {
+    super(why === 'empty'
+      ? `${cmd} exited successfully but wrote no audio (is the disk full?)`
+      : `${cmd} exited successfully but its audio file could not be read`)
+    this.name = 'OsSynthEmptyOutputError'
   }
 }
 
@@ -207,11 +228,20 @@ export class OsSynthProvider implements TtsProvider {
   #linuxBackend: LinuxBackend | null | undefined = undefined
   #announcedFloor = false
   #unavailableReason: string | null = null
+  /**
+   * Resolves once the last `spd-say --cancel` has actually exited. 006 C6 + site 39: the cancel was
+   * fire-and-forget with BOTH its 'error' event and its surrounding catch swallowed, so barge-in on
+   * the Linux floor could fail with no trace — and the next utterance was handed to the same daemon
+   * before the cancel arrived, producing two overlapping voices.
+   */
+  #cancelInFlight: Promise<void> | null = null
+  #lastCancelFailure: string | null = null
 
   constructor(opts: OsSynthOptions = {}) {
     this.#platform = opts.platform ?? (process.platform as OsPlatform)
     this.#timeoutMs = opts.timeoutMs ?? DEFAULT_SPAWN_TIMEOUT_MS
     this.#notify = opts.notify ?? (() => {})
+    if (opts.linuxBackend !== undefined) this.#linuxBackend = opts.linuxBackend
   }
 
   get isWarm(): boolean { return this.#warm }
@@ -258,16 +288,44 @@ export class OsSynthProvider implements TtsProvider {
     this.#warm = true
   }
 
-  cancel(): void {
+  /** Why the last daemon cancel failed, if it did. `null` when barge-in reached the daemon. */
+  get lastCancelFailure(): string | null { return this.#lastCancelFailure }
+
+  cancel(): void | Promise<void> {
     this.#cancelled = true
     const c = this.#child
     this.#child = null
     if (c !== null && c.exitCode === null) c.kill('SIGKILL')
     // spd-say hands the text to the speech-dispatcher daemon, which owns playback: killing our
     // client does NOT stop the voice. Barge-in has to reach the daemon too (R022, two-sided).
-    if (this.#linuxBackend === 'spd-say') {
-      try { spawn('spd-say', ['--cancel'], { stdio: 'ignore' }).on('error', () => {}) } catch { /* best effort */ }
-    }
+    if (this.#linuxBackend !== 'spd-say') return
+    this.#cancelInFlight = new Promise<void>((resolve) => {
+      let child: ChildProcess
+      try {
+        child = spawn('spd-say', ['--cancel'], { stdio: 'ignore' })
+      } catch (err) {
+        // Was `catch { /* best effort */ }`. "Best effort" on the ONE control that must never lie
+        // is not best effort, it is an unreported failure of barge-in (site 39).
+        this.#noteCancelFailure(`spd-say --cancel could not be spawned: ${String(err)}`)
+        resolve()
+        return
+      }
+      const done = (why: string | null): void => {
+        this.#noteCancelFailure(why)
+        resolve()
+      }
+      // Was `.on('error', () => {})` — the second of the two swallows.
+      child.on('error', (err) => { done(`spd-say --cancel could not be started: ${String(err)}`) })
+      child.on('close', (code) => {
+        done(code === 0 ? null : `spd-say --cancel exited ${String(code)}; the daemon may still be speaking`)
+      })
+    })
+    return this.#cancelInFlight
+  }
+
+  #noteCancelFailure(why: string | null): void {
+    this.#lastCancelFailure = why
+    if (why !== null) this.#notify(`Read Aloud: stop may not have worked — ${why}`)
   }
 
   /**
@@ -351,15 +409,16 @@ export class OsSynthProvider implements TtsProvider {
     const dir = await mkdtemp(join(tmpdir(), 'orca-tts-'))
     const wav = join(dir, 'out.wav')
     try {
-      try {
-        await this.#synthesizeToFile(text, wav, opts)
-      } catch (err) {
-        if (err instanceof OsSynthTimeoutError) return   // no audio, but never a hang
-        throw err
-      }
+      // Site 42: `if (err instanceof OsSynthTimeoutError) return` meant a 60-second hang produced
+      // no audio AND no word — the listener waited a minute for a reply that had already been
+      // abandoned. It is still never a hang (the child is killed), but it is now a named failure
+      // the speech service can report aloud.
+      await this.#synthesizeToFile(text, wav, opts)
       if (this.#cancelled || opts.signal?.aborted === true) return
       const data = await readFile(wav).catch(() => null)
-      if (data === null || data.length === 0) return
+      // Site 43: these were one silent `return`, indistinguishable from "nothing to say".
+      if (data === null) throw new OsSynthEmptyOutputError(this.#command(text, wav, opts).cmd, 'unreadable')
+      if (data.length === 0) throw new OsSynthEmptyOutputError(this.#command(text, wav, opts).cmd, 'empty')
       yield { data: new Uint8Array(data), format: 'wav', sampleRate: CAPABILITIES.sampleRate, channels: 1 }
     } finally {
       await rm(dir, { recursive: true, force: true }).catch(() => undefined)
@@ -430,12 +489,16 @@ export class OsSynthProvider implements TtsProvider {
    * emit PCM, and it exists only because on a stock Ubuntu desktop the alternative is silence.
    */
   async #speakDirect(text: string, opts: SynthesizeOptions): Promise<void> {
-    try {
-      await this.#synthesizeToFile(text, '', opts)
-    } catch (err) {
-      if (err instanceof OsSynthTimeoutError) return
-      throw err
+    // C6: never hand a new utterance to the daemon while a cancel for the previous one is still in
+    // flight. Without this the cancel could land on THIS message instead of the one it was meant
+    // for, so pressing skip silenced the reply the listener had just skipped to.
+    if (this.#cancelInFlight !== null) {
+      await this.#cancelInFlight
+      this.#cancelInFlight = null
+      if (this.#cancelled) return
     }
+    // Site 44: the same timeout swallow as site 42, on the floor. Let it out.
+    await this.#synthesizeToFile(text, '', opts)
   }
 
   #capture(cmd: string, args: readonly string[]): Promise<string> {

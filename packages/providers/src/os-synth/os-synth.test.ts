@@ -232,3 +232,113 @@ describe('006 finding 1 — prepare() must not report warm on a synthesizer that
     expect(p.unavailableReason, 'a working engine must report no reason').toBeNull()
   })
 })
+
+/**
+ * 006 sites 42, 43, 44 and 39, and cascade C6.
+ *
+ * Four swallows in one file. A 60-second hang, an unreadable WAV, a zero-byte WAV and a failed
+ * `spd-say --cancel` all produced no audio AND no word — the listener waited for a reply that had
+ * already been abandoned, with every diagnostic reporting normal.
+ *
+ * NO AUDIO IS PLAYED HERE (P31). Every synthesizer is a two-line shell script on a temporary PATH:
+ * one that exits 0 writing nothing, one that sleeps. They open no audio device, and using a real
+ * engine could not produce these failures anyway.
+ */
+describe('006 sites 42/43/44 — a synthesizer that produces nothing says so', () => {
+  const withFakeEngine = async (
+    body: string, fn: (p: OsSynthProvider) => Promise<void>, timeoutMs = 30_000
+  ): Promise<void> => {
+    const { mkdtemp, writeFile, chmod } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'orca-tts-fakeengine-'))
+    const bin = join(dir, 'espeak-ng')
+    await writeFile(bin, `#!/bin/sh\n${body}\n`)
+    await chmod(bin, 0o755)
+    const realPath = process.env['PATH']
+    try {
+      process.env['PATH'] = dir
+      await fn(new OsSynthProvider({ platform: 'linux', linuxBackend: 'espeak-ng', timeoutMs }))
+    } finally {
+      process.env['PATH'] = realPath
+    }
+  }
+
+  it('site 43: exiting 0 without writing audio is a named failure, not silence', async () => {
+    if (process.platform === 'win32') return   // no /bin/sh
+    await withFakeEngine('exit 0', async (p) => {
+      let thrown: unknown = null
+      try {
+        for await (const _ of p.generate('hello there')) { void _ }
+      } catch (e) { thrown = e }
+      expect(thrown, 'a synthesizer that wrote nothing produced no audio and no word').not.toBeNull()
+      expect((thrown as Error).name).toBe('OsSynthEmptyOutputError')
+      expect(String((thrown as Error).message), 'the reason must be actionable').toMatch(/no audio|could not be read/i)
+    })
+  })
+
+  it('site 42: a wedged synthesizer is killed AND reported, not killed and swallowed', async () => {
+    if (process.platform === 'win32') return
+    // Absolute path: PATH is the fake-engine directory, so a bare `sleep` would not resolve and
+    // the script would exit 127 instantly — a fixture that cannot express the failure (P33).
+    await withFakeEngine('exec /bin/sleep 30', async (p) => {
+      const began = Date.now()
+      let thrown: unknown = null
+      try {
+        for await (const _ of p.generate('hello there')) { void _ }
+      } catch (e) { thrown = e }
+      expect(thrown, 'a 60-second hang used to produce no audio and no word').not.toBeNull()
+      expect((thrown as Error).name).toBe('OsSynthTimeoutError')
+      // The half that was already right and must stay right: it is a report, never a hang.
+      expect(Date.now() - began, 'the child must still be killed at the deadline').toBeLessThan(5_000)
+    }, 300)
+  })
+
+  it('CONTROL: an engine that DOES write audio still yields it and throws nothing', async () => {
+    if (process.platform === 'win32') return
+    // Proves the two assertions above can fail for the right reason: the throw is not unconditional.
+    await withFakeEngine('while [ "$1" != "-w" ]; do shift; done; printf RIFFxxxx > "$2"', async (p) => {
+      const out: number[] = []
+      for await (const c of p.generate('hello there')) out.push(c.data.length)
+      expect(out, 'a working engine must not be reported as broken').toEqual([8])
+    })
+  })
+})
+
+/**
+ * 006 site 39 + cascade C6 — the one control that must never lie.
+ *
+ * `spd-say --cancel` was spawned fire-and-forget with BOTH its `'error'` event and its surrounding
+ * `catch` swallowed, so barge-in on the Linux floor could fail with no trace at all. And because
+ * nothing awaited it, `#drain` handed the next utterance to the same daemon before the cancel
+ * arrived — the listener pressed skip and got two overlapping voices, with the stop control now
+ * behaving as a start control.
+ *
+ * `spd-say` does not exist on this machine, so spawning it fails — which is exactly the failure
+ * mode under test, and it opens no audio device.
+ */
+describe('006 site 39 / C6 — a daemon cancel that failed is reported, and is awaited', () => {
+  it('reports a cancel that could not reach the daemon', async () => {
+    const said: string[] = []
+    const p = new OsSynthProvider({ platform: 'linux', linuxBackend: 'spd-say', notify: (m) => said.push(m) })
+    await p.cancel()
+    expect(p.lastCancelFailure, 'barge-in failed and left no trace at all').toBeTruthy()
+    expect(said.join(' '), 'the listener must be told that stop may not have worked')
+      .toMatch(/stop may not have worked/i)
+  })
+
+  it('C6: cancel is awaitable, so the next utterance cannot outrun it', async () => {
+    // The property that makes two voices impossible: `cancel()` returns a promise on this rung,
+    // and PlaybackQueue.bargeIn awaits it (queue.test.ts asserts the awaiting half).
+    const p = new OsSynthProvider({ platform: 'linux', linuxBackend: 'spd-say' })
+    const returned = p.cancel()
+    expect(returned, 'a fire-and-forget cancel cannot be ordered against anything').toBeInstanceOf(Promise)
+    await returned
+  })
+
+  it('CONTROL: on a WAV rung cancel stays synchronous — there is no daemon to tell', async () => {
+    const p = new OsSynthProvider({ platform: 'linux', linuxBackend: 'espeak-ng' })
+    expect(p.cancel(), 'only the spd-say floor needs a second process').toBeUndefined()
+    expect(p.lastCancelFailure).toBeNull()
+  })
+})

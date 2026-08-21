@@ -9,7 +9,7 @@ import type { AudioChunk, PlaybackSink } from '../types/index.js'
 export interface QueueDeps {
   readonly sink: PlaybackSink
   /** Called on barge-in so in-flight SYNTHESIS stops too, not just playback (R022). */
-  readonly cancelSynthesis: () => void
+  readonly cancelSynthesis: () => void | Promise<void>
 }
 
 export class PlaybackQueue {
@@ -41,7 +41,12 @@ export class PlaybackQueue {
   async bargeIn(): Promise<void> {
     this.#generation++
     this.#pending = []
-    this.#deps.cancelSynthesis()
+    // AWAITED, deliberately. This used to be fire-and-forget, which is correct when cancelling is
+    // just a `kill` on a child we own — and wrong on the Linux floor, where cancelling means
+    // spawning `spd-say --cancel` to talk to a daemon that owns playback. Not awaiting it let the
+    // NEXT utterance reach the same daemon first, so skip produced two overlapping voices, or
+    // silenced the reply it had just skipped to (006 C6, P25).
+    await this.#deps.cancelSynthesis()
     await this.#deps.sink.stop()
   }
 

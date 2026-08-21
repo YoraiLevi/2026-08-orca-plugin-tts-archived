@@ -160,7 +160,7 @@ export class SpeechService {
     this.#deps = deps
     this.#playback = new PlaybackQueue({
       sink: deps.sink,
-      cancelSynthesis: () => { deps.provider.cancel() }
+      cancelSynthesis: () => deps.provider.cancel()
     })
   }
 

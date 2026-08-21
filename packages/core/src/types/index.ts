@@ -49,8 +49,14 @@ export interface TtsProvider {
   /**
    * Two-sided cancel (R022): abort in-flight synthesis AND stop producing.
    * Killing only the player leaves the synthesizer generating speech for interrupted text.
+   *
+   * May return a promise, and callers MUST await it. On the Linux `spd-say` floor the cancel is a
+   * SECOND process talking to the speech-dispatcher daemon, and killing our own client does not
+   * stop the daemon (P25). Fire-and-forget meant the next utterance was handed to the same daemon
+   * before the cancel arrived, so the listener pressed skip and heard two voices — or heard the
+   * cancel land on the reply they had just skipped TO (006 C6).
    */
-  cancel(): void
+  cancel(): void | Promise<void>
   /** Voices the provider can currently offer. May be empty before `prepare()`. */
   listVoices(): Promise<readonly string[]>
 }

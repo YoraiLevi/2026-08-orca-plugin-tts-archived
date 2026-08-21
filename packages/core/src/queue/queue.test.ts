@@ -46,3 +46,53 @@ describe('T044 playback queue', () => {
     expect(sink.played).toEqual([1, 2, 3, 4])
   })
 })
+
+/**
+ * 006 cascade C6 — skip plus the Linux floor produced two overlapping voices.
+ *
+ * On the `spd-say` rung the provider yields no audio, so the generation bump has nothing to
+ * invalidate, and the daemon that actually owns playback is only reachable through a SECOND
+ * process (`spd-say --cancel`). `bargeIn` called `cancelSynthesis()` without awaiting it, so the
+ * next utterance reached the daemon before the cancel did: the listener pressed skip and heard two
+ * voices, with the stop control behaving as a start control (P25, P22's helplessness reproduced on
+ * the platform P25 was written to rescue).
+ */
+describe('C6 — barge-in waits for the cancel to actually land', () => {
+  it('does not stop the sink, or return, until cancelSynthesis has resolved', async () => {
+    const order: string[] = []
+    let releaseCancel = (): void => {}
+    const q = new PlaybackQueue({
+      sink: {
+        isPlaying: false,
+        async enqueue(): Promise<void> { order.push('enqueue') },
+        async stop(): Promise<void> { order.push('sink.stop') }
+      },
+      cancelSynthesis: () => {
+        order.push('cancel.start')
+        return new Promise<void>((r) => { releaseCancel = () => { order.push('cancel.done'); r() } })
+      }
+    })
+    const barge = q.bargeIn()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(order, 'the sink was stopped before the daemon was even told').toEqual(['cancel.start'])
+    releaseCancel()
+    await barge
+    expect(order, 'barge-in returned while the cancel was still in flight')
+      .toEqual(['cancel.start', 'cancel.done', 'sink.stop'])
+  })
+
+  it('CONTROL: a synchronous cancel still works and is not made to wait', async () => {
+    // Proves the assertion above is about ORDERING, not about every cancel becoming a promise.
+    const order: string[] = []
+    const q = new PlaybackQueue({
+      sink: {
+        isPlaying: false,
+        async enqueue(): Promise<void> {},
+        async stop(): Promise<void> { order.push('sink.stop') }
+      },
+      cancelSynthesis: () => { order.push('cancel') }
+    })
+    await q.bargeIn()
+    expect(order).toEqual(['cancel', 'sink.stop'])
+  })
+})
