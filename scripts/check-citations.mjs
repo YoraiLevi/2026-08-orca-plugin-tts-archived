@@ -46,14 +46,26 @@
 //                   Verifiable only by cloning those; counted, never silently dropped.
 //
 // USAGE
-//   pnpm check:citations              quiet when clean, non-zero on any stale citation
+//   pnpm check:citations              non-zero on any stale citation
 //   pnpm check:citations --summary    print the counts even when clean
 //   pnpm check:citations --strict     also fail on unanchored citations
 //   pnpm check:citations --list       dump every resolved citation and its verdict
 //   node scripts/check-citations.mjs --fix    rewrite stale citations onto the anchor's current line
 //                                    (CITATION_LOCKED=a.md,b.md exempts files another agent owns)
 //   pnpm check:citations --require-orca       fail if the ORCA checkout is missing
-//   pnpm check:citations --max-stale=N        tolerate N known-stale citations (the ratchet)
+//   pnpm check:citations --ratchet            enforce THIS configuration's ratchet, read from
+//                                    docs/.research/citation-ratchet.json. PREFERRED — the number
+//                                    lives beside its reasoning and its calibration commit, and
+//                                    cannot be quietly raised in a workflow file.
+//   pnpm check:citations --max-stale=N        a raw threshold. REFUSED unless N is this
+//                                    configuration's calibrated ratchet — see CONFIGURATION
+//                                    IDENTITY below for why a number from another config is worse
+//                                    than no number.
+//
+// EVERY RUN PRINTS ITS CONFIGURATION, clean or not: which ORCA state produced the count, which
+// threshold was applied and where it came from, and whether the working tree was dirty. A count
+// without its configuration is unusable, and this repo proved it the expensive way — see
+// docs/.research/citation-audit.md "Re-audit".
 //   ORCA_SRC=/path/to/orca pnpm check:citations
 
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'node:fs'
@@ -71,9 +83,12 @@ const FIX = ARGS.has('--fix')
 const REQUIRE_ORCA = ARGS.has('--require-orca')
 // A ratchet, not an amnesty: the number of citations we have not yet re-derived. It may only go
 // down. Every entry is listed in docs/.research/citation-audit.md with why it is still open.
-const MAX_STALE = Number(
-  [...ARGS].find((a) => a.startsWith('--max-stale='))?.split('=')[1] ?? 0,
-)
+const MAX_STALE_ARG = [...ARGS].find((a) => a.startsWith('--max-stale='))?.split('=')[1]
+const MAX_STALE = Number(MAX_STALE_ARG ?? 0)
+// Read the per-configuration ratchet instead of taking a number on the command line. Preferred:
+// the number then lives beside its reasoning and its calibration commit, and cannot be quietly
+// raised in a workflow file.
+const USE_RATCHET = ARGS.has('--ratchet')
 // Files another agent owns right now; --fix must not touch them.
 const LOCKED = (process.env.CITATION_LOCKED ?? '').split(',').map((x) => x.trim()).filter(Boolean)
 
@@ -88,7 +103,12 @@ const SLACK = 10 // lines of tolerance: within ~a screen of the claim, the reade
 
 function gitFiles(root, args) {
   try {
-    return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).split('\n').filter(Boolean)
+    // stderr ignored: probing a missing ORCA checkout is an EXPECTED outcome, reported by the
+    // config line below. Letting git's "fatal: cannot change to ..." through would put a scary
+    // line next to a number that is fine, which is how people learn to skim past real errors.
+    return execFileSync('git', ['-C', root, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).split('\n').filter(Boolean)
   } catch {
     return []
   }
@@ -553,8 +573,103 @@ if (FIX) {
 // ORCA checkout HEAD -- documents claim a pinned commit; say so if the tree has moved.
 const orcaHead = counts.orca > 0 ? (gitFiles(ORCA, ['rev-parse', 'HEAD'])[0] ?? null) : null
 
+/* ================================================================ CONFIGURATION IDENTITY
+ *
+ * THE DEFECT THIS EXISTS TO END. This checker does not measure the same population in every
+ * configuration. With an ORCA checkout resolved it checks ~527 citations into ORCA's tree and
+ * calls ~129 paths external; with no checkout those same paths fall to external and the count is
+ * drawn from a partly DISJOINT set. Measured, on one pinned tree: seven repairs moved the
+ * ORCA-resolved count 92 -> 85 and the ORCA-absent count 98 -> 98. A team can therefore repair
+ * everything a local run shows and leave CI exactly as red, with no way to tell that from a lack
+ * of effort. That is a permanently-red signal carrying no information, and it will camouflage the
+ * real failure when it comes.
+ *
+ * So every run now states which configuration produced its number, and a threshold calibrated in
+ * one configuration is REFUSED in another rather than silently enforced.
+ *
+ * The ORCA SHA is part of the identity, not decoration: ORCA citations verified against a moved
+ * checkout were verified against a different tree than the documents claim, which is a different
+ * measurement again.
+ */
+function configId() {
+  if (!ORCA_PRESENT) return 'orca:absent'
+  if (orcaHead === null) return 'orca:present-unknown-head'
+  return orcaHead === ORCA_PINNED ? `orca:${ORCA_PINNED.slice(0, 10)}` : `orca:moved@${orcaHead.slice(0, 10)}`
+}
+const CONFIG = configId()
+
+/**
+ * Uncommitted edits to the files citations point INTO change the answer, and in a shared worktree
+ * they belong to somebody else. This is not a config -- it is a validity condition on the reading.
+ * Reported loudly and never silently absorbed: the same tree read 139 while a peer had one source
+ * file open and 85 once it was pinned.
+ */
+function dirtyTargets() {
+  const out = gitFiles(REPO, ['status', '--porcelain'])
+    .map((l) => l.slice(3).trim())
+    .filter((f) => /\.(ts|tsx|js|mjs|cjs|json|yml)$/.test(f) && !f.startsWith('dist/'))
+  return out
+}
+const DIRTY = dirtyTargets()
+
+/* ---------------------------------------------------------------- the ratchet, per config */
+
+function readRatchetFile() {
+  const path = join(REPO, 'docs/.research/citation-ratchet.json')
+  if (!existsSync(path)) return null
+  try { return JSON.parse(readFileSync(path, 'utf8')) } catch { return null }
+}
+const RATCHET = readRatchetFile()
+const ratchetEntry = RATCHET?.configs?.[CONFIG] ?? null
+
+/**
+ * Decide the threshold, and REFUSE rather than compare across configurations.
+ *
+ * Returns { limit, refuse } -- `refuse` is a message that forces a non-zero exit no matter what
+ * the count is, because a number that cannot be honestly compared is worse than no number.
+ */
+function resolveThreshold() {
+  if (USE_RATCHET) {
+    if (RATCHET === null) {
+      return { limit: 0, refuse: '--ratchet was passed but docs/.research/citation-ratchet.json is missing or unparseable.' }
+    }
+    if (ratchetEntry === null) {
+      return {
+        limit: 0,
+        refuse:
+          `no ratchet is calibrated for configuration ${CONFIG}. Calibrate one in ` +
+          'docs/.research/citation-ratchet.json, on a CLEAN worktree, with the reason written beside it.',
+      }
+    }
+    return { limit: ratchetEntry.maxStale, refuse: null }
+  }
+  if (MAX_STALE_ARG === undefined) return { limit: 0, refuse: null }
+
+  // A number was passed on the command line. Only accept it if it IS this configuration's
+  // calibrated ratchet; anything else is a threshold from somewhere else being applied here.
+  if (ratchetEntry !== null && Number(MAX_STALE_ARG) !== ratchetEntry.maxStale) {
+    const elsewhere = Object.entries(RATCHET?.configs ?? {})
+      .filter(([, v]) => v.maxStale === Number(MAX_STALE_ARG))
+      .map(([k]) => k)
+    const supersededWhy = RATCHET?.superseded?.[String(Number(MAX_STALE_ARG))]
+    return {
+      limit: ratchetEntry.maxStale,
+      refuse:
+        `--max-stale=${MAX_STALE_ARG} is not the ratchet for configuration ${CONFIG}, which is ` +
+        `${ratchetEntry.maxStale}.` +
+        (elsewhere.length ? ` ${MAX_STALE_ARG} is the ratchet for ${elsewhere.join(', ')}.` : '') +
+        (supersededWhy ? `\n           ${MAX_STALE_ARG} is recorded as SUPERSEDED: ${supersededWhy}` : '') +
+        '\n           Pass --ratchet instead of a number, so the threshold travels with its ' +
+        'configuration and its reasoning.',
+    }
+  }
+  return { limit: MAX_STALE, refuse: null }
+}
+const { limit: STALE_LIMIT, refuse: REFUSAL } = resolveThreshold()
+
 const problems =
-  stale.length > MAX_STALE || (STRICT && unanchored.length > 0) || (REQUIRE_ORCA && !ORCA_PRESENT)
+  REFUSAL !== null ||
+  stale.length > STALE_LIMIT || (STRICT && unanchored.length > 0) || (REQUIRE_ORCA && !ORCA_PRESENT)
 
 if (stale.length) {
   console.error(`\nSTALE CITATIONS (${stale.length})\n`)
@@ -591,6 +706,35 @@ if (orcaHead && orcaHead !== ORCA_PINNED) {
   console.error(`\nWARNING: the ORCA checkout at ${ORCA} is HEAD ${orcaHead.slice(0, 10)},`)
   console.error(`         but the documents pin ${ORCA_PINNED.slice(0, 10)}. ORCA citations were`)
   console.error(`         verified against a different tree than the documents claim.`)
+}
+
+/* ---------------------------------------------------------------- the config line
+ *
+ * Printed on EVERY run, clean or not. The tool used to be quiet when clean, and quiet was the
+ * problem: a bare count carries no evidence of which population produced it, so two runs that
+ * disagree look like progress or regression instead of two different measurements. A number
+ * without its configuration is unusable, and this repo proved it the expensive way.
+ */
+const thresholdLabel =
+  REFUSAL !== null ? 'REFUSED'
+  : USE_RATCHET ? `${STALE_LIMIT} (from citation-ratchet.json, calibrated ${RATCHET?.calibratedAt ?? '?'})`
+  : MAX_STALE_ARG !== undefined ? `${STALE_LIMIT} (--max-stale, matches this config's ratchet)`
+  : `${STALE_LIMIT} (none passed — any stale citation fails)`
+console.error(
+  `\nconfig:    ${CONFIG}  ·  threshold ${thresholdLabel}` +
+  `  ·  tree ${DIRTY.length === 0 ? 'clean' : `DIRTY, ${DIRTY.length} file(s)`}`,
+)
+if (DIRTY.length > 0) {
+  console.error(
+    '           This count includes UNCOMMITTED edits to files citations point into, which in a\n' +
+    '           shared worktree may be a peer\'s in-flight work rather than citation rot. Pin the\n' +
+    '           reading: git worktree add --detach /tmp/x <sha>, symlink node_modules, re-run.',
+  )
+  for (const f of DIRTY.slice(0, 8)) console.error(`             ${f}`)
+  if (DIRTY.length > 8) console.error(`             … and ${DIRTY.length - 8} more`)
+}
+if (REFUSAL !== null) {
+  console.error(`\nREFUSED:   ${REFUSAL}`)
 }
 
 if (SUMMARY || problems) {
