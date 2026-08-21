@@ -199,9 +199,64 @@ value that must move.
 
 ---
 
-## Phase M9 — Resident service + Piper (post-v1)
+## Phase M9 — The resident service (post-v1)
 
-- [ ] **T090** Service skeleton: `/synthesize` (streaming), `/cancel`, `/health`, `/engines`
+> **Rescoped 2026-08-21 by `docs/design/015-m9-rescope.md`, which amends `010` sections 8, 10 and 12.**
+> This phase read *"Resident service + Piper — only a neural engine meets the 500 ms budget"*. Both
+> halves of that are measured false. **The ~950 ms inter-sentence gap is the CoreAudio device open,
+> not the process spawn** — spawn is 2.3 ms of it, the temp file 0.33 ms, ~893 ms is the device
+> `[measured-here]` (`docs/.research/latency-measurements.md` 1.1, PITFALLS **P32**). And a **warm
+> resident `AVSpeechSynthesizer` reaches its first buffer in p50 17.7 / 17.1 ms**, n=20 ×2
+> `[measured-here]` (`docs/.research/spike1-resident-synth.md` 1) — 8.5× inside 010's 150 ms pass
+> condition. **So M9's deliverable is holding the audio DEVICE open across an utterance, and Piper is
+> a quality decision on its own schedule.** A change that stops spawning a player per chunk while
+> still opening the device per chunk recovers **2 ms of 950** and alters nothing a listener hears.
+
+### M9a — the resident service, OS synthesizer, device held
+
+- [ ] **T088** SPIKE-3: hold a device open across two buffers; report gap and device-open count. **Audible — not on a machine anyone is listening to** (P31). The one number M9a's plan rests on and the only one nobody has taken
+- [ ] **T089** [P] Run the committed cross-platform SPIKE-1 probes — `scripts/spikes/spike1-windows-firstbuffer.ps1` and `scripts/spikes/spike1-linux-firstindex.mjs`. Both are `[claimed]` today; each is one command on the right machine
+- [ ] **T090** macOS sidecar skeleton: resident process, `AVSpeechSynthesizer.write(_:toBufferCallback:)` → `AVAudioEngine` + `AVAudioPlayerNode`, **one engine start per session**
+- [ ] **T090a** Device lifecycle: lazy acquire on first synthesize; **engine never stops between sentences**; release at `IDLE_RELEASE_MS` (60 s); process exit at `IDLE_EXIT_MS` (15 min, 5 min on battery); **no timer ever touches the device on a schedule** (B-03)
+- [ ] **T090b** Default-device change mid-sentence — headphones plugged in — rebuild the graph at the new output format and **resume from the last completed word boundary**; announce only if a sentence was lost, at `next` urgency (P30)
+- [ ] **T090c** Device lost to hog/exclusive mode → announce the rung change **by name**, fall back to the subprocess sink (R015)
+- [ ] **T090d** Two-sided cancel while we own the device: `stopSpeaking(.immediate)` + drop unscheduled buffers + `playerNode.stop()` with a short fade, **engine stays running**; sidecar timestamps the last non-silent sample (this is 003's drain segment, finally measurable)
+- [ ] **T090e** `duck(level)` / `unduck()` as transport verbs — a mixer gain ramp. **B-04 is structural and belongs in this brief, not a later patch**
+- [ ] **T090f** Protocol + addressing: `/synthesize` (streaming), `/cancel`, `/pause`, `/resume`, `/duck`, `/health`, `/engines`; per-worktree socket path (P27), `protocolVersion` in the path, `{pid, procStart}` liveness (B-02), version mismatch **announced and degraded, never silent** (C-03 covers the Windows named-pipe half)
+- [ ] **T094** [P] `ServiceProvider` implementing `TtsProvider` v2, passing the same contract suite
+- [ ] **T095** Degradation ladder with explicit rung reporting — the plugin can say which rung each platform is on
+- [ ] **T096** Kill the service mid-utterance → restart **once** with backoff, resume from the last completed sentence, and **say so aloud**. *(Reworded: the old "no user-visible failure" is the discipline P30 forbids.)* Verify by effect with `log` and `notify` disabled, plus a negative control
+- [ ] **T097a** Gap probe: `interchunk.gap` shape from `scripts/bench-latency.mjs`, run against the resident sink **and against today's `SubprocessSink` in the same session as the baseline** (R004)
+- [ ] **T097b** Idle probe: `powermetrics` wakeups/sec and package idle residency, service warm and queue empty, against a plugin-disabled baseline. Closes the half of B-03 that `spike1-resident-synth.md` 3.1 excludes
+- [ ] **T098** [P] Windows resident host (`SetOutputToAudioStream`, `SpeakProgress`, WASAPI shared-mode client held open)
+- [ ] **T099** [P] Linux SSIP socket client — pause/resume and index marks, **`bytes: false` permanently**; it is a `spoke-elsewhere` provider, not a synthesis service
+
+**Gate M9a — the device stays open across a reply.** Full statement, with its instrument and its
+falsifier, in `docs/design/015-m9-rescope.md` section 6. In brief:
+
+- **Pass:** inter-sentence gap **p50 ≤ 50 ms, p95 ≤ 100 ms**, gap-to-audio ratio **p50 ≤ 5 %**;
+  **exactly one device open per reply**, asserted by the test; `firstaudio.upper` **p50 ≤ 500 ms**
+  warm (the conservative bound, so the gate cannot be met by picking the flattering one); no
+  measurable rise in idle wakeups/sec; and the same-session baseline against today's sink still
+  reads ~890–950 ms.
+- **FALSIFIER:** p50 gap above **150 ms**, or more than one device open per reply, or
+  `firstaudio.upper` p50 above **500 ms**. Any one means residency did not buy the device back and
+  the milestone routes to design 004's held-`AudioContext` path.
+- **Not a CI gate.** CI runners have no audio device at all (P16), so every probe that matters would
+  report NOT-RUN and the row would be a permanently-broken indicator. *(This replaces the old T097's
+  "in CI".)* CI gates the **protocol**: socket lifecycle, version refusal, cancel semantics,
+  restart-and-resume, capability descriptor.
+- **Running it is audible** — `afplay` has no device-selection flag and stock macOS has no null sink
+  (P31, `latency-measurements.md` 1.0). Not on a machine anyone is listening to.
+
+### M9b — Piper as an engine inside the service
+
+Gated on **quality**, not latency. Piper's 52–65 ms/sentence `[measured-here]` (P11) is a regression
+guard here, not the gate. The argument for it is that all 180 installed macOS voices on this machine
+are the compact tier `[measured-here]`, Windows third-party apps are fenced to SAPI 5 `*Desktop`
+voices and stock Linux is espeak-ng (P16) — so **one good voice, identical on three platforms**, for
+a listener who spends hours a day with it. Quality is an accessibility property here.
+
 - [ ] **T091** Piper via `sherpa-onnx-node` → `service/src/engines/piper.ts`
 - [ ] **T092** Model manager
   - [ ] T092a Download with resume + progress
@@ -209,12 +264,10 @@ value that must move.
   - [ ] T092c Regression test with a non-ASCII path ← the `Björn` bug
   - [ ] T092d Checksum verification
 - [ ] **T093** Warm-on-start + one-character warm-up generation
-- [ ] **T094** [P] `ServiceProvider` implementing `TtsProvider`, passing the same contract suite
-- [ ] **T095** Degradation ladder with explicit rung reporting
-- [ ] **T096** Test: kill the service mid-utterance → falls back to OS synth, no user-visible failure
-- [ ] **T097** [P] Latency benchmark asserting < 500 ms warm, per OS, in CI
+- [ ] **T097c** Quality comparison against the OS voice, and a latency regression guard (must not get worse than M9a)
 
-**Gate M9:** T097 reports measured first-audio under 500 ms on each OS; T096 green.
+**Gate M9b:** a listener prefers the Piper voice in a blind A/B on all three platforms; T092c green;
+the licence is shown before any download; M9a's latency gate still passes.
 
 ---
 

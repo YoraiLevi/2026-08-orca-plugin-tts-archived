@@ -28,7 +28,7 @@ two Definition-of-Done items are unmet and named below.
 | CI green on three OSes | ✅ run 32403931195 |
 | README documents limitations verbatim | ✅ |
 | Memory files reconcile | ✅ |
-| **First audio < 500 ms** *(R4.2 scores the **default local backend**; the default is Piper. The row below scores the **OS-synth fallback**, which is not what the budget is written against.)* | ❌ **On the OS synth: between 1,112 ms and 2,017 ms** `[measured-here]` (p50 lower/upper bound, n=10 ×2, `docs/.research/latency-measurements.md` 1.2). Bracket, not midpoint — nothing in userland can see the first sample leave the DAC without a loopback or CoreAudio probe. **M9 is necessary but not sufficient:** `generate()` alone is p50 1,054–1,163 ms `[measured-here]`, 2.1× the whole budget with playback at zero (1.3), so R4.2 on this path needs Piper as well. Tracked: repo issue #1. |
+| **First audio < 500 ms** *(R4.2 scores the **default local backend**; the default is Piper. The row below scores the **OS-synth fallback**, which is not what the budget is written against.)* | ❌ **On the OS synth: between 1,112 ms and 2,017 ms** `[measured-here]` (p50 lower/upper bound, n=10 ×2, `docs/.research/latency-measurements.md` 1.2). Bracket, not midpoint — nothing in userland can see the first sample leave the DAC without a loopback or CoreAudio probe. **Rescoped 2026-08-21 by `docs/design/015-m9-rescope.md`.** `OsSynthProvider.generate()` is p50 1,054–1,163 ms `[measured-here]` (1.3) — but that cost is **per-process engine and voice init, not synthesis compute**: a *warm resident* `AVSpeechSynthesizer` reaches its first buffer in **p50 17.7 / 17.1 ms**, n=20 ×2 `[measured-here]` (`docs/.research/spike1-resident-synth.md` 1), and ~328 ms cold (section 2). So **the engine is not on the macOS latency critical path and Piper is not what this row needs** — what it needs is the audio **device** held open across the utterance (~893 ms of the ~950 ms gap, P32). Windows and Linux first-buffer are `[claimed]`; their probes are committed and unrun. Tracked: repo issue #1, and issue #3 whose title is now false. |
 | **A human installs it and hears an agent reply** | ✅ **VERIFIED 2026-08-21.** Huddle mode spoke a live reply in a real ORCA session, on time and without repeating. |
 
 ## Open work
@@ -36,7 +36,8 @@ two Definition-of-Done items are unmet and named below.
 | Task | State |
 |---|---|
 | T086 marketplace entry, T087 tag v1 | not started — see "decide first" below |
-| M9 resident Piper service (T090–T097) | not started; the only thing that meets the latency budget |
+| **M9a — the resident service (device held open), T088–T099** | not started. **Rescoped**: the deliverable is holding the audio device open, not swapping the synthesizer (`docs/design/015-m9-rescope.md`). Gate and falsifier: 015 section 6. Blocking measurement: **SPIKE-3 (T088), the held-device probe, `[claimed]` in every configuration today** |
+| **M9b — Piper inside the service, T091–T097c** | not started; gated on **quality**, not latency. Piper's 52–65 ms `[measured-here]` (P11) is a regression guard here, not the gate |
 | T100 host→panel channel PR | issue #15638 raised; awaiting ORCA's design decision |
 | T102 `selection:read` PR | issue #15639-sibling #15637 raised; awaiting decision |
 

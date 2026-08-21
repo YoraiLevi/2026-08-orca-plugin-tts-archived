@@ -39,7 +39,7 @@ before designing anything.** Our ORCA plugin is a *host* for that design, not a 
 | R3.4 | Default needs **no account, no API key, no network** | Disqualifies Picovoice Orca, ElevenLabs, OpenAI, edge-tts |
 | R3.1/R3.2 | Backend is **configuration, not code**, behind a documented interface | Provider seam exists before the first engine |
 | R4.1 | **Sentence streaming required** — "POST → wait for whole paragraph → play" fails | Huddle mode must synthesize sentence 1 while the agent still types |
-| R4.2 | First audio **< ~500 ms** on the default local backend | The **default local backend is Piper** (52–65 ms/sentence `[measured-here]`, P11). On the `say` fallback the budget is unreachable: `generate()` alone is p50 1,054–1,163 ms `[measured-here]` (n=9 ×2), 2.1× the whole budget with playback at zero. Score the two paths separately. |
+| R4.2 | First audio **< ~500 ms** on the default local backend | **Rescoped 2026-08-21, `docs/design/015-m9-rescope.md`.** `OsSynthProvider.generate()` is p50 1,054–1,163 ms `[measured-here]` (n=9 ×2) — but that is per-process engine and voice init, **not synthesis compute**: warm resident `AVSpeechSynthesizer` first buffer is **p50 17.7 / 17.1 ms**, n=20 ×2 `[measured-here]` (`docs/.research/spike1-resident-synth.md` 1). **The budget is a device question on macOS, not an engine one.** Score per platform and per rung; Windows and Linux are `[claimed]`. |
 | R2.5 | Speech **interruptible** by a second chord | Two-sided cancel: stop the player AND the synthesizer |
 | — | **Two-process rule**: neural model load is seconds; a hotkey must not pay it per press | Resident warm service + thin client |
 | R5.2 | **Playback belongs to the client, not the synthesis service** | Providers emit PCM; a separate sink plays it |
@@ -96,6 +96,16 @@ and that was **wrong** — see below.
 
 ## Settled findings
 
+> **Amended again 2026-08-21 — SPIKE-1, `docs/.research/spike1-resident-synth.md`.** A **warm resident**
+> `AVSpeechSynthesizer.write(_:toBufferCallback:)` reaches its first PCM buffer in **p50 17.7 / 17.1 ms**,
+> n=20 ×2 `[measured-here]` — 8.5× inside 010's 150 ms pass condition; cold is ~328 ms (n=8), so residency is
+> worth ~311 ms `[derived]` once per session; SSML is free (−0.3 / +0.4 ms); idle is 0.05 % CPU and 9.4 MB of
+> private footprint, **synthesizer only, device excluded**. **Therefore M9 is rescoped
+> (`docs/design/015-m9-rescope.md`): its deliverable is holding the audio DEVICE open across an utterance,
+> and Piper moves to M9b as a quality decision on its own schedule.** Windows and Linux first-buffer remain
+> `[claimed]` — the probes are committed and have never been executed.
+
+
 > **Amended 2026-08-21 — the latency measurement pass.** `docs/.research/latency-measurements.md` is
 > now the source of truth for every performance number in this project, and `pnpm bench:latency`
 > re-runs it (**silent by default**; `--audible` opens the audio device and will interrupt whoever is
@@ -117,8 +127,10 @@ and that was **wrong** — see below.
   (P11), no node-gyp, prebuilt binaries. `say` is the never-fails fallback only: its *empty-string
   spawn* costs 414 ms `[measured-here]` (5 runs, P10) and a **whole real sentence through
   `generate()` costs p50 1,054–1,163 ms** `[measured-here]` (n=9 ×2,
-  `docs/.research/latency-measurements.md` 1.3) — so on the fallback the engine *is* the problem,
-  not only the spawn. **Kokoro is a trap**: 16–25× slower than Piper `[derived]` from P11, int8
+  `docs/.research/latency-measurements.md` 1.3). **That cost is per-process init, not synthesis compute** —
+  the same engine renders a sentence in **17.7 ms warm** in a resident process `[measured-here]`
+  (`docs/.research/spike1-resident-synth.md` 1), so residency deletes it. **Piper's argument is voice
+  quality, not latency** (`docs/design/015-m9-rescope.md` section 3). **Kokoro is a trap**: 16–25× slower than Piper `[derived]` from P11, int8
   slower than FP32.
 - **One dependency, `sherpa-onnx-node`, covers TTS + future STT + VAD + keyword spotting.**
 - **No preinstalled macOS binary accepts streaming PCM on stdin.** `afplay` refuses it and gives a
