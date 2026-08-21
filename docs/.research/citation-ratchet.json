@@ -9,30 +9,36 @@
     "",
     "A number here is a RATCHET, not an amnesty. It may only go DOWN. Raising it to make a job",
     "green is how a checker becomes decoration (PITFALLS P33). THE NUMBERS BELOW ARE NOT MET AT",
-    "HEAD AND HAVE DELIBERATELY NOT BEEN RAISED TO MEET IT — see `standing` vs `measured`.",
+    "HEAD AND HAVE DELIBERATELY NOT BEEN RAISED TO MEET IT \u2014 see `standing` vs `measured`.",
     "",
     "Every reading was taken on a CLEAN DETACHED WORKTREE at the stated commit, with node_modules",
     "symlinked in. A count taken in the shared working tree is not comparable: it reads whatever",
     "five peers have uncommitted. The same tree read 139 while one peer had os-synth/index.ts open."
   ],
-
   "calibratedAt": "98309f8",
   "calibratedOn": "2026-08-21",
   "configs": {
     "orca:87097551f8": {
-      "maxStale": 85,
-      "why": "Standing ratchet, measured clean at 98309f8. All 85 were in the three record documents - 006-fma 66, 014-review-round7 13, 008-crossreview-round3 6 - with zero live."
+      "why": "The single LOST citation is 014-review-round7.md's `types/index.ts:230`, a line past the end of a 103-line file with no anchor anywhere in it. It is 1 because that is what was measured, not because 1 is a comfortable number: this may only go DOWN.",
+      "maxLost": 1
     },
     "orca:absent": {
-      "maxStale": 98,
-      "why": "The CI configuration: GitHub's runner has no ORCA checkout. The same 85 plus 13 that only resolve in this configuration - five in 011-settings, two in 016, one in 002 pointing at another document, and four more in 006 the ORCA-resolved run classifies differently."
+      "why": "The CI configuration: GitHub's runner has no ORCA checkout, so ~527 ORCA citations fall to external and a partly disjoint population is measured. LOST happens to be the same 1 in both configurations today; that is a coincidence of this tree, not a property, which is why the entries stay separate.",
+      "maxLost": 1
     }
   },
-
   "measured": {
     "at": "1558ecc",
-    "orca:87097551f8": { "stale": 130, "drifted": 129, "lost": 1 },
-    "orca:absent": { "stale": 142, "drifted": 141, "lost": 1 },
+    "orca:87097551f8": {
+      "stale": 130,
+      "drifted": 129,
+      "lost": 1
+    },
+    "orca:absent": {
+      "stale": 142,
+      "drifted": 141,
+      "lost": 1
+    },
     "why": [
       "NOT MET, and not raised. The standing 85/98 were measured at 98309f8; commit 4ccfa20",
       "(fix(os-synth): a reply beginning with `---` lost half of it) moved the ORCA-resolved total",
@@ -50,8 +56,49 @@
       "docs/.research/citation-audit.md, `What the ratchet should measure instead`."
     ]
   },
-
   "superseded": {
-    "34": "Calibrated 2026-08-21 against the ORCA-ABSENT run while docs/.research/citation-audit.md's Numbers table reported 33 from the ORCA-RESOLVED run. Two populations, one number. It was never a threshold on the number anyone was reading, and the checker now refuses it rather than enforcing it."
+    "34": "Calibrated 2026-08-21 against the ORCA-ABSENT run while docs/.research/citation-audit.md's Numbers table reported 33 from the ORCA-RESOLVED run. Two populations, one number. It was never a threshold on the number anyone was reading, and the checker now refuses it rather than enforcing it.",
+    "85 / 98 (total)": "The total-count ratchet. Superseded by the move to LOST, not by being raised. Both numbers stay in standing_total_stale_SUPERSEDED and both are still printed on every run."
+  },
+  "gate": "LOST",
+  "gateChangedOn": "2026-08-21",
+  "gateChangedWhy": [
+    "THE GATE WAS NARROWED ON PURPOSE, from the TOTAL stale count to LOST alone. Recorded here",
+    "rather than left to be discovered, because a quality gate that gets narrower without an",
+    "explanation is indistinguishable from one that was loosened to make a job green.",
+    "",
+    "A stale citation is three different things: DRIFTED (the anchor is still in the cited file,",
+    "somewhere else - the claim is intact and the pointer is off), LOST (the anchor is nowhere in the",
+    "file - the claim itself is in question), and QUOTE-GONE (the document quotes code verbatim and",
+    "that code is gone - almost always a REMEDIED defect, never safe to re-point).",
+    "",
+    "DRIFTED tracks CODE CHURN, not documentation decisions. Measured: 4ccfa20, a one-file bug fix in",
+    "os-synth, moved the ORCA-resolved total from 85 to 130 in a single commit with no documentation",
+    "changing at all - bisected in a pinned worktree, controlled by scoring the same tree 85 under the",
+    "old script and 85 under the new one. A gate on the total therefore punishes whoever fixes a bug",
+    "in a heavily-cited file and rewards leaving it alone.",
+    "",
+    "And it had NO HONEST EXIT. Raising the number to 130 is decoration. Re-pointing the 66 rows in",
+    "006-fma is actively HARMFUL: that document is stale by remedy, so a re-pointed citation lands on",
+    "the fix while the sentence beside it describes the defect - a false claim, strictly worse than",
+    "the stale pointer it replaces. A gate whose only exits are 'lie' and 'make it worse' is broken.",
+    "",
+    "LOST is churn-invariant. Only a decision about the documents can create one, a bug fix cannot,",
+    "and it is 1 today - so a ratchet of 1 is a bound that means something. DRIFTED and QUOTE-GONE are",
+    "still PRINTED ON EVERY RUN, side by side with LOST, so nothing is hidden; they simply stop",
+    "pretending to be a gate.",
+    "",
+    "Authorised by the architect 2026-08-21 as a reversible, documented change to what the gate means.",
+    "",
+    "THE STRONGER FIX IS ITS OWN JOB and deliberately not started: 004 Panel E's 'cite a symbol plus",
+    "the line', with the tool RESOLVING the line from the symbol rather than comparing against it. At",
+    "that point drift stops existing rather than being tolerated, and the DRIFTED bucket empties",
+    "instead of being excused. See docs/.research/citation-audit.md, 'What the ratchet should measure",
+    "instead'."
+  ],
+  "standing_total_stale_SUPERSEDED": {
+    "orca:87097551f8": 85,
+    "orca:absent": 98,
+    "why": "The old TOTAL-count ratchet, measured clean at 98309f8, kept visible rather than deleted. It was never met again after 4ccfa20 and was never raised to meet it - see gateChangedWhy."
   }
 }

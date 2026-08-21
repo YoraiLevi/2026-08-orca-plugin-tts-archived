@@ -57,10 +57,16 @@
 //                                    docs/.research/citation-ratchet.json. PREFERRED — the number
 //                                    lives beside its reasoning and its calibration commit, and
 //                                    cannot be quietly raised in a workflow file.
-//   pnpm check:citations --max-stale=N        a raw threshold. REFUSED unless N is this
-//                                    configuration's calibrated ratchet — see CONFIGURATION
-//                                    IDENTITY below for why a number from another config is worse
-//                                    than no number.
+//   pnpm check:citations --max-lost=N         a raw threshold on LOST. REFUSED unless N is this
+//                                    configuration's calibrated ratchet.
+//   --max-stale=N                    REFUSED. It bounded the TOTAL, and the gate is on LOST as of
+//                                    2026-08-21; a flag whose meaning changed under its caller is
+//                                    as dangerous as a threshold from another configuration.
+//
+// WHAT THE GATE MEASURES, and why it is not the total: DRIFTED tracks code churn (one bug fix in a
+// heavily-cited file moved the total 85 -> 130 with no document changing), so gating on it punishes
+// whoever fixes the bug. LOST is churn-invariant. Both are printed on EVERY run — see
+// docs/.research/citation-ratchet.json "gateChangedWhy".
 //
 // EVERY RUN PRINTS ITS CONFIGURATION, clean or not: which ORCA state produced the count, which
 // threshold was applied and where it came from, and whether the working tree was dirty. A count
@@ -83,8 +89,8 @@ const FIX = ARGS.has('--fix')
 const REQUIRE_ORCA = ARGS.has('--require-orca')
 // A ratchet, not an amnesty: the number of citations we have not yet re-derived. It may only go
 // down. Every entry is listed in docs/.research/citation-audit.md with why it is still open.
+const MAX_LOST_ARG = [...ARGS].find((a) => a.startsWith('--max-lost='))?.split('=')[1]
 const MAX_STALE_ARG = [...ARGS].find((a) => a.startsWith('--max-stale='))?.split('=')[1]
-const MAX_STALE = Number(MAX_STALE_ARG ?? 0)
 // Read the per-configuration ratchet instead of taking a number on the command line. Preferred:
 // the number then lives beside its reasoning and its calibration commit, and cannot be quietly
 // raised in a workflow file.
@@ -625,6 +631,13 @@ if (FIX) {
 // ORCA checkout HEAD -- documents claim a pinned commit; say so if the tree has moved.
 const orcaHead = counts.orca > 0 ? (gitFiles(ORCA, ['rev-parse', 'HEAD'])[0] ?? null) : null
 
+// Disjoint by construction, so the three always sum to `stale.length`. Subtracting one bucket's
+// count from another's is how a total quietly stops adding up.
+const quoteGone = stale.filter(({ cit, r }) => quotesGone(cit.context, r.target.abs))
+const notQuoted = stale.filter(({ cit, r }) => !quotesGone(cit.context, r.target.abs))
+const drifted = notQuoted.filter(({ r }) => r.now && r.now.length > 0).length
+const lost = notQuoted.length - drifted
+
 /* ================================================================ CONFIGURATION IDENTITY
  *
  * THE DEFECT THIS EXISTS TO END. This checker does not measure the same population in every
@@ -693,35 +706,55 @@ function resolveThreshold() {
           'docs/.research/citation-ratchet.json, on a CLEAN worktree, with the reason written beside it.',
       }
     }
-    return { limit: ratchetEntry.maxStale, refuse: null }
+    return { limit: ratchetEntry.maxLost, refuse: null }
+  }
+  if (MAX_LOST_ARG !== undefined) {
+    if (ratchetEntry !== null && Number(MAX_LOST_ARG) !== ratchetEntry.maxLost) {
+      return {
+        limit: ratchetEntry.maxLost,
+        refuse:
+          `--max-lost=${MAX_LOST_ARG} is not the ratchet for configuration ${CONFIG}, which is ` +
+          `${ratchetEntry.maxLost}. Pass --ratchet instead of a number, so the threshold travels ` +
+          'with its configuration and its reasoning.',
+      }
+    }
+    return { limit: Number(MAX_LOST_ARG), refuse: null }
   }
   if (MAX_STALE_ARG === undefined) return { limit: 0, refuse: null }
 
-  // A number was passed on the command line. Only accept it if it IS this configuration's
-  // calibrated ratchet; anything else is a threshold from somewhere else being applied here.
-  if (ratchetEntry !== null && Number(MAX_STALE_ARG) !== ratchetEntry.maxStale) {
-    const elsewhere = Object.entries(RATCHET?.configs ?? {})
-      .filter(([, v]) => v.maxStale === Number(MAX_STALE_ARG))
-      .map(([k]) => k)
-    const supersededWhy = RATCHET?.superseded?.[String(Number(MAX_STALE_ARG))]
-    return {
-      limit: ratchetEntry.maxStale,
-      refuse:
-        `--max-stale=${MAX_STALE_ARG} is not the ratchet for configuration ${CONFIG}, which is ` +
-        `${ratchetEntry.maxStale}.` +
-        (elsewhere.length ? ` ${MAX_STALE_ARG} is the ratchet for ${elsewhere.join(', ')}.` : '') +
-        (supersededWhy ? `\n           ${MAX_STALE_ARG} is recorded as SUPERSEDED: ${supersededWhy}` : '') +
-        '\n           Pass --ratchet instead of a number, so the threshold travels with its ' +
-        'configuration and its reasoning.',
-    }
+  // `--max-stale` bounded the TOTAL. The gate is on LOST as of 2026-08-21, so the flag no longer
+  // names the thing it sets, and it is REFUSED rather than silently reinterpreted -- a flag whose
+  // meaning changed under its caller is the same defect as a threshold from another configuration.
+  const supersededWhy = RATCHET?.superseded?.[String(Number(MAX_STALE_ARG))]
+  return {
+    limit: ratchetEntry?.maxLost ?? 0,
+    refuse:
+      `--max-stale=${MAX_STALE_ARG} bounds the TOTAL stale count, and this gate is on LOST as of ` +
+      `2026-08-21 (citation-ratchet.json "gate"). They are not the same number: this run has ` +
+      `${lost} LOST and ${stale.length} stale.` +
+      (supersededWhy ? `\n           ${MAX_STALE_ARG} is recorded as SUPERSEDED: ${supersededWhy}` : '') +
+      '\n           Pass --ratchet.',
   }
-  return { limit: MAX_STALE, refuse: null }
 }
-const { limit: STALE_LIMIT, refuse: REFUSAL } = resolveThreshold()
 
+const { limit: LOST_LIMIT, refuse: REFUSAL } = resolveThreshold()
+
+/**
+ * THE GATE IS ON `lost`, NOT ON THE TOTAL -- decided 2026-08-21, reasoning in citation-ratchet.json
+ * under "gateChangedWhy", and authorised as a change to what the gate MEANS.
+ *
+ * DRIFTED tracks code churn: `4ccfa20`, a one-file bug fix, moved the total from 85 to 130 without
+ * a word of documentation changing. A gate on the total punishes whoever fixes a bug in a
+ * heavily-cited file, and it had no honest exit -- raising the number is decoration, and
+ * re-pointing the 66 rows in `006-fma` is actively harmful because that document is stale by
+ * REMEDY. LOST is churn-invariant: only a decision about the documents can create one.
+ *
+ * DRIFTED and QUOTE-GONE are still printed on every run, precisely so this reads as a gate
+ * NARROWED on purpose rather than a count quietly hidden.
+ */
 const problems =
   REFUSAL !== null ||
-  stale.length > STALE_LIMIT || (STRICT && unanchored.length > 0) || (REQUIRE_ORCA && !ORCA_PRESENT)
+  lost > LOST_LIMIT || (STRICT && unanchored.length > 0) || (REQUIRE_ORCA && !ORCA_PRESENT)
 
 /* ---------------------------------------------------------------- unread suppressions
  *
@@ -782,9 +815,6 @@ function unreadSuppressions() {
 }
 const UNREAD = unreadSuppressions()
 
-const quoteGone = stale.filter(({ cit, r }) => quotesGone(cit.context, r.target.abs))
-const drifted = stale.filter(({ r }) => r.now && r.now.length > 0).length - quoteGone.length
-const lost = stale.length - drifted - quoteGone.length
 
 if (stale.length) {
   console.error(`\nSTALE CITATIONS (${stale.length})\n`)
@@ -862,12 +892,22 @@ if (orcaHead && orcaHead !== ORCA_PINNED) {
  */
 const thresholdLabel =
   REFUSAL !== null ? 'REFUSED'
-  : USE_RATCHET ? `${STALE_LIMIT} (from citation-ratchet.json, calibrated ${RATCHET?.calibratedAt ?? '?'})`
-  : MAX_STALE_ARG !== undefined ? `${STALE_LIMIT} (--max-stale, matches this config's ratchet)`
-  : `${STALE_LIMIT} (none passed — any stale citation fails)`
+  : USE_RATCHET ? `LOST <= ${LOST_LIMIT} (from citation-ratchet.json, calibrated ${RATCHET?.calibratedAt ?? '?'})`
+  : MAX_LOST_ARG !== undefined ? `LOST <= ${LOST_LIMIT} (--max-lost)`
+  : `LOST <= ${LOST_LIMIT} (none passed — any LOST citation fails)`
 console.error(
   `\nconfig:    ${CONFIG}  ·  threshold ${thresholdLabel}` +
   `  ·  tree ${DIRTY.length === 0 ? 'clean' : `DIRTY, ${DIRTY.length} file(s)`}`,
+)
+// UNCONDITIONAL, including on a green run. The gate was narrowed from the total to LOST, and a
+// narrowed gate that also stopped printing the wider number would be indistinguishable from a
+// number that had been hidden. DRIFTED is not a gate any more; it is still evidence.
+console.error(
+  `stale:     ${stale.length} total = ${drifted} DRIFTED (pointer off, claim intact — moves with` +
+  ` code churn, NOT gated)\n` +
+  `                     + ${lost} LOST (anchor nowhere in the file — the claim is in question, GATED)\n` +
+  `                     + ${quoteGone.length} QUOTE-GONE (quoted code is gone — likely REMEDIED,` +
+  ` read the row, never re-point)`,
 )
 if (DIRTY.length > 0) {
   console.error(
@@ -906,11 +946,7 @@ if (SUMMARY || problems) {
   console.error(
     `\ncitations: ${counts.total} found · ${counts.repo} into this repo · ${counts.orca} into ORCA` +
     ` (${orcaHead ? orcaHead.slice(0, 10) : 'n/a'}) · ${counts.external} external\n` +
-    `verdicts:  ${counts.ok} verified · ${counts.stale} stale · ${counts.unanchored} unanchored\n` +
-    `stale is:  ${drifted} DRIFTED (anchor still in the file, pointer off — moves with code churn)` +
-    ` · ${lost} LOST (anchor not in the file at all — the claim is in question)` +
-    ` · ${quoteGone.length} QUOTE-GONE (the document quotes code verbatim and that code is gone —` +
-    ` likely REMEDIED, never re-point without reading the row)`,
+    `verdicts:  ${counts.ok} verified · ${counts.stale} stale · ${counts.unanchored} unanchored`,
   )
   if (FIX) {
     console.error(`\n--fix rewrote ${fixedCount} citation(s); ${skippedCount} left for a human.`)

@@ -302,7 +302,7 @@ rather than only foreign ones — the CONTROL (1 red), and making `--ratchet` ig
 (1 red). They deliberately pin no citation COUNT: that moves whenever anyone edits a source file,
 and a test red for that reason would say nothing about the instrument.
 
-## What the ratchet should measure instead — the recommendation, not implemented
+## What the ratchet measures now — implemented 2026-08-21, authorised by the architect
 
 Fixing the instrument exposed a second defect underneath it, and this one is the author's to settle
 because it changes what the gate *means*.
@@ -333,17 +333,41 @@ leaving it alone**, which is backwards, and it currently has **no honest path to
 number is decoration, and re-pointing the citations is actively harmful for the 66 in `006-fma`,
 which is stale by remedy. A gate whose only exits are "lie" and "make it worse" is the finding.
 
-**Recommendation: ratchet on LOST, report DRIFTED.** `LOST` is churn-invariant, it is 1 today, and a
-ratchet of 1 is a real bound that a bug fix cannot break. `DRIFTED` stays visible, and stops being a
-gate. The stronger version, if the author wants pointers that do not rot at all, is the one `004`
-Panel E already named: **cite a symbol plus the line**, and let the tool resolve the line from the
-symbol rather than comparing against it — at which point drift stops existing rather than being
-tolerated. That is a larger change and deserves its own Job.
+**Done: the gate is on LOST; DRIFTED and QUOTE-GONE are reported and not gated.** `LOST` is
+churn-invariant — only a decision about the documents can create one, and a bug fix cannot — it is
+**1** today, and a ratchet of 1 is a bound that means something.
 
-**Left as-is deliberately:** the ratchet is still on the total, and the standing numbers 85 / 98 were
-**not** raised to meet the measured 130 / 142. Both are recorded in `citation-ratchet.json` —
-`standing` versus `measured` — so the gap is visible instead of resolved by moving a threshold to
-fit the number it measures.
+Both numbers print on **every** run, green included, in one block:
+
+```
+config:    orca:87097551f8  ·  threshold LOST <= 1 (from citation-ratchet.json, calibrated 98309f8)  ·  tree clean
+stale:     154 total = 134 DRIFTED (pointer off, claim intact — moves with code churn, NOT gated)
+                     + 1 LOST (anchor nowhere in the file — the claim is in question, GATED)
+                     + 19 QUOTE-GONE (quoted code is gone — likely REMEDIED, read the row, never re-point)
+```
+
+That is deliberate. A gate that is narrowed **and** stops printing the wider number is
+indistinguishable from a count that was hidden, and the reasoning for the narrowing lives beside the
+numbers in `citation-ratchet.json` under `gateChangedWhy`, next to the superseded `34`.
+
+`--max-stale=N` is **refused**, not silently reinterpreted: it bounded the total, the gate is on
+LOST, and a flag whose meaning changed under its caller is as dangerous as a threshold from another
+configuration. `--max-lost=N` exists for ad-hoc use and is itself refused unless it matches the
+configuration's calibrated ratchet.
+
+**The gate can go red, proved rather than asserted.** A LOST citation is manufacturable — cite a
+line past the end of a file *and* give the prose an anchor that occurs nowhere in it, so the checker
+has no fix to offer, which is exactly what separates LOST from DRIFTED. Three tests hold the gate
+honest in both directions: a manufactured LOST **fails** at `--max-lost=0`; the same LOST **passes**
+at `--max-lost=1`, proving the red came from the gate and not from something else in the run; and a
+DRIFTED citation does **not** fail, which is the whole point of the change. Mutants: gate moved back
+to the total (1 red), gate wired to never fire (1 red), breakdown suppressed on green runs (7 red).
+
+**Still its own Job, deliberately not started — `004` Panel E's stronger version.** Cite a symbol
+plus the line, and have the tool **resolve** the line from the symbol rather than comparing against
+it. At that point DRIFTED stops existing rather than being excused, and the 134 currently printed as
+information go to zero on their own. It is a change to how every citation in the repo is written, so
+it needs its own Job and its own migration; this section is the pointer to it.
 
 ## What the checker should have caught and did not — two, one fixed, one bounded
 
