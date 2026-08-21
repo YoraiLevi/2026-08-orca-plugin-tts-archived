@@ -80,12 +80,31 @@ const UNIT_WORDS: Record<string, [string, string]> = {
 const KEY_GLYPHS: Record<string, string> = {
   '\u2318': 'command', '\u21e7': 'shift', '\u2325': 'option', '\u2303': 'control',
   '\u23ce': 'enter', '\u232b': 'delete', '\u21e5': 'tab', '\u2423': 'space',
-  '\u2191': 'up', '\u2193': 'down', '\u2190': 'left', '\u2192': 'right'
+  '\u2191': 'up', '\u2193': 'down', '\u2190': 'left', '\u2192': 'right',
+  /**
+   * 006 site 50: `stripEmoji` deleted emoji, dingbats AND CHECK MARKS with no announcement, so
+   * "\u2705 done" and "\u274C done" reached the listener as the same word — the verdict removed and
+   * only the subject left. These carry MEANING in an agent reply; a party popper does not, and
+   * still does not get one. Spoken as words, not announced as omissions: "yes" is the content, and
+   * "an emoji was omitted" would be narration.
+   */
+  '\u2713': 'yes', '\u2714': 'yes', '\u2705': 'yes',
+  '\u2717': 'no', '\u2718': 'no', '\u274c': 'no', '\u274e': 'no',
+  '\u26a0': 'warning', '\u2757': 'important', '\u2755': 'important'
 }
 
 // A lead-in, not a bare label: a listener needs a beat of warning before the content vanishes.
 // Its own sentence, so the engine pauses either side of it.
 const CODE_PLACEHOLDER = ' . Here, a code block is omitted. '
+/**
+ * 006 site 48. An unclosed fence swallows EVERYTHING after it to the end of the reply, and
+ * `stripFencedCode` recorded that fact in a local called `announced` and then wrote `void
+ * announced`. The listener heard "a code block is omitted" and had no way to know the rest of the
+ * answer went with it — which is materially different from a normal, closed code block where the
+ * prose after it is still read.
+ */
+const UNCLOSED_CODE_PLACEHOLDER =
+  ' . Here, a code block is omitted, and the reply ends inside it, so anything after it was not read. '
 
 
 export function normalize(md: string, opts: NormalizeOptions = {}): string {
@@ -138,8 +157,15 @@ function stripFencedCode(src: string, policy: CodeBlockPolicy): string {
     }
     if (!inFence) out.push(line)
   }
-  // An unclosed fence swallows the remainder; the announcement already happened.
-  void announced
+  // Site 48: `void announced` — the fact was computed and discarded. An unclosed fence means the
+  // rest of the reply is gone too, so say the honest sentence instead of the ordinary one.
+  if (inFence && announced) {
+    const at = out.lastIndexOf(CODE_PLACEHOLDER)
+    if (at !== -1) out[at] = UNCLOSED_CODE_PLACEHOLDER
+  } else if (inFence && policy !== 'announce') {
+    // Nothing was announced at all, and the remainder of the reply has still vanished.
+    out.push(UNCLOSED_CODE_PLACEHOLDER)
+  }
   return out.join('\n')
 }
 
@@ -165,7 +191,19 @@ function stripInlineCode(src: string): string {
 
 /* ---------------------------------------------------------------- stage 3 */
 
-/** `[label](url)` -> `label`. Runs before bare-URL stripping so the label survives. */
+/**
+ * `[label](url)` -> `label`, plus the destination when the label does not already give it away.
+ *
+ * 006 site 51: the destination was dropped SILENTLY, while a bare URL in the same reply is
+ * announced ("a link to github dot com"). The asymmetry is the defect — the listener's own
+ * recorded feedback on this project is that URLs vanishing without warning was a problem, and a
+ * markdown link is the form agents actually emit.
+ *
+ * The judgement, stated: reading every destination would be narration, which is its own harm. So
+ * the host is spoken only when the label does not already contain it. `[github.com](https://github.com)`
+ * says it once; `[click here](https://evil.example)` — the case where the loss actually matters —
+ * says both. Runs before bare-URL stripping so the label survives.
+ */
 function expandMarkdownLinks(src: string): string {
   let out = ''
   let i = 0
@@ -174,13 +212,27 @@ function expandMarkdownLinks(src: string): string {
       const close = src.indexOf('](', i)
       if (close !== -1) {
         const end = src.indexOf(')', close + 2)
-        if (end !== -1) { out += src.slice(i + 1, close); i = end + 1; continue }
+        if (end !== -1) {
+          const label = src.slice(i + 1, close)
+          const url = src.slice(close + 2, end)
+          out += label + linkSuffix(label, url)
+          i = end + 1
+          continue
+        }
       }
     }
     out += src[i]
     i++
   }
   return out
+}
+
+/** '' when the label already names the destination, otherwise ", a link to example dot com". */
+function linkSuffix(label: string, url: string): string {
+  const host = (url.replace(/^https?:\/\//, '').split('/')[0] ?? '').replace(/^www\./, '')
+  if (host.length === 0 || !host.includes('.')) return ''        // relative link, anchor, mailto
+  if (label.toLowerCase().includes(host.toLowerCase())) return ''
+  return `, ${linkPhrase(url)},`
 }
 
 /** "a link to github dot com" beats "link omitted": the destination is usually the point. */

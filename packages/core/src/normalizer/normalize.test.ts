@@ -20,8 +20,15 @@ describe('T021a fenced code blocks', () => {
       input: 'Before\n```js\nconst x = 1\n```\nAfter', expect: 'Before. Here, a code block is omitted. After' },
     { name: 'tilde fence behaves the same',
       input: 'Before\n~~~\nraw\n~~~\nAfter', expect: 'Before. Here, a code block is omitted. After' },
-    { name: 'unclosed fence omits the remainder',
-      input: 'Before\n```js\nconst x = 1\nnever closed', expect: 'Before. Here, a code block is omitted.' }
+    // CHANGED DELIBERATELY (006 site 48). An unclosed fence swallows the whole remainder of the
+    // reply, not just a code block, and `stripFencedCode` computed that fact and wrote
+    // `void announced`. The old expectation said the listener should hear the SAME sentence for
+    // "here is a code block, and the answer continues after it" and "the answer ends here and you
+    // are not getting the rest" — which is the collapse this round exists to remove.
+    { name: 'an unclosed fence says the rest of the reply went with it',
+      input: 'Before\n```js\nconst x = 1\nnever closed',
+      expect: 'Before. Here, a code block is omitted, and the reply ends inside it, ' +
+        'so anything after it was not read.' }
   ])
 })
 
@@ -36,7 +43,18 @@ describe('T021c urls', () => {
   run([
     { name: 'bare url becomes a placeholder', input: 'See https://example.com now', expect: 'See a link to example dot com now' },
     { name: 'sentence punctuation after a url is preserved', input: 'See https://example.com.', expect: 'See a link to example dot com.' },
-    { name: 'markdown link keeps its label', input: 'See [the docs](https://example.com) now', expect: 'See the docs now' }
+    // CHANGED DELIBERATELY (006 site 51). The destination was dropped silently while a BARE url in
+    // the same reply is announced. The asymmetry is the defect, and "URLs vanished without warning"
+    // is the listener's own recorded feedback on this project.
+    { name: 'a markdown link says where it goes, when the label does not',
+      input: 'See [the docs](https://example.com) now',
+      expect: 'See the docs, a link to example dot com, now' },
+    // ...and does NOT say it twice when the label already carries the host. Reading every
+    // destination would be narration, which is its own harm.
+    { name: 'a label that already names the host is not repeated',
+      input: 'See [example.com](https://example.com) now', expect: 'See example.com now' },
+    { name: 'a relative link gets no destination at all',
+      input: 'See [the docs](/guide/intro) now', expect: 'See the docs now' }
   ])
 })
 
@@ -310,5 +328,33 @@ describe('ordered lists keep their numbers', () => {
     const out = normalize('1. alpha', { expandNumbers: false })
     expect(out).toBe('1, alpha.')
     expect(out).not.toContain('1. ')
+  })
+})
+
+/**
+ * 006 site 50 — emoji, dingbats AND CHECK MARKS were deleted with no announcement.
+ *
+ * The chosen outcome is neither "announce the omission" nor "leave it": a check mark is CONTENT,
+ * not decoration. "✅ done" and "❌ done" reached the listener as the same word — the verdict
+ * removed and only the subject left, which is 006's S1 shape (told something the agent did not
+ * say) rather than its S2 one. A party popper carries no verdict and is still deleted, silently
+ * and correctly: announcing it would be narration.
+ */
+describe('006 site 50 — a check mark is a verdict, not decoration', () => {
+  it('speaks the glyphs that carry meaning', () => {
+    expect(normalize('✅ the tests pass')).toContain('yes')
+    expect(normalize('❌ the tests fail')).toContain('no')
+    expect(normalize('⚠ be careful')).toContain('warning')
+  })
+
+  it('the two verdicts are no longer the same sentence', () => {
+    // The assertion that could not have failed before: both sides normalized to "done".
+    expect(normalize('✅ done')).not.toBe(normalize('❌ done'))
+  })
+
+  it('CONTROL: decorative emoji are still deleted, and not announced', () => {
+    const out = normalize('\u{1F389} shipped it')
+    expect(out).toContain('shipped it')
+    expect(out, 'narrating a party popper is the harm on the other side').not.toMatch(/omit|emoji/i)
   })
 })
