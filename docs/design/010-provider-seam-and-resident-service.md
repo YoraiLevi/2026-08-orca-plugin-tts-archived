@@ -471,7 +471,7 @@ export class PauseUnsupportedError extends Error {
 > | `packages/core/src/types/index.ts:3-10` and `packages/core/src/queue/index.ts:7` | `AudioChunk` with `format: string`, `sampleRate`, `channels`; the queue is typed on it | both typed on v1 throughout |
 
 **`PlaybackSink` v2.** The v1 shape is `enqueue(chunk) / stop() / isPlaying`
-(`packages/core/src/types/index.ts:64-69`). v2 adds what a sink that owns a device needs, and what
+(`packages/core/src/types/index.ts:82-87`). v2 adds what a sink that owns a device needs, and what
 the format change forces:
 
 ```ts
@@ -1022,7 +1022,7 @@ into today's M9 and nothing is lost but the ordering.
 neural model load takes seconds and a hotkey must not pay it per press — but a *service* that starts
 at activation pays a startup cost for every ORCA launch, whether or not anything is ever spoken. The
 resolution: `prepare()` starts the service and returns when it answers `/health`; the first speak
-after activation may pay the start, and `isWarm` (`types/index.ts:46`) already exists to say so.
+after activation may pay the start, and `isWarm` (`types/index.ts:64`) already exists to say so.
 
 The bridge while it starts is the **existing subprocess provider**, which is exactly what it is for:
 *"the never-fails fallback and the first-run bridge while a model downloads, never the low-latency

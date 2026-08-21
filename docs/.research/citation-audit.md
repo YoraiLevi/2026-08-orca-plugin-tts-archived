@@ -137,6 +137,135 @@ once** in the file, the citation names its own path (no inheritance), and the pa
 exactly one file. Everything else is left for a human, because a wrong "fix" is a fabricated
 pointer — the harm this tool exists to prevent.
 
+## Re-audit, 2026-08-21 (J21) — the ratchet is red, and the two runs measure different populations
+
+Everything below was measured on a **clean checkout of `06b060d`** in a detached worktree with
+`node_modules` and `dist` symlinked in, not on the shared working tree. That distinction turned out
+to matter and is the first finding.
+
+### The readings
+
+| Run | Config | Stale | Ratchet | Verdict |
+|---|---|---|---|---|
+| Local, before | clean `06b060d`, ORCA resolved | **92** (73 sites) | 34 | red |
+| Local, after this pass | same, plus the seven repairs below | **85** (66 sites) | 34 | red |
+| CI-equivalent, before | same tree, no ORCA checkout | **98** | 34 | red |
+| CI-equivalent, after | same, plus the seven repairs | **98** | 34 | red |
+
+### Finding 1 — the local run and the CI run check partly DISJOINT sets
+
+The seven citations repaired in this pass moved the local count 92 → 85 and the CI count **not at
+all**. They are not checked in the CI configuration: without an ORCA checkout the resolver
+reclassifies a large block of paths (129 external locally, **644** external without ORCA), and the
+`packages/...` citations in `002`, `010` and `017` fall out of scope entirely. The CI run also flags
+citations the local run never sees — five in `011-settings.md`, two in `016`, and
+`002-agent-spoken-channel.md:613`, which points at another *document*, not at code.
+
+So **`--max-stale=34` was never a threshold on the number this document's "Numbers" table reports.**
+That table's 33 was measured with ORCA resolved; the ratchet was calibrated against the ORCA-less CI
+run. Two different populations, one number, and a green CI claim on top. Repairing what a local run
+shows you can leave CI exactly as red as it was — which is what happened here, measured.
+
+**Recommendation (not implemented):** the checker should print which configuration it ran in and
+refuse to compare against a ratchet calibrated in the other one, or the ratchet should be stored per
+configuration. Until then, only the ORCA-less number may be compared against `--max-stale`.
+
+### Finding 2 — CI has been red since `42280b6`, and no ratchet was ever raised to hide it
+
+Swept the history with one instrument held fixed (one worktree, one copy of the checker, `git
+checkout` between readings). ORCA resolved:
+
+| Commit | Stale sites | What moved |
+|---|---|---|
+| `5f2a72e` | 63 | — |
+| **`42280b6`** `feat(settings)` | **72** | +9 sites. The settings work inserted `NORMALIZE_OPTION_KEYS` and its compile guard near the top of `normalizer/index.ts`, shifting everything below it |
+| `42b9a28` | 73 | +1, mine — the million-ceiling comment moved `tidyPunctuation` |
+| `06b060d` | 73 | — |
+
+Nobody raised the ratchet, which is the one thing that went right: the number stayed at 34 and the
+job stayed red. What went wrong is that `HANDOFF.md` said CI was green for four days
+(corrected in `06b060d`) — the indicator was working and the *summary of* the indicator was not.
+
+### Finding 3 — `--fix` is unsafe here, demonstrated rather than asserted
+
+`006-fma.md:51` (row TT1) cites `huddle/index.ts:130` and its prose anchor is
+`try { dirs = await readdir(root) } catch { return null }`. The checker cannot see that: it picks the
+rarest *strong* anchor in the table cell, which is `#ensureWatching`, and reports "now at
+228,250,278,474". Of those, **278 is the declaration and 228, 250 are call sites**. A `--fix` pass
+rewrites the citation onto one of them and the row then points at code that has nothing to do with
+`readdir`. Green, and wrong — the E-01 failure this tool exists to prevent, reproduced.
+
+### Finding 4 — `006` is stale by REMEDY, not by drift, and that is why it cannot be mechanically fixed
+
+Three rows checked by hand against today's code:
+
+| Row | Claim | Today |
+|---|---|---|
+| TT1 | bare `catch { return null }` after `readdir(root)`, `:130` | **FIXED.** `huddle/index.ts:485-491` separates `ENOENT` from anything else, logs, and returns a structured reason — which is TT1's own "Instrument:" recommendation |
+| TT2 | bare `catch { return [] }` after `readFile(file)`, `:241` | **FIXED.** `:560-568` returns `format: 'unknown'`, routing to the spoken "cannot read this transcript" |
+| TT3 | `decodeClaudeLine` `catch { return null }`, `decoders.ts:31` | **STILL PRESENT** at `decoders.ts:49`. Genuine line drift, defect intact |
+
+Re-pointing TT1 to `:485` would make the pointer green while the sentence beside it describes a
+defect that is no longer there. **A stale pointer is a navigation problem; a re-pointed pointer on a
+remedied defect is a false claim.** The second is worse, and it is what any bulk fix of `006`
+produces. Which rows are which cannot be derived from the checker's output — it needs a human
+reading each row's claim against today's code, 66 times.
+
+### What was repaired in this pass — seven, all outside the record
+
+Each was verified by reading the target line, not by watching the checker turn green.
+
+| Site | Was | Now | Anchor verified at the new line |
+|---|---|---|---|
+| `002-agent-spoken-channel.md:54` | `:122-144`, `:96`, `:88` | `:166-195`, `:135`/`:139`, `:122` | `stripFencedCode` 166-195; policy default 135; call 139; `CODE_PLACEHOLDER` 122 |
+| `002:296` | `chunker/index.ts:53` | `:72` | `DEFAULT_MAX_UNITS = 200` |
+| `002:570` | `:88`, `:96`, `:122-144` | `:122`, `:139`, `:166-195` | same three |
+| `010:474` | `types/index.ts:64-69` | `:82-87` | `PlaybackSink` interface body |
+| `010:1025` | `types/index.ts:46` | `:64` | `readonly isWarm: boolean` |
+| `017:433` | `normalizer/index.ts:674-750` | `:698-774` | `expandNumbers` body |
+| `017:461` | `:744` | `:768` | `if (value >= 1_000_000 …` |
+| `017:480` | `tidyPunctuation :810` | `:827` | `function tidyPunctuation` |
+
+`017:480`'s **`speakFilePaths` `:519` was left alone.** The checker reported it stale, and it is not:
+`:519` is a deliberate pointer *inside* `speakFilePaths` (the same line `017:495` cites), the anchor
+declaration at `:498` opens the block containing it, and only the `tidyPunctuation` half of that line
+had actually moved. Following the tool there would have replaced a precise pointer with a coarser
+one. Recorded because "the checker said so" is not a reason.
+
+### Finding 5 — `[live tree]` is a stamp the machine cannot read
+
+`017-review-round8.md` marks ten citations `` `[live tree]` `` and explains at `:7` that they may have
+moved by the time you read them. That is an honest disclosure addressed to a **human**; the checker
+does not parse it, so those citations are counted like any other and go stale on the next edit to the
+file they point into. This is **P35's exact shape** — an annotation that was present while the
+suppression was absent. Either they should carry a real `<!-- citation-check: ignore -->` beside the
+prose stamp, or they should be re-anchored and the stamp dropped. All ten were checked by hand in
+this pass and all ten now land on the construct they name.
+
+### The decision this pass prepares but does not take
+
+`006`'s exemption is the author's call (round 7 **R7-08**, round 8 **R8-02**). Two things worth
+knowing before taking it:
+
+- **The exemption is not implemented.** `006` contains **zero** `citation-check:` markers. What is
+  exempt today is `006`'s obligation to carry R006 evidence labels — *not* its citations, which are
+  fully counted by CI. Lifting or keeping the documented exemption changes **0** citations by itself.
+- **The cost of actually closing `006` is 66 hand judgements**, not a `--fix` run: for each row, does
+  the defect still exist (re-point) or has it been remedied (rewrite the row, or pin the document to
+  the SHA it reviewed)? Three rows sampled here split 2 remedied / 1 drifted, so expect roughly half.
+
+The two clean options, costed: **pin** `006` to the SHA it analysed and add `ignore-file` — cheap,
+honest, and the document stops being a live claim about today's code. Or **reconcile** it row by row
+— expensive, and it turns the FMA into a status report rather than a record of what was found. They
+are different documents afterwards, which is why it is not a maintenance decision.
+
+### The ratchet was NOT lowered, and CI stays red
+
+The honest floor after this pass is **85** local / **98** CI-equivalent, against a ratchet of 34.
+Moving `--max-stale` to 98 would make CI green and make the ratchet decoration, which is the failure
+`.github/workflows/ci.yml` already warns about in its own comment. **It is left at 34 and the job is
+left red.** The number to beat is 98, and it is 98 because of `006`.
+
 ## What this checker cannot catch
 
 Stated plainly, because a tool that hides its blind spots is worse than none.

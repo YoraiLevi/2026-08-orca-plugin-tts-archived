@@ -50,9 +50,9 @@ substitute for one — but the *properties* are what we are copying, not the tra
 
 This is not a greenfield decision. There is a live wrong behaviour to fix.
 
-`packages/core/src/normalizer/index.ts:122-144` strips fenced code, and with the default policy
-`'announce'` (called at `:96`) it substitutes `CODE_PLACEHOLDER` — *" . Here, a code block is omitted. "*
-(`:88`). So **if an agent emitted a ```speak block into ORCA today, the listener would hear
+`packages/core/src/normalizer/index.ts:166-195` strips fenced code, and with the default policy
+`'announce'` (read at `:135`, called at `:139`) it substitutes `CODE_PLACEHOLDER` — *" . Here, a code block is omitted. "*
+(`:122`). So **if an agent emitted a ```speak block into ORCA today, the listener would hear
 "Here, a code block is omitted."** and then the prose. The do-nothing baseline is already the
 disqualifying failure mode described in Q6. Whatever we choose, the `speak` info string must be
 stripped **silently and unconditionally**, independent of `codeBlocks` policy.
@@ -293,7 +293,7 @@ So the mechanism is:
 
 **There is no length cap on the huddle path at all.** `packages/plugin/src/huddle/index.ts:179`
 hands the whole decoded reply to `speak(text, 'queue', label)`. The chunker splits at
-`DEFAULT_MAX_UNITS = 200` (`packages/core/src/chunker/index.ts:53`) and the queue caps at eight
+`DEFAULT_MAX_UNITS = 200` (`packages/core/src/chunker/index.ts:72`) and the queue caps at eight
 **replies, not chunks** (`packages/plugin/src/main.ts:48`). So **a single reply is never dropped by
 overflow, however long it is** — the overflow rule cannot help, because there is only one item.
 
@@ -567,7 +567,7 @@ flowchart TD
 
 **Immediate correctness fix, independent of everything above:** the `speak` info string must be
 stripped silently regardless of the `codeBlocks` policy
-(`packages/core/src/normalizer/index.ts:88` `CODE_PLACEHOLDER`, called at `:96`, `stripFencedCode` at `:122-144`). Today it would be announced as *"Here, a
+(`packages/core/src/normalizer/index.ts:122` `CODE_PLACEHOLDER`, called at `:139`, `stripFencedCode` at `:166-195`). Today it would be announced as *"Here, a
 code block is omitted."* — which is the disqualifying failure mode arriving through the front door.
 
 ---

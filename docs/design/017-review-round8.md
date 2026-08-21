@@ -430,7 +430,7 @@ J21 fixed the thousands separator during this round — `1,112` now reads *"one 
 twelve"*, verified `[measured-here]` against the live tree. The following survive it.
 
 ### R8-18 — A hyphenated date is read as three unrelated quantities
-**S4** · `expandNumbers` (`normalizer/index.ts:674-750` `[live tree]`)
+**S4** · `expandNumbers` (`normalizer/index.ts:698-774` `[live tree]`)
 
 `"on 2026-08-21 we shipped"` → `"on two thousand twenty six-eight-twenty one we shipped"`. Dates
 appear in every changelog, every commit reference and every measurement this project records.
@@ -458,7 +458,7 @@ hyphen as nothing or as a pause. **A regression of −42 ms and an improvement o
 same sentence**, and this project's entire subject matter is measured deltas.
 
 ### R8-22 — Two numbers in one sentence are read in two different systems
-**S4** · `if (value >= 1_000_000 || digits.length > 6)` (`normalizer/index.ts:744` `[live tree]`)
+**S4** · `if (value >= 1_000_000 || digits.length > 6)` (`normalizer/index.ts:768` `[live tree]`)
 
 `"We processed 1234567 rows and 999999 more."` → `"We processed 1234567 rows and nine hundred ninety
 nine thousand nine hundred ninety nine more."` One numeral is handed to the engine, the next is
@@ -477,7 +477,7 @@ place. Ratios, scores, dates written `16/9`, and fractions all land here.
 ## 6. Paths
 
 ### R8-24 — A dotfile path loses its space, and a reply that opens with one loses its first character
-**S4** · `speakFilePaths` (`:519` `[live tree]`) and `tidyPunctuation` (`:810` `[live tree]`)
+**S4** · `speakFilePaths` (`:519` `[live tree]`) and `tidyPunctuation` (`:827` `[live tree]`)
 
 `".gitignore in src/.eslintrc.json here"` → `"gitignore in file named.eslintrc, JSON, in folder src,
 here"`. Two defects:
