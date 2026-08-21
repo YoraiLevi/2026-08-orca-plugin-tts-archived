@@ -538,7 +538,7 @@ Ordered by how badly the presentation misleads. This is the list the round-3 bri
    Source column of the Latency Budgets table, **on the page that defines R006.** The other rows in
    that table cite a requirement or a third-party source; this one cites a code comment and uses the
    verb "measures".
-2. **`docs/design/004-voice-lab.md:108` and `line 355`, quoted into `docs/design/007-user-stories.md:753-754`** — the `simulateChunkGapMs` preset `970`
+2. **`docs/design/004-voice-lab.md:132` and `line 392`, quoted into `docs/design/007-user-stories.md:753-754`** — the `simulateChunkGapMs` preset `970`
    carries *"(v1 macOS, **measured**)"*. It is a third-party changelog figure. This is the only place
    in the repo where a label is not merely dropped but **upgraded**, and it ships as a slider preset a
    listener will tune against.
@@ -547,7 +547,7 @@ Ordered by how badly the presentation misleads. This is the list the round-3 bri
    longer executes, measuring the wrong quantity (3.3).
 4. **`contract.ts:69` and the nine "measured 50 ms" claims that rest on it** — the assertion is
    `<= 1000 ms`. A permanently-green indicator (3.4).
-5. **`docs/.discussion/003-panel-and-control-channel.md:375-381` — the Stop segment table.** Five rows, a column headed *"Basis"*, identical
+5. **`docs/.discussion/003-panel-and-control-channel.md:383-389` — the Stop segment table.** Five rows, a column headed *"Basis"*, identical
    formatting. Four rows are intuition; one cell (1.5 ms) is real and measures a different quantity
    on a player we do not ship. The 40 ms row describes a process that does not exist. Reprinted as
    authoritative-looking mermaid annotations at

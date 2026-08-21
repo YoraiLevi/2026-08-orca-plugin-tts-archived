@@ -11,6 +11,15 @@ Frames Q34 without answering it (kind **T** — the listener decides). Consumes 
 > document, in place**. Every amendment carries a dated note naming the finding that forced it.
 > Ledger of what changed and what was deferred: `docs/design/009-reconciliation.md`.
 
+> **Amended 2026-08-21 — forced by finding 4 of `docs/.research/latency-measurements.md` (section
+> 1.4).** This document costed the identity earcon at **140 ms**. Measured through the shipped sink,
+> **it costs p50 874 / 862 ms** — n=10 per run, two runs `[measured-here]` — a **6.2× miss**, paid
+> **before the first word**, and **mandatory every turn** on the exact guaranteed floor (`V = 1`,
+> everyone in overflow) this document designs for. Sections **11.1a**, **11.1d** and **13** are
+> amended in place and every option that carried the 140 ms number is re-costed. The cause is not
+> the tone and not the process spawn: it is the **audio device open** the sink pays for the extra
+> chunk (PITFALLS **P32**), which is why the fix is M9 and not a shorter earcon.
+
 ---
 
 ## 1. The verdict, before the reasoning
@@ -44,7 +53,11 @@ Five-line recommendation:
 Two dependencies this recommendation **funds explicitly**, rather than assuming: the Windows
 provider must move to `SpeakSsml` for the pitch component to exist at all (costed in 8.5 — decline
 it and Windows tier 0 stays at 2), and the voice list must be cached once at activation, because
-enumerating it costs ~450 ms against a ~500 ms first-audio budget (9.1).
+enumerating it costs **p50 487 / 472 ms** `[measured-here]` (n=6 ×2,
+`docs/.research/latency-measurements.md` 1.6 — worse than P28's ~450 ms) against a ~500 ms
+first-audio budget (9.1). **It is the entire budget on its own,** and `OsSynthProvider.prepare()`
+calls it on darwin/win32 (`packages/providers/src/os-synth/index.ts:230-233`), so a cold `prepare()`
+adds ~480 ms in front of the ~1,100 ms first-audio path unless it is warmed off the critical path.
 
 ---
 
@@ -509,7 +522,7 @@ Every row degrades to something **audible and named**. Never to silence, never t
 | F2 | Assigned index no longer exists — a voice was uninstalled, or one was **installed mid-session** and the cached list is stale (9.1) | host fingerprint mismatch on rescan; or a synthesis whose checksum equals the fallback baseline | Discard the map, recompute, and **say so**: *"Voices were reassigned after a system change."* Silent reassignment would present a new voice as the same agent. Rescan is user-triggered, never polled — a 450 ms poll for a twice-a-year event is not a check, it is a tax |
 | F2b | `SpeakSsml` throws on malformed SSML, turning a cosmetic pitch failure into **silence** (8.5) | the PowerShell call exits non-zero, or writes a zero-length WAV | `catch → $s.Speak(plainText)`: drop the pitch, **keep the words**, and record that this session fell to tier-0 prosody so the identity layer keeps speaking its call-sign. Pitch may fail; speech may not |
 | F3 | **macOS silent-fallback lie** — `say -v Bogus` exits 0 and emits the default voice's exact bytes | one-off **distinctness probe**: synthesize a 3-word phrase with each candidate and with no `-v`; any candidate whose md5 equals the no-voice baseline is **not a real voice** and is struck from the ranked list | The list shrinks; identities are recomputed on the smaller list. Never keep a voice that failed the probe |
-| F3b | The probe is too slow to run at startup — 41 × ~450 ms ≈ 18 s (`say -v ?` alone costs ~450 ms, measured) | timing | Run it **in the background**, cached against the fingerprint. Until it completes, use only the 6 compact locale voices, which are the ones the probe already confirmed |
+| F3b | The probe is too slow to run at startup — 41 × ~480 ms ≈ **~20 s** `[derived]` (`say -v '?'` alone is p50 487 / 472 ms `[measured-here]`, n=6 ×2, `latency-measurements.md` 1.6) | timing | Run it **in the background**, cached against the fingerprint. Until it completes, use only the 6 compact locale voices, which are the ones the probe already confirmed |
 | F4 | **Windows substring binding** — `SelectVoice('David')` matching something unintended | pass the full `VoiceInfo.Name`, then **read `$s.Voice.Name` back** and compare | Mismatch → strike that voice from the list, log a WARNING, reassign. The read-back is the whole check; without it the failure is invisible |
 | F5 | **Two live sessions hold the same slot** — stale roster, two workers, a race | before speaking, re-read the roster; if two live sessions resolve to the same slot, both are in violation | Demote **both** to overflow: shared neutral voice, call-sign mandatory, announced. Two identical unnamed voices is precisely the P22 failure and must be impossible |
 | F6 | The session registry does not cover the agent CLI in use (Q27's unresolved sub-question — all five observed sessions were Claude Code) | registry lookup by `sessionId` returns nothing while a transcript is being read | Roster degrades to "transcripts modified within the last N minutes"; collision avoidance degrades to hash-only; **overflow behaviour becomes the default** (everyone named). Announce the degradation once |
@@ -560,7 +573,8 @@ avoided by bookkeeping:
 | **Pitch set** | pentatonic C5 D5 E5 G5 A5 C6 | **disjoint**: C4, F4, A4 (low) and E6, G6 (high) |
 | **Envelope** | 60 ms per note, 20 ms gap, 5 ms raised-cosine fade | 150 ms total per earcon: one note of 150 ms, or three of 40 ms with 15 ms gaps |
 | **Gain** | 0.05, matching buzz | 0.05 |
-| **Total** | 140 ms | 150 ms |
+| **Total tone** | 140 ms `[derived]` (60 + 20 + 60) | 150 ms `[derived]` |
+| **Total wall-clock cost on v1** | **p50 874 / 862 ms** `[measured-here]` (n=10 ×2, `docs/.research/latency-measurements.md` 1.4) — the tone is 16 % of it; the rest is the sink's audio-device open for the extra chunk | same shape: any control earcon emitted as its own chunk pays the same ~870 ms until M9 |
 | **Who assigns** | `earconId = h mod 30`, probed against live sessions exactly as voices are | a fixed, named table — never hashed, because a control must sound the same every time |
 
 **Identity cardinality after the reservation: still 30.** `008` X-03 expected this number to
@@ -605,20 +619,46 @@ assertion over two sets that were built to be disjoint could not have failed oth
 | Pitch set | 6 notes, pentatonic: C5 D5 E5 G5 A5 C6 — **identity only** |
 | Cardinality | ordered pairs of distinct notes = 6 × 5 = **30** |
 | Sample rate | the provider's, 22050 — emitted as an `AudioChunk` prepended to the utterance |
-| Cost | **140 ms of tone, plus one sink spawn** — see below |
+| Cost | **p50 874 / 862 ms of wall clock on v1** `[measured-here]` (n=10 ×2), of which 140 ms `[derived]` is tone — see below |
 
-**The cost, honestly.** This document originally costed the earcon at *"~140 ms, once per
-speaker-turn"*, and §13 options D and E carry that number. It omits the dominant term.
-`SubprocessSink` spawns **one player process per chunk** and its own header states the cost —
-*"one process per chunk gives a ~970 ms inter-sentence gap on macOS (`afplay`)"*
-(`packages/plugin/src/sinks/subprocess-sink.ts:8-10`). The earcon is an `AudioChunk` prepended to
-the utterance, so on v1 it costs **140 ms of tone plus one spawn (~970 ms on v1 macOS)**, inserted
-**before the first word** — directly into the path R4.2 budgets at 500 ms. Stated as a rule:
-**per-turn earcons are an M9-dependent feature.** Until M9 holds a player open, §13's options D and
-E are the *slowest* rows in that table, not the cheapest, and the table should be read that way.
-(The ~970 ms itself is **UNLABELLED** — it appears in a code comment and nowhere as a probe. It is
-load-bearing for M9, for `004`'s whole Q20 verdict and for this paragraph, and it should be
-measured once with a run count.)
+**The cost, measured. Amended 2026-08-21, forced by finding 4 of
+`docs/.research/latency-measurements.md` (1.4).** This document originally costed the earcon at
+*"~140 ms, once per speaker-turn"*, and §13 options D and E carried that number. A round-3 revision
+then added *"plus one sink spawn (~970 ms)"* — right that a dominant term was missing, wrong about
+what it was. **Both are now superseded by a measurement.**
+
+Prepending exactly the 140 ms two-note buffer as its own `AudioChunk` through the shipped
+`SubprocessSink` measures **p50 874 ms** (run 1, n=10) and **p50 862 ms** (run 2, n=10) of wall
+clock `[measured-here]`, inserted **before the first word** — directly into the path R4.2 budgets at
+500 ms. Three things follow, and the third is the one to carry forward:
+
+1. **The tone is 16 % of its own cost.** Shortening the earcon, dropping a note, or trimming the
+   20 ms gap changes almost nothing. The lever is not the acoustic spec.
+2. **The dominant term is the audio device, not the process.** `afplay`'s fork/exec is 2.3 ms
+   `[measured-here]`; the temp file is 0.33 ms; ~893 ms of an inter-chunk boundary is CoreAudio
+   device open, pre-roll, post-roll and teardown (PITFALLS **P32**). The measured ~870 ms is lower
+   than 140 + 970 because the tone is short and part of the device-open cost overlaps playback.
+3. **Per-turn earcons are an M9-dependent feature, and M9 must hold the *device* open.** A version
+   of M9 that pools player *processes* while still opening the device per chunk would leave this
+   cost intact. Until then §13's options D and E are the **slowest** rows in that table, not the
+   cheapest, and the table now says so in its own Costs column.
+
+**A cheaper option the 140 ms framing hid, and which this document now recommends for v1.** The
+~870 ms is the cost of the earcon being *its own chunk* — a chunk boundary is a device open. It is
+**not** the cost of 140 ms of tone existing. So on v1 the earcon should be **mixed into the head of
+the first speech chunk** rather than prepended as a separate `AudioChunk`: same sound, same position
+before the first word, one device open instead of two, ~140 ms instead of ~870. The obstacles are
+known and small — the tone must be rendered in the provider's declared `AudioFormat` (already
+required by the format-mixing note below) and concatenated onto the front of the first WAV. **Until
+M9, "prepend a chunk" is the expensive spelling of this feature and "concatenate into the first
+chunk" is the cheap one, and nothing in the perceptual design distinguishes them.** After M9 the two
+converge and the separate chunk is preferable again for scheduling reasons.
+
+**Where the headroom is.** 2 of 10 samples in run 1 and 3 of 10 in run 2 came in at **~370 ms**
+instead of ~870, and only when a previous `afplay` had exited moments earlier — i.e. when the device
+was still **warm** `[measured-here]`. That is direct, independent evidence for consequence 3: about
+500 ms of this cost is device state, and it is recoverable by keeping the device open rather than by
+changing anything about the earcon.
 
 A second-order consequence: the earcon is generated PCM and `AudioChunk.format` is provider-chosen
 (`packages/core/src/types/index.ts:7`). A synthesized tone prepended to an `os-synth` `'wav'` stream
@@ -638,7 +678,7 @@ turn, and `tts` is read as letters. So: **two levels.**
 
 | Level | Form | Source | Spoken when |
 |---|---|---|---|
-| **Short** — the call-sign | one word, one or two syllables (~350 ms) | `WORDS[h mod 64]`, collision-probed | prefixed to a turn, per Q34's chosen policy |
+| **Short** — the call-sign | one word, one or two syllables (~350 ms `[claimed]` — never synthesized and timed) | `WORDS[h mod 64]`, collision-probed | prefixed to a turn, per Q34's chosen policy |
 | **Long** — the full name | the registry `name`, run through the normalizer | `~/.claude/sessions/<pid>.json` | on switch, on status, on request |
 
 This replaces `sessionLabel()`'s eight-hex-character UUID slice
@@ -737,7 +777,7 @@ known compact set". See Q51.
 | 2 | A different voice, same gender | `V ≥ 3` | 0.60–0.75 | free |
 | 3 | **Pitch**, ±3 semitones on an already-used voice | pitch reachable (all three, unevenly) | 0.36 | Windows needs `SpeakSsml`; macOS needs `[[` escaping |
 | 4 | **Rate**, ×0.92 / ×1.08 | everywhere | 0.10 | **fights the listener's comprehension setting** — last resort |
-| 5 | **Overflow**: shared voice, mandatory call-sign | always | n/a | ~350 ms per turn |
+| 5 | **Overflow**: shared voice, mandatory call-sign | always | n/a | ~350 ms per turn `[claimed]` — plus ~870 ms `[measured-here]` if emitted as a separate chunk (§11.1d) |
 
 Running underneath every rank, on every platform, at no marginal cost:
 
@@ -762,15 +802,28 @@ setting, with no code change.
 |---|---|---|---|
 | **A — Never** | voices alone carry identity | zero time cost; maximum flow | the listener has not yet learned the mapping; any tier-≥1 or overflow identity; `V = 1` |
 | **B — On switch only** (today: `switchTo()`, `huddle/index.ts:165` — **and no caller invokes it**, 007 C8) | *"Now reading from orca-plugin-tts, session 111693de."* | one announcement per switch | long gaps — after five minutes of one speaker, the listener has forgotten who it was |
-| **C — Call-sign prefix, every turn** | *"Cedar. The tests pass."* | ~350 ms every turn | tiring in a fast back-and-forth with one agent |
-| **D — Earcon only** | two notes, then speech | 140 ms of tone **plus one sink spawn (~970 ms on v1 macOS) until M9** — §11.1d; needs learning | a listener who has not learned it, or who has disabled it |
-| **E — Earcon always, call-sign on switch** | notes every turn, name when the speaker changes | as D, every turn — **the slowest row in this table on v1, not the cheapest** (§11.1d) | the long-gap case, same as B |
+| **C — Call-sign prefix, every turn** | *"Cedar. The tests pass."* | ~350 ms every turn `[claimed]` — **nobody has synthesized a call-sign and timed it**, and if it is emitted as its own chunk on v1 it pays the same ~870 ms as D | tiring in a fast back-and-forth with one agent |
+| **D — Earcon only** | two notes, then speech | **p50 ~870 ms on v1 macOS** `[measured-here]` (874 / 862, n=10 ×2, `latency-measurements.md` 1.4), of which 140 ms is tone — until M9 holds the audio device open (§11.1d); needs learning | a listener who has not learned it, or who has disabled it |
+| **E — Earcon always, call-sign on switch** | notes every turn, name when the speaker changes | as D — **~870 ms `[measured-here]` every turn, the slowest row in this table on v1, not the cheapest** (§11.1d) — plus C's cost on switches | the long-gap case, same as B |
 | **F — Adaptive** | name whenever ≥ 2 sessions have spoken in the last *N* minutes, **or** the identity is tier ≥ 1, **or** more than *M* minutes have passed | variable; no fixed cost | hardest to predict — the listener cannot anticipate whether a name is coming |
 
 Two rules are **not** options, because they are correctness rather than taste:
 
 1. Any identity in tier ≥ 1 or overflow is **named every turn**, regardless of the setting. Those
    identities are, by construction, near the perceptual floor.
+
+   > **Amended 2026-08-21, forced by finding 4 of `docs/.research/latency-measurements.md`.** This
+   > rule is unchanged as *policy* and its *implementation* is now constrained. On the guaranteed
+   > floor — `V = 1`, every session in overflow (§14.3 case A) — this rule makes a per-turn identity
+   > marker mandatory, and a per-turn marker emitted as its own `AudioChunk` costs **~870 ms
+   > `[measured-here]`** in front of every reply. That is 1.7× R4.2's entire 500 ms budget, paid
+   > exactly where the budget is measured, on exactly the configuration the rule exists for.
+   > **The rule therefore now carries an implementation constraint, not an escape hatch:** on v1 the
+   > mandatory marker must be **mixed into the first speech chunk** (§11.1d), never prepended as a
+   > separate chunk. A per-turn *prepended* earcon is an M9-dependent feature and must not ship as a
+   > default before M9 holds the audio device open. If neither is available, prefer the spoken
+   > call-sign inside the same chunk over a separate tone chunk — it is speech the provider is
+   > already synthesizing, so it costs its own duration and nothing else.
 2. A **switch** is always audible in some form. P22's lesson is that the worst experience is not
    knowing whose words these are, and that failure distressed the listener enough to be recorded as
    a pitfall.
@@ -782,8 +835,16 @@ its "What this document does not decide" table under Q34.
 **One thing this table does not cost, and nobody did.** `008` X-05 stacked the preambles that three
 documents each prepend *"regardless of the setting"* — this document's earcon (§11.1) and mandatory
 call-sign (§13 rule 1), `003` §6's identity re-spoken after ~30 s of silence, and `002`'s omission
-announcements — and measured **~2.7 s of preamble in front of a 1.0 s reply** on the guaranteed
-floor, where every session is overflow and naming is mandatory. Three "regardless" rules in three
+announcements — at **~2.7 s of preamble in front of a 1.0 s reply** on the guaranteed floor, where
+every session is overflow and naming is mandatory. **Amended 2026-08-21:** that ~2.7 s was
+`[claimed]`, not measured — three of its four terms were estimates and the fourth was a third-party
+figure — and three documents nonetheless called it *"measured"*. One term is now real: the earcon is
+**~870 ms `[measured-here]`**, against the 140 ms the arithmetic used. The total survives roughly
+intact only because X-05 had separately added a ~970 ms spawn term that the measurement folds into
+the same ~870 ms. What changes is the *shape* of the problem: the preamble's dominant cost is
+**device-open time per extra chunk**, so it is removed by M9 and by chunk-merging (§11.1d), and
+**not** by shortening any wording — which is what an utterance-preamble budget would otherwise be
+tempted to do first. Three "regardless" rules in three
 documents compose into something nobody chose. **This is not resolved here.** It needs an
 utterance-preamble budget owned by whichever module finally assembles the utterance, with the
 percentage set by the listener; it is recorded as `Q61` in `docs/.discussion/000-open-questions.md`
@@ -985,7 +1046,7 @@ listener-chosen set; it is not a return to "whatever transcript was touched last
 | 4 | **Windows `SpeakSsml` migration** + XML escaping + a `catch → Speak` fallback that drops pitch and keeps the words | takes Windows from 2 identities to 6. **Costed in 8.5. This is a funded dependency of the tuple, not an implied one** — decline it and Windows tier 0 stays at 2 | open |
 | 4b | macOS `[[` escaping in the normalizer, before any `[[pbas]]` is emitted | in-band commands mean user text containing `[[` would execute (MEASURED) | open |
 | 5 | Voice-distinctness probe, cached against the host fingerprint | F3 — otherwise macOS assigns voices that are all the same voice | open |
-| 5b | **Voice-list cache** — built once at `prepare()`, invalidated by rescan, never polled | `say -v '?'` costs ~450 ms, MEASURED, against a ~500 ms first-audio budget (9.1) | open |
+| 5b | **Voice-list cache** — built once at `prepare()`, invalidated by rescan, never polled | `say -v '?'` costs **p50 487 / 472 ms** `[measured-here]` (n=6 ×2, `latency-measurements.md` 1.6), against a ~500 ms first-audio budget (9.1) | open |
 | 6 | Rate calibration table (section 8.3) | otherwise one rate number means three things | open; needs M11 |
 | 7 | Roster from `~/.claude/sessions/*.json` replacing the newest-transcript heuristic | Q27; also fixes P22 properly and answers Q28 | open |
 | 9 | **M16's followed set** — more than one session must be able to speak, or gate M15 cannot be run at all (§15.1, 007 C5) | the gate says *"with two agents running"*; the lock says one. **This is a scheduling dependency: M15 after M16** | open, **blocking the gate** |
@@ -1004,7 +1065,7 @@ To append to `docs/.discussion/000-open-questions.md`.
 | Q44 | E | **macOS `[[pbas n]]` units.** Is 1 unit exactly 1 semitone, and what is the per-voice baseline? Probe: synthesize a sustained vowel at `pbas` 40/46/52, estimate F0 by autocorrelation, check the ratios against `2^(1/12)`. Runnable on this machine. |
 | Q45 | E | **espeak-ng `-p 0..99` → semitones.** Same F0 probe at `-p` 30/50/70. Requires a Linux box with the binary. |
 | Q46 | E | **Does `~/.claude/sessions/` register non-Claude agent CLIs?** Q27 left this open; M15 now depends on it for the roster (F6). Probe: start a Codex / Grok / omp session through ORCA and re-run `ls ~/.claude/sessions/*.json`. |
-| Q47 | D | **Earcon cadence.** Before every utterance, every turn, or only on speaker change? 140 ms × every chunk is a real cost in a streaming reply; only-on-change loses the cue mid-turn. |
+| Q47 | D | **Earcon cadence.** Before every utterance, every turn, or only on speaker change? **Re-costed 2026-08-21:** a *separate* earcon chunk is **~870 ms `[measured-here]`** × every chunk, not 140 ms — prohibitive per utterance in a streaming reply, and the reason §11.1d now recommends mixing the tone into the first speech chunk on v1. Only-on-change still loses the cue mid-turn. |
 | Q48 | T→D | **The 64-word call-sign list.** Which words (design: the constraints in 11.2), and may the listener rename an agent's call-sign (design), and which words feel right (taste, Voice Lab)? |
 | Q49 | D | **Does M15's parity claim require caching 3–4 Piper voices at first run** rather than one? That is the difference between "parity by design doc" and "parity you can hear on Windows". Bears on first-run download size and on M9. |
 | Q50 | D | **Per-agent identity vs. the single-session lock (P22).** — **ANSWERED 2026-08-21 in §15.1**: it is a precondition, not a question. Recommendation A — the lock becomes a listener-chosen *followed set*, M16 delivers it, and **M15 is scheduled after M16**. The alternative (identity for switch announcements only) is coherent but requires rewording gate M15 in the same change. Left in the table because the author, not an agent, chooses between A and B. |

@@ -19,6 +19,15 @@ the schema. That raises the bar on "The export format" below from convenience to
 > document, in place**. Every amendment carries a dated note naming the finding that forced it.
 > Ledger of what changed and what was deferred: `docs/design/009-reconciliation.md`.
 
+> **Amended 2026-08-21 — the latency measurement pass** (`docs/.research/latency-measurements.md`,
+> `pnpm bench:latency`). **The Q20 verdict below is unchanged and is now measured rather than
+> asserted**, but two things it said are wrong and are corrected in place: the inter-chunk gap is the
+> **audio device**, not the process spawn (finding 1 / PITFALLS **P32**), and section 9's cold-path
+> gate budget was costed against `say ""`'s 414 ms spawn when a real sentence through `generate()`
+> costs **p50 1,054–1,163 ms**. Every latency number in this document now carries an R006 label.
+> Row 34's `970` preset, which shipped as *"(v1 macOS, measured)"* against a third-party changelog,
+> now carries the real citation and run count.
+
 ---
 
 ## 1. What the lab is, in one paragraph
@@ -49,16 +58,25 @@ these decisions; M11 does not wait for M9).
 
 ### The argument against server playback
 
-| Cost | Evidence |
-|---|---|
-| One player process per chunk, ~970 ms inter-sentence gap on macOS | `packages/plugin/src/sinks/subprocess-sink.ts:8-10` — documented in the sink's own header |
-| Temp-dir round trip per chunk: `mkdtemp` → `writeFile` → spawn → `rm` | `sinks/subprocess-sink.ts:52-61` |
-| Every replay re-pays synthesis; `say ""` alone costs 414 ms | PITFALLS P10 |
-| `listVoices()` costs ~450 ms per call on macOS | `docs/.research/q-round1-platform.md` "Cost of `listVoices()`" |
+| Cost | Measured | Label | Evidence |
+|---|---|---|---|
+| **One audio-device open per chunk**, giving a ~950 ms inter-sentence gap on macOS | p50 950 / 937 / 897 ms, n=18 per run, three runs | `[measured-here]` | `docs/.research/latency-measurements.md` 1.1; `packages/plugin/src/sinks/subprocess-sink.ts:8-10` |
+| …of which the **player process spawn** is | 2.3 / 2.9 ms, n=12 per run — **0.25 % of the gap** | `[measured-here]` | `latency-measurements.md` 1.1, PITFALLS **P32** |
+| Temp-dir round trip per chunk: `mkdtemp` → `writeFile` → spawn → `rm` | 0.33 / 0.42 ms, n=20 — **0.03 % of the gap** | `[measured-here]` | `sinks/subprocess-sink.ts:52-61`; `latency-measurements.md` 1.1 |
+| Every replay re-pays synthesis: a **real sentence** through `OsSynthProvider.generate()` | p50 1,163 / 1,054 ms, n=9 per run | `[measured-here]` | `latency-measurements.md` 1.3 (`say ""` alone is 414 ms, PITFALLS P10) |
+| `listVoices()` per call on macOS | p50 487 / 472 ms, p95 591 / 547 ms, n=6 per run | `[measured-here]` | `latency-measurements.md` 1.6, revising P28's ~450 ms upward |
+
+> **Amended 2026-08-21, forced by finding 1 of `latency-measurements.md`.** The first row previously
+> read *"One player process per chunk"* and cited the sink's own header for it. **The mechanism was
+> wrong.** Decomposed, ~893 ms of the 950 (99.7 %) is CoreAudio device open, pre-roll, post-roll and
+> teardown. This does not weaken the Q20 verdict — it **strengthens** it, because the browser path
+> removes a device open per chunk, which is the whole cost, rather than a process spawn, which is
+> 2 ms. It does change what M9 has to do: hold the **device** open, not the process (P32).
 | It builds a second playback path the plugin does not use, contradicting R5.2 / constitution R023 — providers emit audio and never own playback (`packages/core/src/types/index.ts:33-38`) | — |
 
-A four-sentence fixture replayed server-side is four spawns: roughly 4 × 970 ms of gap on top of
-synthesis, every single time the listener presses Play. That does not meet a two-second gate on the
+A four-sentence fixture replayed server-side is four device opens: roughly 4 × 950 ms of gap
+`[derived]` from the p50 above, on top of ~1.1 s of synthesis per sentence `[measured-here]`, every
+single time the listener presses Play. That does not meet a two-second gate on the
 *first* play and cannot meet it on a replay at all, because there is nothing to replay from.
 
 ### The argument for browser playback
@@ -77,8 +95,10 @@ bytes on the wire are already `decodeAudioData`-shaped. So:
   returns a JSON envelope of base64 WAV chunks. No player is spawned anywhere.
 - The page decodes each chunk once into an `AudioBuffer`, keyed by
   `hash(chunkText + voice + rate)`, and schedules them back-to-back on one `AudioContext` — which
-  also removes the ~970 ms gap from the lab, because there is no second process.
-- **Replay is a cache hit: `source.start()` on an already-decoded buffer, ~0 ms.** Scrubbing,
+  also removes the ~950 ms gap from the lab `[measured-here]` — one `AudioContext` stays open for
+  the whole session, so the device is opened once rather than once per chunk.
+- **Replay is a cache hit: `source.start()` on an already-decoded buffer, ~0 ms `[claimed]`** — no
+  probe has run; this is reasoning about `source.start()`. Scrubbing,
   looping one sentence, and instant A/B all fall out of the same cache for free.
 
 **One code path is still preserved where it matters.** The shared path with the plugin is
@@ -90,8 +110,13 @@ rewrite anyway. Sharing it would share the part that is scheduled for demolition
 
 `AVSpeechSynthesizer.write(_:toBufferCallback:)` was MEASURED yielding 55,050 PCM frames headless,
 with no process spawn and no audio device touched (`q-round1-platform.md` "Unused capabilities" 1).
-That removes the 414 ms `say` spawn (PITFALLS P10) and the temp-WAV round trip from the *synthesis*
-side of the ledger. It changes nothing on the *playback* side, because the sidecar's output is
+That removes the 414 ms `say` spawn `[measured-here]` (5 runs, PITFALLS P10) and the temp-WAV round
+trip from the *synthesis* side of the ledger. **It does not remove the synthesis itself, and that is
+now the larger term:** a real sentence through `generate()` is p50 1,054–1,163 ms `[measured-here]`,
+so roughly 640–750 ms `[derived]` is the engine, not the spawn. The sidecar drives the same
+`AVSpeechSynthesizer` voices, so whether it starts *emitting* sooner is a streaming question, not an
+engine-speed one — that is exactly what `010`'s SPIKE-1 measures, and it is now the probe this
+document's cold-path budget depends on too. It changes nothing on the *playback* side, because the sidecar's output is
 `AVAudioPCMBuffer` — which is more Web-Audio-native than WAV, not less: raw interleaved PCM goes
 straight into an `AudioBuffer` with no `decodeAudioData` step at all.
 
@@ -103,9 +128,21 @@ contract allows — today `'wav'` (`providers/src/os-synth/index.ts:338`), tomor
 
 ### Consequence, stated rather than hidden
 
-The lab does not reproduce v1's ~970 ms inter-chunk gap, so **pacing controls are tuned against a
+The lab does not reproduce v1's ~950 ms inter-chunk gap, so **pacing controls are tuned against a
 floor that does not exist in the shipped plugin**. Mitigation: control `pace.simulateChunkGapMs`
-(row 34 below), default `0`, with presets `0` (M9 target) and `970` (v1 macOS, measured). The
+(row 34 below), default `0`, with presets `0` (M9 target) and `950` (v1 macOS, `[measured-here]`:
+p50 950 / 937 / 897 ms, n=18 per run over three runs, `docs/.research/latency-measurements.md` 1.1).
+
+> **Amended 2026-08-21, forced by finding E-05 and the R006 label sweep.** The preset was `970`,
+> carrying the label *"(v1 macOS, **measured**)"*, which nothing in this repo supported: 970 came
+> from the `speak11` changelog — a third-party measurement of someone else's player — and lost its
+> `[measured-third-party]` label in transit through the sink's header, where it was then re-invented
+> as a local measurement. It has since turned out to be right to within 2–8 % of our own p50, which
+> is luck rather than evidence. The preset now carries the number measured on **our** sink, with its
+> run count and its source. This was the only place in the repository where a label was not merely
+> dropped but **upgraded**, and it shipped as a slider a listener would tune against.
+
+The
 listener can hear either world. This is the same "engine-provisional" tagging Q25's resolution
 already requires.
 
@@ -352,7 +389,7 @@ for darwin and win32; the Linux branch is `linuxCommand()`, `:175`) and are now 
 | 31 | `voice.volume` | slider | 0–100 | no field exists | More | `[[volm]]` / `Volume` / `-a` | `q-round1-platform.md` Q33 | **EP** |
 | 32 | `pace.chunkMaxUnits` | slider | 40–600, step 20 | 200 | Common | `ChunkerOptions.maxUnits` | `core/src/chunker/index.ts:53` | **PP** |
 | 33 | `pace.isolateFirstSentence` | toggle | on · off | `true`, **and forwarded** — `speech-service.ts:245-246` passes it alongside `maxUnits` (`6b776d4`) | More | `ChunkerOptions.isolateFirstSentence` | `chunker/index.ts:66`; `speech-service.ts:245-246` | **PP** |
-| 34 | `pace.simulateChunkGapMs` | slider | 0–1500; presets `0` (M9 target), `970` (v1 macOS, measured) | n/a — lab-only | Common | lab playback scheduler only | `sinks/subprocess-sink.ts:8-10` | **PP** |
+| 34 | `pace.simulateChunkGapMs` | slider | 0–1500; presets `0` (M9 target), `950` (v1 macOS, `[measured-here]` — p50 950/937/897 ms, n=18 ×3, `docs/.research/latency-measurements.md` 1.1) | n/a — lab-only | Common | lab playback scheduler only | `sinks/subprocess-sink.ts:8-10` | **PP** |
 | 35 | `pace.sentencePauseMs` | slider | 0–800 ms, step 25 | none — pauses come only from emitted punctuation | More | pause token → rendering stage (6a) | H39 | **EP** |
 | 44 | `pace.pauseBackend` | select | `punctuation` (today, all platforms) · `ssml` (`<break time>`; macOS `AVSpeechUtterance`, Windows `SpeakSsml`, Linux `espeak-ng -m`) · `in-band` (macOS `[[slnc]]`, MEASURED) | `punctuation` — the only one implemented | Common | how rows 9 and 35 are encoded (6a) | `q-round1-platform.md` Q33 / "Unused capabilities" 3 | **EP** |
 
@@ -363,7 +400,9 @@ exact shape. The lab must therefore populate this control **only** from `listVoi
 free text, and verify a selection by effect the first time it is used: synthesize a two-word probe
 under the chosen voice and under the platform default and compare the bytes. Identical bytes → the
 lab says *"that voice did not take; the system substituted its default."* Cache the voice list; it
-costs ~450 ms per enumeration on macOS.
+costs **p50 487 / 472 ms** per enumeration on macOS `[measured-here]` (n=6 per run, two runs,
+`docs/.research/latency-measurements.md` 1.6 — worse than P28's ~450 ms, which strengthens the
+requirement rather than changing it).
 
 ### Panel F — What interrupts what, and what gets announced
 
@@ -767,7 +806,7 @@ flowchart TD
     F --> H
     G --> H
     H --> I{"Audio cached for<br/>hash(text+voice+rate)?"}
-    I -- yes --> J["source.start on the<br/>decoded AudioBuffer<br/><b>~0 ms</b>"]
+    I -- yes --> J["source.start on the<br/>decoded AudioBuffer<br/><b>~0 ms [claimed]</b>"]
     I -- no --> K["POST /speak → server:<br/>normalize → Chunker →<br/>OsSynthProvider.generate<br/>returns base64 WAV chunks"]
     K --> L["decodeAudioData,<br/>cache by hash"]
     L --> M["Schedule chunks back-to-back<br/>+ pace.simulateChunkGapMs"]
@@ -781,18 +820,44 @@ flowchart TD
     Q --> R["Save to plugin / Export a copy"]
 
     C -.->|"GATE M11: change → hear ≤ 2 s"| N
-    K -.->|"first play: synthesis only,<br/>no player spawn, no ~970 ms gap"| N
+    K -.->|"first play: synthesis only,<br/>no player spawn, no device open,<br/>no ~950 ms gap [measured-here]"| N
 ```
 
-**Gate budget, measured against numbers we already have.** Cold path: one `say` spawn ≈ 414 ms
-(PITFALLS P10) plus synthesis, plus one round trip on loopback (<5 ms), plus `decodeAudioData` on a
-~60 KB WAV (single-digit ms). Comfortably inside two seconds for a one-to-three-sentence fixture.
-Warm path: cache hit, effectively instant. The server-playback alternative would have added
-~970 ms **per chunk** to the cold path and the whole cold path again to every replay — which is why
-Q20 went the way it did.
+**Gate budget, per segment, labelled.**
+
+| Segment | Cost | Label |
+|---|---|---|
+| in-page re-normalize | ~1 ms | `[claimed]` — no probe; reasoning about pure functions |
+| **`OsSynthProvider.generate()`, one real sentence** (the 414 ms `say` spawn is *inside* this, not on top of it) | **p50 1,163 / 1,054 ms**, p95 1,244 / 1,084, min 900, n=9 per run | `[measured-here]` — `latency-measurements.md` 1.3 |
+| loopback round trip `127.0.0.1` | <5 ms | `[claimed]` |
+| `decodeAudioData` on a ~60 KB WAV | 8–10 ms | `[measured-here]` third-party-to-this-doc — `docs/.research/orca-empirical-findings.md` |
+| **cold-path total, one sentence** | **~1.1–1.2 s of a 2 s gate** | `[derived]` |
+| warm path — `source.start()` on a decoded `AudioBuffer` | ~0 ms | `[claimed]` — reasoning about `source.start()`, no probe |
+
+> **Amended 2026-08-21, forced by finding 3 of `docs/.research/latency-measurements.md`.** This
+> paragraph was headed *"measured against numbers we already have"* and costed the cold path as
+> *"one `say` spawn ≈ 414 ms plus synthesis"* — treating the 414 ms as the dominant term with
+> synthesis as an unquantified extra. **That is backwards.** 414 ms is `say ""`, empty string, zero
+> synthesis; a real sentence end to end is **p50 1,054–1,163 ms**, so synthesis proper is roughly
+> 640–750 ms *on top of* the spawn. The verdict does not change — the gate is still met — but
+> **"comfortably inside two seconds" was not warranted**: a one-sentence fixture spends ~55–60 % of
+> the M11 gate in the synthesizer, and a three-sentence fixture that does not overlap synthesis with
+> playback **misses the gate outright**. Two consequences for T111:
+>
+> 1. **The gate must be measured on the fixture the listener actually uses**, not on a one-liner.
+>    If fixtures are multi-sentence, the server must stream chunk 1 to the page while it synthesizes
+>    chunk 2 — which the existing `POST /speak` envelope, returning all chunks at once, does not do.
+>    Sequence that before declaring the gate met.
+> 2. **On the Piper rung the problem disappears** (52–65 ms/sentence `[measured-here]`, P11), which
+>    is one more reason the lab must not hard-code the OS synth as its only backend.
+
+The server-playback alternative would have added **~950 ms `[measured-here]` per chunk** to the cold
+path — a device open per chunk, not a process spawn — and the whole cold path again to every replay.
+That is why Q20 went the way it did, and the measurement strengthens it.
 
 **What would prove this design wrong:** a fixture that takes longer than two seconds from keypress
-to audio on the author's machine. T111 should log server-side synthesis time per request and the
+to audio on the author's machine — and on the numbers above that is now a **live** risk for any
+fixture longer than about one sentence, not a theoretical one. T111 should log server-side synthesis time per request and the
 page should show cold/warm and elapsed ms in the status bar (visible in the wireframe as
 `♪ playing · 1.2 s`). An indicator that never changes is a broken indicator; this one must show the
 cold path being slower than the warm one, or it is not measuring anything.

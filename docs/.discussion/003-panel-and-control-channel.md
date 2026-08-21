@@ -337,12 +337,17 @@ permanently.**
 Stop is reachable by four physically distinct routes, ordered by how fast they are and by whether
 they survive terminal focus:
 
-| # | Route | Works while a terminal has focus? | Realistic press-to-silence |
-|---|---|---|---|
-| 1 | keypress `s` in the control pane | yes (it *is* the focused terminal) | ~20–60 ms |
-| 2 | panel Stop button (mouse) → `terminal.sendText` → control pane → socket | yes | ~40–120 ms |
-| 3 | plugin hotkey | **no** (F6) | ~20–50 ms when it fires at all |
-| 4 | command palette entry, or `orca-tts stop` in any shell | yes | seconds |
+| # | Route | Works while a terminal has focus? | Realistic press-to-silence | Label |
+|---|---|---|---|---|
+| 1 | keypress `s` in the control pane | yes (it *is* the focused terminal) | ~20–60 ms | `[claimed]` |
+| 2 | panel Stop button (mouse) → `terminal.sendText` → control pane → socket | yes | ~40–120 ms | `[claimed]` |
+| 3 | plugin hotkey | **no** (F6) | ~20–50 ms when it fires at all | `[claimed]` |
+| 4 | command palette entry, or `orca-tts stop` in any shell | yes | seconds | `[claimed]` |
+
+> **Labels added 2026-08-21 (measurement pass, R006).** All four figures are intuition. No probe has
+> ever run on any of these routes, and routes 1–2 traverse a control pane whose viability is `003`
+> Q45, still open. The *ranking* is the load-bearing claim here and it is unaffected; the numbers are
+> not evidence and must not be quoted as though they were.
 
 Route 2 is the one that answers the user's sentence, because a mouse click has no keyboard-focus
 problem. Route 1 is the one that is fastest. Route 3 is a bonus that must never be documented as
@@ -360,7 +365,10 @@ Above 400 ms is a defect that fails CI, not a slow day.**
 
 Why 250 ms and not something looser:
 
-1. **Above roughly 250–300 ms, people stop attributing the effect to their own action** and press
+1. **Above roughly 250–300 ms, people stop attributing the effect to their own action** `[claimed]`
+   — *no citation exists anywhere in this repo for that threshold, and it is the sole justification
+   for both the p99 250 ms budget and the 400 ms CI gate* (labelled 2026-08-21, measurement pass
+   `latency-measurements.md` 3.6 item 6) — and press
    again. A Stop that has to be pressed twice teaches the user that the control is unreliable, which
    is precisely the helplessness in P22.
 2. **The competing timescale is the audio chunk, not the poll.** We synthesize in sentence chunks of
@@ -377,8 +385,51 @@ Why 250 ms and not something looser:
 | click → panel JS → bridge → capability gate → PTY write | 60 ms | local IPC; the gate is a synchronous table lookup (`plugin-capability-gate.ts:39-45`) |
 | PTY → control-pane reader → unix socket → worker | 40 ms | line read on an already-running process, kept-open socket |
 | worker: bump generation, clear queue, cancel synthesis | 100 ms | `provider.cancel()` + `playback.bargeIn()`, already implemented (`packages/plugin/src/speech-service.ts:99` (`cancelSynthesis` → `provider.cancel()`) and `:115` (`bargeIn()`)) |
-| audio device drain | 50 ms | requires a bounded sink buffer; `ffplay.kill()` measured at 1.5 ms (PITFALLS P9) |
+| audio device drain | 50 ms | **`[claimed]` — nothing has measured this.** See the amendment below |
 | **total** | **250 ms** | |
+
+> **Amended 2026-08-21 — forced by finding 5 of `docs/.research/latency-measurements.md` (section 1.5).**
+> The drain row previously read *"requires a bounded sink buffer; `ffplay.kill()` measured at 1.5 ms
+> (PITFALLS P9)"*. **That citation supported a different quantity and has been removed.**
+>
+> - **Kill-to-exit on the player we actually ship** (`afplay`, SIGKILL 400 ms into a 3 s tone):
+>   **p50 3.5 ms / p95 8.8 ms** and **p50 2.9 ms / p95 7.3 ms**, n=10 per run, two runs
+>   `[measured-here]`. P9's 1.5 ms was `ffplay`, which we do not ship on macOS. Same order of
+>   magnitude, slightly worse, still negligible.
+> - **That measures the process dying, not audio stopping.** Whatever CoreAudio has already accepted
+>   into its buffer is not observable from userland and is not in that number. **Drain is unmeasured**
+>   and stays `[claimed]` until somebody builds a rig: a loopback capture (BlackHole plus a recorder,
+>   correlating the first silent sample against the probe's `t0`) or a CoreAudio-level probe. This
+>   repo is *structurally* unable to take the reading on the author's own machine — `afplay` has no
+>   device-selection flag and a stock macOS system ships no null sink, so any device-side probe plays
+>   sound at whoever is sitting there (`latency-measurements.md` 1.0, PITFALLS P31).
+> - **Two of the four remaining rows are also unmeasured.** The 60 ms and 40 ms IPC segments are
+>   intuition. Only the third row has any measured content, and it is smaller than stated:
+>   `provider.cancel()` measures **0–1 ms** (`docs/.research/q-round1-codebase.md:287`) and the player
+>   kill ~3 ms, against a 100 ms allowance.
+>
+> **Does the 250 ms still add up? Honest answer: the total is unproven, but nothing measured argues
+> against it — and the way it was assembled should be distrusted.**
+>
+> 1. **In its favour.** The one segment we can now bound is the one the design worried about least,
+>    and it is ~30× under its allowance. The 100 ms worker row is very likely a large over-allocation,
+>    which buys headroom for the two IPC rows and the drain.
+> 2. **Against it.** The segments were chosen to **sum to 250**, which is the target, not an
+>    observation. A budget whose parts are picked to hit its own total is the same shape of artefact
+>    as a test whose assertion is twenty times the budget it is quoted as proving (`latency-measurements.md` 3.4) — it
+>    cannot fail on paper. **The 250 ms remains a target, and this document is not entitled to call
+>    it achievable until routes 1–2 are measured end to end.**
+> 3. **The one substantive new worry.** Playback teardown on this stack is large: `afplay`'s fixed
+>    per-invocation cost is **905–915 ms** by regression `[measured-here]`
+>    (`latency-measurements.md` 2.5), of which an unknown part is *post-roll and device teardown*
+>    after the last sample. If a meaningful share of that sits **after** the audio the listener hears,
+>    a 50 ms drain allowance is optimistic and the failure is invisible to every test we would write,
+>    because our tests observe the process, not the device. This is the single reason to fund the
+>    CoreAudio probe before, not after, the CI gate is turned on.
+>
+> **Consequence for the section-2 gate:** unchanged in direction and strengthened in reason. The
+> 400 ms CI gate stays a **target, not yet a gate** (as `008` C-02 already required), and the probe
+> that must be sequenced first is now named: a loopback or CoreAudio measurement of cancel-to-silence.
 
 4. **Polling cannot carry this and the arithmetic proves it.** The floor on a panel poll is
    `10 000 / 30 = 333 ms` per message (F4), and one slot per window belongs to the watchdog, so the
@@ -913,8 +964,16 @@ in tier ≥ 1 or overflow is named every turn regardless, because those identiti
 perceptual floor. That override is correctness, not taste, and it is 005's to make.
 
 **Both documents write into one audio stream and neither costs the total.** X-05 of
-`docs/design/008-crossreview-round3.md` measured the stack — earcon, call-sign, re-spoken long form
-— at ~2.7 s of preamble in front of a 1.0 s reply on the guaranteed floor. That finding is **not
+`docs/design/008-crossreview-round3.md` stacked the preamble — earcon, call-sign, re-spoken long form
+— at ~2.7 s in front of a 1.0 s reply on the guaranteed floor. **Amended 2026-08-21, forced by
+finding 4 of `docs/.research/latency-measurements.md` (1.4): that figure was `[claimed]`, not
+measured — three of its four terms were estimates — and its largest term is now measured and it is
+worse than the arithmetic assumed.** The earcon, prepended as its own `AudioChunk` through the
+shipped sink, costs **p50 874 / 862 ms** of wall clock, n=10 per run, two runs `[measured-here]` —
+against the 140 ms the arithmetic used. The ~2.7 s total survives roughly intact only because
+X-05 had already added a separate ~970 ms spawn term that the measurement folds into the same
+~870 ms; what changes is that the preamble's dominant cost is now **known**, is **device-open time**,
+and is therefore **removed by M9 rather than by shortening any wording**. That finding is **not
 resolved here**: it needs an utterance-preamble budget owned by whichever module assembles the
 utterance, with the percentage set by the listener in Voice Lab. Recorded as open (`Q61`) rather
 than quietly left out.
@@ -1448,7 +1507,7 @@ sequenceDiagram
     Note over W: segment budget 100 ms<br/>speech-service.ts:99,115
     W->>S: bargeIn(): flush buffered audio
     S-->>U: SILENCE
-    Note over S,U: drain budget 50 ms<br/>ffplay kill measured 1.5 ms (P9)
+    Note over S,U: drain budget 50 ms UNMEASURED [claimed]<br/>afplay kill-to-exit ~3 ms [measured-here] n=10 x2<br/>kill-to-exit is NOT audio-stop - see Q13 amendment
 
     W->>S: short earcon = "stopped"
     Note over U,S: confirmation arrives in the AUDIO channel,<br/>not the panel, because the panel is read-blind
@@ -1481,7 +1540,7 @@ flowchart LR
 | 1b | **Framing (X-02)** | Envelopes are wrapped in `\x1b]777;orca-tts;…\x07`; the control pane's stdin is a two-state machine, raw-mode keypresses outside frames, envelopes inside, nothing inside a frame ever dispatched as a key (2D.2). |
 | 1c | **Keyboard vocabulary (X-09)** | **One table, section 4a**, cited by 004 §8 and 005 §11.2. `Space` = play/pause toggle everywhere; `s` = stop everywhere; `R` = replay everywhere; `m` = mute everywhere. The lab's `S`/`R` snapshot-restore move to `K`/`L`; its `M` more-tier moves to `+`; its `V` and `,` are retired. |
 | 1d | **The 301st reply (B-01)** | The remembered-id set becomes a **floor**, not a fence, and a **per-file byte high-water mark** is the durable bound (7.1). Entering the replay buffer marks a reply seen. |
-| 2 | Q13 Stop latency | **p50 ≤ 120 ms, p99 ≤ 250 ms, > 400 ms fails CI.** Must interrupt mid-chunk. Polling cannot meet it: worst case ≈ 495 ms. |
+| 2 | Q13 Stop latency | **p50 ≤ 120 ms, p99 ≤ 250 ms, > 400 ms fails CI — a `[claimed]` target, not yet a gate.** Its four segments are estimates chosen to sum to the target; only `kill`-to-exit (~3 ms `[measured-here]`) and `provider.cancel()` (0–1 ms) are measured, and **audio drain is unmeasured** (Q13 amendment, 2026-08-21). Must interrupt mid-chunk. Polling cannot meet it: worst case ≈ 495 ms `[derived]`. |
 | 3 | Q12 envelope | `{v,id,verb,gen,arg,at}`. Idempotent by `id` (last 64). Stale by **generation**, not clock. 5 s absolute guard. Six named refusal codes. |
 | 4 | Q14 unavailable | Disabled **with the named reason and the remedy**. Never hidden, never a frozen last-known value. |
 | 5 | Display surface | The control-pane TUI, not the plugin panel — the panel is read-blind today. Poll ceiling recorded for when #15643 lands: 1 Hz nominal, self-capped at 24/10 s. |
