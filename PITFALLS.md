@@ -6,6 +6,47 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P33 — The number in the document was never the number in the assertion
+**Symptom:** nine places quoted provider `cancel()` as *"measured within 50 ms"* — `STATE.md`,
+`docs/TASKS.md` x4, `docs/PLAN.md` x2, `docs/design/007-user-stories.md` x3 — and all nine were
+green. The assertion was `expect(elapsed).toBeLessThanOrEqual(CANCEL_BUDGET_MS * 20)`, i.e.
+1,000 ms, with a `console.warn` above 50 that nobody reads in a passing log. **Verified by effect:**
+delaying the SIGKILL in `OsSynthProvider.cancel()` by 900 ms measured 904 ms and stayed green in
+both cancel tests. An 18x regression on the project's own barge-in budget was free, silently, at
+any time. Two more of the same shape came out of the same pass: a queue-overflow test that asserted
+a log line and not which end of the queue was discarded (inverting the policy left all 16 tests in
+the file green), and principle VIII's thinking-block gate, which could be made to speak the model's
+reasoning aloud with all seven of its own tests still passing.
+**Cause:** three artefacts that each looked right alone. The constant was right (50). The prose was
+right (50). The arithmetic *between* them made the gate 20x the claim, and nothing in the repo ever
+compared the three. The stated reason for the multiplier — *"a hard ceiling keeps a wedged provider
+from hanging CI"* — is what the 120 s test timeout already does; conflating "don't hang" with "meet
+the budget" is what produced it. The thinking-block case has a different cause worth naming on its
+own: the FIXTURE could not exercise the branch. A real thinking block keeps its payload under
+`thinking`/`data` and has no `text` key at all, so a decoder reading `block.text` blindly finds
+nothing to leak in the fixture and everything to leak in the record ORCA actually hands us.
+**Instead:**
+- **The gate is the budget. No multiplier, ever.** If a number needs slack, change the constant and
+  change every document with it — do not hide the slack in arithmetic beside the constant.
+- **"Don't hang CI" is a timeout, not an assertion.** Two different concerns; never one expression.
+- **`pnpm check:mutants`** (`scripts/mutation-check.mjs`) — 18 named mutants, each declaring the
+  invariant it attacks and the test that must go red. It is the only gate here that verifies a TEST
+  by effect. Add one whenever a load-bearing invariant lands. Equivalent mutants are declared as
+  such *with the line that makes them inert*, because a wrongly-marked equivalent is exactly the
+  blind spot the script exists to find.
+- **`packages/providers/src/budget-claims.test.ts`** — runs in `pnpm test`, parses the documented
+  numbers out of the prose and asserts they equal the constant the suite enforces, in both
+  directions. It carries its own floor assertion (`claimsSeen >= 9`), because a guard that quietly
+  stops matching is the same failure wearing the uniform of the fix.
+- **Before trusting a fixture, ask what the real record looks like.** A fixture that cannot express
+  the failure makes every assertion over it green for free.
+**Worth remembering:** a coverage gate would not have caught any of this — the cancel path was at
+full coverage the entire time it was ungated. Neither would a naming convention: the test was
+*named* "T041c cancel() is observed within 50 ms" while asserting 1,000. The only instrument that
+finds a check which could not have failed is breaking the code and watching whether it goes red.
+Full audit, including the six other loose assertions and everything that was checked and found
+sound: `docs/.research/test-audit.md`.
+
 ## P32 — The ~950 ms inter-sentence gap is the audio DEVICE, not the process spawn
 **Symptom:** every document in this repo explained macOS's inter-sentence silence as *"one process
 per chunk"*, and M9 was on the way to being scoped as *"stop spawning a player per chunk"*. That fix
