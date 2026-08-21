@@ -45,7 +45,7 @@ Six facts constrain everything that follows. Five are settled; the sixth is new 
 
 **F1 — Exactly three host methods are panel-callable.** `workspace.readContext`,
 `terminal.sendText`, `notifications.show`. The set is derived from the spec table by filtering
-`panel: true`, so it cannot drift (`src/shared/plugins/plugin-host-api.ts:144-148`). <!-- citation-check: ignore — VERIFIED CORRECT at the pinned ORCA commit 87097551f8; the checker's anchor heuristic picks `notifications.show` from elsewhere in the same sentence. Recorded in 009 finding E-01: "Do not 'fix' them." --> All thirteen
+`panel: true`, so it cannot drift (`src/shared/plugins/plugin-host-api.ts:261-265`). <!-- citation-check: ignore --><!-- why: VERIFIED CORRECT at the pinned ORCA commit 87097551f8; the checker's anchor heuristic picks `notifications.show` from elsewhere in the same sentence. Recorded in 009 finding E-01: "Do not 'fix' them." --> All thirteen
 method names are at `plugin-host-api.ts:124-244`; there is no `terminal.create`, no
 `terminal.read`, and no way for a plugin to open a pane.
 
@@ -297,7 +297,7 @@ Rules that make the frame safe rather than merely present:
 ##### 2D.3 — The `enter` flag, stated once, because it is the difference between a buffer and a turn
 
 `terminal.sendText` takes `{terminalId, text, enter}`. `enter` appends `\r` to the PTY payload
-(`orca-runtime.ts:39794-39810`). <!-- citation-check: ignore — VERIFIED CORRECT at the pinned ORCA commit 87097551f8; the anchor heuristic picks `terminalId` from elsewhere in the same sentence. Recorded in 009 finding E-01: "Do not 'fix' them." --> In a shell or an agent CLI that `\r` is what **submits**. This
+(`orca-runtime.ts:39794-39810`). <!-- citation-check: ignore --><!-- why: VERIFIED CORRECT at the pinned ORCA commit 87097551f8; the anchor heuristic picks `terminalId` from elsewhere in the same sentence. Recorded in 009 finding E-01: "Do not 'fix' them." --> In a shell or an agent CLI that `\r` is what **submits**. This
 document therefore fixes it:
 
 | Send | `enter` | Why |

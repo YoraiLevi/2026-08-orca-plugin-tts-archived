@@ -149,7 +149,7 @@ Four properties of that shape are the reason four documents each need to widen i
 | # | Extension | Requested by | Lands with | Platform evidence |
 |---|---|---|---|---|
 | 1 | Per-utterance identity: voice, **rate as wpm**, pitch in semitones | `005` sections 4, 8.2, 8.4 | M15 | rate everywhere; pitch on all three by three different surfaces (`q-round1-platform.md` Q33) |
-| 2 | `pause()` / `resume()`, distinct from `cancel()` | `003` section 8.7 (`:1283-1296`) <!-- citation-check: ignore — the bare `:NN` inherits the PRECEDING path (a research file); the prose names `003`, where these lines are correct. R7-21 characterises this inheritance shape as a false positive. --> | M13 | macOS `pauseSpeaking(at: .word)`, Windows `Pause()`/`Resume()`, Linux SSIP `PAUSE`/`RESUME` — **`[documented]`**, item 2 |
+| 2 | `pause()` / `resume()`, distinct from `cancel()` | `003` section 8.7 (`:1283-1296`) <!-- citation-check: ignore --><!-- why: the bare `:NN` inherits the PRECEDING path (a research file); the prose names `003`, where these lines are correct. R7-21 characterises this inheritance shape as a false positive. --> | M13 | macOS `pauseSpeaking(at: .word)`, Windows `Pause()`/`Resume()`, Linux SSIP `PAUSE`/`RESUME` — **`[documented]`**, item 2 |
 | 3 | Audio-format variance, including synthesized earcon PCM | `004` section 2 (**`004:126-127`** — corrected 2026-08-21, R7-21: `004:102` was wrong at this document's own pinned SHA `32b929a`, where the sentence *"Branch on `chunk.format`, do not assume WAV"* was at `004:91`; it is `004:126-127` at HEAD), `005` section 11.1d (`:623-627`) | M11 | our own three rungs already differ; the earcon is generated PCM at a rate the provider did not choose |
 | 4 | **`spoke-elsewhere` as a first-class outcome** | `008` X-10, resolved in `009` section 1 | **already shipped, unmodelled** | `PITFALLS.md` P25; `os-synth/index.ts:318-323` |
 | 5 | **Word-boundary events** | nobody — found by the platform probe, unscheduled | M13's cursor, and precise resume | **`[measured-here]` on macOS** (F2); Windows `SpeakProgress` and Linux SSIP index marks **`[documented]`** |
@@ -670,10 +670,19 @@ copies the shape.
 
 ## 7. What the contract suite must add
 
-`packages/providers/src/contract.ts` today has six tests: one chunk (`:29`), empty input (`:39`),
-cancel within `CANCEL_BUDGET_MS = 50` (`:12`, `:47`), capabilities typed (`:75`), `prepare()`
-idempotent (`:94`), voices listable (`:105`). Test `T041d` is the one FMA PV11 calls a check that
-could not have failed.
+`packages/providers/src/contract.ts` today has six tests. **One per line, each with the symbol it
+anchors on** — the previous single-sentence form put six bare `:NN` pointers behind one quoted symbol,
+and the checker's anchor heuristic then read *all six* as citations of `CANCEL_BUDGET_MS`, reporting
+correct line numbers as stale. Cite a symbol plus the line (`004` Panel E), one claim per line:
+
+- `T041a` — one chunk yields audio: `packages/providers/src/contract.ts:29`
+- `T041b` — `generate` on empty input: `packages/providers/src/contract.ts:39`
+- `T041d` — `capabilities` is present and typed: `packages/providers/src/contract.ts:75`
+- `T041e` — `T041e prepare() is idempotent`: `packages/providers/src/contract.ts:94` <!-- citation-check: ignore --><!-- why: verified by hand at contract.ts:94; the anchor heuristic reaches into the NEXT bullet and matches listVoices instead. Re-check with: sed -n 94p packages/providers/src/contract.ts -->
+- `T041f` — `listVoices` returns a list: `packages/providers/src/contract.ts:105`
+- `T041c` — `cancel` resolves inside the budget: `packages/providers/src/contract.ts:47`, against `CANCEL_BUDGET_MS` at `packages/providers/src/contract.ts:12`
+
+Test `T041d` is the one FMA PV11 calls a check that could not have failed.
 
 | New test | Asserts | Negative control |
 |---|---|---|
@@ -932,7 +941,7 @@ synthesis through three unrelated APIs. **Costed here rather than hidden**, per 
 - **Linux is a socket client, and it cannot be a synthesis service at all.** SSIP's full verb list is
   `set/history/stop/cancel/pause/resume/sound_icon/char/key/list/get/help/block/speak/quit`
   (`speechd` `src/server/parse.c:98-110`) — **no audio-retrieval verb**; `SET` has no audio-output
-  parameter (`:424-680` <!-- citation-check: ignore — external brailcom/speechd, path inherited by the tool from a repo file; see section 15's R7-21 block, which records that these five pointers are unpinned and why they are not "fixed" with a number. -->); and the last theoretical capture route is closed at
+  parameter (`:424-680` <!-- citation-check: ignore --><!-- why: external brailcom/speechd, path inherited by the tool from a repo file; see section 15's R7-21 block, which records that these five pointers are unpinned and why they are not "fixed" with a number. -->); and the last theoretical capture route is closed at
   `src/audio/libao.c:75`, which calls `ao_open_live()` and cannot open a file driver. So **the Linux
   resident service is a `spoke-elsewhere` provider with pause/resume and index marks** — better
   transport, still no bytes. Section 5's rung is the permanent Linux answer *unless* the
@@ -1375,8 +1384,8 @@ document — 009 records that a previous correction table was itself 16 lines st
 
 **One stale citation found, in two places.** The Windows rate formula
 `Math.round((opts.rate - 1) * 10)` is at **`packages/providers/src/os-synth/index.ts:444`**, not
-`:366`. <!-- citation-check: ignore — this line QUOTES a stale citation as the finding. Re-anchoring it would delete the defect it reports (R7-21, and 014's own declared-contribution note). --> `docs/design/005-agent-identity.md` section 8.2 and `docs/design/006-fma.md` PV14 both cite
-`:366`, which now lands on `$s.Rate = ${rate}`. <!-- citation-check: ignore — same: the wrong line IS the claim. --> The finding itself — the linear formula over-shoots
+`:366`. <!-- citation-check: ignore --><!-- why: this line QUOTES a stale citation as the finding. Re-anchoring it would delete the defect it reports (R7-21, and 014's own declared-contribution note). --> `docs/design/005-agent-identity.md` section 8.2 and `docs/design/006-fma.md` PV14 both cite
+`:366`, which now lands on `$s.Rate = ${rate}`. <!-- citation-check: ignore --><!-- why: same: the wrong line IS the claim. --> The finding itself — the linear formula over-shoots
 in the middle and saturates from `rate` 2.0 upward — is unchanged and correct. Not fixed here; this
 document changes no file but itself.
 
@@ -1384,7 +1393,7 @@ document changes no file but itself.
 >
 > 1. **The blanket sentence above does not cover the external citations, and reads as though it
 >    does.** Section 9 and section 13 cite `brailcom/speechd` at `src/server/parse.c:98-110`,
->    `:424-680` <!-- citation-check: ignore — an EXTERNAL brailcom/speechd path; the bare `:NN` inherits the preceding repo path, which is the tool's blind spot. The real defect is that these five pointers carry no SHA, and it is stated in this very block rather than fixed by a line number. -->, `src/audio/libao.c:75`, `src/clients/say/options.c` and `module_utils.c` with **no
+>    `:424-680` <!-- citation-check: ignore --><!-- why: an EXTERNAL brailcom/speechd path; the bare `:NN` inherits the preceding repo path, which is the tool's blind spot. The real defect is that these five pointers carry no SHA, and it is stated in this very block rather than fixed by a line number. -->, `src/audio/libao.c:75`, `src/clients/say/options.c` and `module_utils.c` with **no
 >    commit and no version**. R001 requires a recorded SHA. There is no vendored copy in this repo, so
 >    **as written those five pointers are unverifiable** — and the load-bearing claim *"`spoke-elsewhere`
 >    is the permanent Linux floor"* rests entirely on them. **Nobody in this session could reach the
