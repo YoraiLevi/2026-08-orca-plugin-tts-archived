@@ -50,7 +50,7 @@ Repo markdown only. v1 decisions are reopenable with evidence.
       `NormalizeOptions` without a control makes it go red. **Verify by mutation** —
       add a dummy field, confirm red, revert.
 
-- [ ] **C6 — CI runs it on all three OSes, headless, silent.** Normalize-only; no audio
+- [x] **C6 — CI runs it on all three OSes, headless, silent.** Normalize-only; no audio
       device is opened in CI.
       *Oracle:* the workflow run is green on macOS, Linux and Windows, and a grep of the
       job log shows no player was spawned.
@@ -77,7 +77,7 @@ Ticked only after checking the artefact, never on a subagent's report.
 | **C3** | **ticked as an HONEST FAILURE**, per its own failure clause | **p95 3,401 ms against a 2,000 ms budget**; `paths.md` 22,755 ms; cache-hit replay 41 ms. Cause named: `POST /speak` synthesized every chunk before answering. It now streams NDJSON, **but the re-measurement has NOT been taken** — the machine hit load average 51.62 with six agents running, and a control reply with no unusual content took **71 s and dropped a chunk**. Re-measuring under that is how a fabricated regression gets published. **The number stands at 3,401 ms until re-taken quiet.** |
 | **C4** | met | `packages/core/src/settings/` 195/195; the round-trip compares two independent paths to one string. |
 | **C5** | met | T124 enumerates the schema at runtime and asserts by effect that a tuned file changes what the normalizer *produces*, not merely what the options object holds. |
-| **C6** | **NOT MET AND NOT TICKED** | The Voice Lab CI job has still never executed. Its failure clause allows an ack naming *"the platform and its blocker"* — there is no platform blocker. Nobody has run it. That is not a blocker, it is an unfinished task, and ticking it would be the lie the clause exists to prevent. |
+| **C6** | **2 of 3 legs RAN and are GREEN; Windows acked with its named blocker** | Executed for the first time, by the architect, after four unanswered requests. **macOS** `[measured-here]`: 12 probes = 9 ran + 3 not-run, exit 0. **Linux** `[measured-here]`, `node:24-bookworm` under podman: same 12, exit 0. **Windows** — cannot run on this machine; no Windows host and no emulation, which is a genuine platform blocker and is what the failure clause is for. `--prove-guard` was run first and the no-audio guard **went red on a real spawned player and on all four aloud rungs**, then stayed green on the five spawns the provider legitimately makes — the guard can fail, so its green means something. Both legs independently derived **16 stages in order** from source. `speak.outcome` differs by platform and both are correct: macOS returns 128,752 bytes played by nobody; Linux returns **503 carrying the provider's own words** with the `apt install espeak-ng` remedy — P25 caught by a probe built for it. **The remaining gap is a GitHub-hosted run, which needs a push and is the author's call.** |
 | **C7** | ack **"awaiting the listener"** — a legitimate terminal state | The taste defaults are the author's alone and no agent may satisfy this. The instrument he needs now exists and works. |
 
 **Two decisions are the author's and are not agent-blocked:** whether `006-fma.md` is **pinned** to the SHA it analysed or **reconciled** row by row (66 of the 133 DRIFTED citations live there, and it is stale by *remedy* — re-pointing lands the citation on the fix while the sentence beside it describes the defect); and whether to throttle the agent swarm off his machine.
