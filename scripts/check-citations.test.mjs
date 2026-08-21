@@ -288,6 +288,22 @@ describe('the LOST gate can go red', () => {
     expect(code).toBe(0)
   })
 
+  it('a green run prints the counts and NOT the wall of detail; --list asks for it', () => {
+    // Added because a mutant that printed the detail unconditionally went GREEN against every
+    // other test here — the behaviour had no check at all until this one.
+    const drifting = fixture(
+      'The catch at `packages/core/src/thing.ts:2` in `readRoot` names the cause.\n', SOURCE_REMEDIED,
+    )
+    const quiet = drifting(['--max-lost=1'])
+    expect(quiet.code).toBe(0)
+    expect(quiet.out).toMatch(/stale:\s+1 total/)          // the count is always there
+    expect(quiet.out).not.toContain('STALE CITATIONS')     // the detail is not
+    expect(quiet.out).toContain('--list to see them')
+
+    const asked = drifting(['--max-lost=1', '--list'])
+    expect(asked.out).toContain('STALE CITATIONS')
+  })
+
   it('CONTROL: a DRIFTED citation does NOT fail the run — that is the whole point of the change', () => {
     const { code, out } = fixture(
       'The catch at `packages/core/src/thing.ts:2` in `readRoot` names the cause.\n',
