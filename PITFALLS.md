@@ -102,6 +102,18 @@ so the window in which your work is unattributed and revertible stays small. If 
 already committed by someone else, say so in your own commit message: the content is fine, only the
 attribution is wrong, and the record is worth more than the blame.
 
+**Amended 2026-08-21, after the rule above was followed and failed anyway.** An agent staged six
+explicit paths and verified with `git status --short` that only those six were staged. Between that
+check and `git commit`, a peer staged their files into the shared index, and the commit took the
+whole index — roughly 14 files belonging to someone else. Neither agent ran `-A` or `-a`.
+**`git add` and `git commit` are two operations against one shared index, and anything can land
+between them.** "Stage explicit paths" is necessary and not sufficient; it closes the careless case
+and leaves the race open.
+**The stronger form:** pass the paths to the commit itself — `git commit -- <paths>` commits only
+those paths regardless of what else is staged — or re-check `git diff --cached --name-only`
+immediately before committing and abort on a mismatch. Prefer the first: it has no window at all,
+where the second merely has a smaller one.
+
 ## P33 — The number in the document was never the number in the assertion
 **Symptom:** nine places quoted provider `cancel()` as *"measured within 50 ms"* — `STATE.md`,
 `docs/TASKS.md` x4, `docs/PLAN.md` x2, `docs/design/007-user-stories.md` x3 — and all nine were
