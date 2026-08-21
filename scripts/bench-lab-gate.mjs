@@ -652,6 +652,9 @@ async function staleHitProbe (cdp, fixture) {
   await selectFixture(cdp, fixture)
   await focusControl(cdp, 'voice.rate')
   const prime = await trial(cdp, KEYS.space)
+  // The prime must COMPLETE, or the page holds no cache and press 2 misses for the wrong reason —
+  // this probe would then report OK while proving nothing (FR-024 made an early Stop possible).
+  const primed = await waitForComplete(cdp)
 
   await settle(cdp)
   await press(cdp, KEYS.right)
@@ -668,23 +671,47 @@ async function staleHitProbe (cdp, fixture) {
     id: 'cachekey.stale-hit',
     label: 'FR-023 — POST /speak requests for: [prime, after changing `voice.rate`, after ' +
       `reloading the fixture] = [${req(prime)}, ${req(afterChange)}, ${req(afterReload)}]. ` +
+      `The prime ${primed ? 'completed' : 'DID NOT COMPLETE — this probe proves nothing'}. ` +
       (stale
         ? 'ZERO after a changed `voice.rate` while the control case issued one: the page replayed ' +
           'audio synthesized at the OLD rate. `state.chunkKeysFor` is keyed by text only.'
         : 'The changed control produced a fresh synthesis.') +
       ` Elapsed after the change: ${afterChange.ok ? afterChange.ms.toFixed(0) + ' ms' : 'n/a'}.`,
     label_kind: 'measured-here',
-    status: stale ? 'VIOLATION' : 'OK',
+    status: !primed ? 'VIOLATION' : stale ? 'VIOLATION' : 'OK',
     stats: { n: 3, min: 0, p50: 0, p95: 0, max: 0, mean: 0 },
-    raw: { prime: req(prime), afterChange: req(afterChange), afterReload: req(afterReload),
+    raw: { primed, prime: req(prime), afterChange: req(afterChange), afterReload: req(afterReload),
            msAfterChange: afterChange.ok ? +afterChange.ms.toFixed(1) : null }
   })
 }
 
+/**
+ * Wait until the page reports the utterance it is holding is COMPLETE.
+ *
+ * Under FR-024 the page starts playing chunk 1 while chunk 2 is still being synthesized, so
+ * `settle()`'s Stop — 250 ms after first audio — lands MID-STREAM and the page (correctly) refuses
+ * to commit a truncated cache. Priming a warm series therefore has to wait for the whole utterance,
+ * or every "warm" trial is a cold one wearing the wrong label. Watched through the page's own
+ * `window.__lab` record rather than guessed at with a sleep.
+ */
+async function waitForComplete (cdp, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const u = await cdp.evaluate('window.__lab && window.__lab.utterance ? { c: !!window.__lab.utterance.complete, a: !!window.__lab.utterance.aborted } : null')
+    if (u && u.c) return true
+    if (u && u.a) return false
+    await sleep(20)
+  }
+  return false
+}
+
 async function warmSeries (cdp, n) {
-  // Prime: one cold play of the current text at the current options, so the buffers exist.
+  // Prime: one cold play of the current text at the current options, so the buffers exist — and
+  // let it FINISH, because a stream stopped early leaves a deliberately incomplete cache.
   await settle(cdp)
   await trial(cdp, KEYS.space)
+  const primed = await waitForComplete(cdp)
+  if (!primed) throw new Error('the warm series could not prime: the page never reported a complete utterance')
   const trials = []
   for (let i = 0; i < n; i++) {
     await settle(cdp)                     // stop, so Space is a play and not a pause

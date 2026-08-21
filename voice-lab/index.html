@@ -1680,11 +1680,13 @@ async function speak (text, { confirmation = false } = {}) {
     state.lastPlayed = { text, synth, keys: cachedKeys }
     scheduleBuffers(bufs, values()['pace.simulateChunkGapMs'], () => onPlaybackEnd())
     setTiming('warm', performance.now() - t0)
+    markUtterance({ text, complete: true, delivered: bufs.length, lost: 0, aborted: false, path: 'warm' })
     if (!confirmation) setStatus('Playing, from the cache.')
     return
   }
 
   if (!confirmation) setStatus('Synthesizing…')
+  markUtterance({ text, complete: false, delivered: 0, lost: 0, aborted: false, startedAt: t0 })
 
   // One in-flight utterance. Aborting the FETCH is what stops the server: it closes the socket,
   // the server sees it and cancels the synthesizer. Stop stays pushed, never polled.
@@ -1724,7 +1726,13 @@ async function speak (text, { confirmation = false } = {}) {
     })
     serverIsUp()
   } catch (err) {
-    if (ac.signal.aborted) return            // the listener pressed Stop; that is not a failure
+    if (ac.signal.aborted) {
+      // The listener pressed Stop. The chunks that DID arrive stay decoded in `buffers`, but the
+      // key list is deliberately not committed: replaying a truncated utterance as though it were
+      // the whole one is the silent-wrong-answer failure this project keeps finding.
+      markUtterance({ complete: false, delivered: sched.count, aborted: true })
+      return
+    }
     serverIsDown(err); earcon('control.error'); return
   }
 
@@ -1770,6 +1778,7 @@ async function speak (text, { confirmation = false } = {}) {
   state.chunkKeysFor ??= new Map()
   state.chunkKeysFor.set(text, keys)
   state.lastPlayed = { text, synth, keys }
+  markUtterance({ complete: true, delivered: sched.count, lost: end ? end.lost : 0 })
 
   // A loss is never silent and never merely logged (PITFALLS P30). The SERVER already spoke it —
   // it appended one synthesized sentence to the end of the stream — so the listener hears it in
@@ -1784,6 +1793,25 @@ async function speak (text, { confirmation = false } = {}) {
   }
 
   setTiming('cold', firstAudioMs, end && end.timings && end.timings.synthMs)
+}
+
+/**
+ * The page's own machine-readable record of the utterance in flight.
+ *
+ * `docs/.research/m11-gate.md` finding G-5 asked for exactly this and recorded it as unbuilt: a
+ * harness driving the page from outside cannot otherwise tell a cache that is COMPLETE from one
+ * that was cut short by Stop — and under FR-024 that difference is real, because Stop can now land
+ * while chunk 2 is still being synthesized. `window.__lab` is read-only bookkeeping; nothing on
+ * the page branches on it.
+ */
+window.__lab = { utterance: null, utterances: [] }
+function markUtterance (patch) {
+  const u = { ...(window.__lab.utterance ?? {}), ...patch, at: performance.now() }
+  window.__lab.utterance = u
+  if (patch.complete === true || patch.aborted === true) {
+    window.__lab.utterances.push(u)
+    if (window.__lab.utterances.length > 200) window.__lab.utterances.shift()
+  }
 }
 
 function onPlaybackEnd () {
