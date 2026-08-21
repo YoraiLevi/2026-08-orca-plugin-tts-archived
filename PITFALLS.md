@@ -6,6 +6,21 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P35 — A suppression marker the tool does not parse is a suppression that never happened
+**Symptom:** two ORCA citations were annotated `<!-- citation-check: ignore — VERIFIED CORRECT … -->`
+so `--fix` would leave them alone. `--fix` rewrote one of them anyway —
+`plugin-host-api.ts:261-265` → `:144-148`, the exact citation `009` finding E-01 records as correct
+and says *"Do not 'fix' them."*
+**Cause:** the marker was written with its reason **inside** the comment. The tool's matcher is
+`/<!--\s*citation-check:\s*ignore\s*-->/` — nothing may sit between `ignore` and `-->`. Every such
+marker parsed as ordinary prose. The annotation was **present**; the suppression was **absent**.
+**Instead:** after adding any suppression, ignore-rule, allowlist entry or lint disable, **re-run the
+tool and confirm the count moved by exactly what you suppressed.** Watch a named value move. A marker
+you added and did not re-measure is a comment addressed to a human, and the machine never read it.
+Put the reason in a **second** comment beside the marker, never inside it. This is the same shape as
+the backup heartbeat reading `ok:false` for six weeks: the indicator existed and nobody checked it
+could still go red.
+
 ## P34 — A concurrent agent's `git add -A` claims your uncommitted work
 **Symptom:** mid-fix, `git status` showed the source files clean while the working tree plainly
 contained the edits. They had been swept into `172c061` — a **documentation** commit from another

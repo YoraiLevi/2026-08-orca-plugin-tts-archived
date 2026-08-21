@@ -13,7 +13,10 @@
 
 ## One-paragraph status
 
-v1 is built, tested, published, and green on CI across macOS, Linux and Windows. 106 tests, lint
+v1 is built, tested, published, and green on CI across macOS, Linux and Windows. **337 tests** (18 files,
+`pnpm test` at `745d36c` — amended 2026-08-21, forced by round-7 finding R7-09, which found this file,
+`HANDOFF.md` and `006` carrying three different wrong counts; the number is recorded WITH the SHA it was
+measured at, per R7-13, because a bare count goes stale the next time anyone adds a test), lint
 and typecheck clean, bundle 17 files / 0.06 MB against ORCA's 50 MB cap. Three gaps in ORCA's
 plugin API are raised upstream, one of them with a merged-ready patch. The project is NOT finished:
 two Definition-of-Done items are unmet and named below.
@@ -23,7 +26,7 @@ two Definition-of-Done items are unmet and named below.
 | Criterion | State |
 |---|---|
 | No account, key, or network by default | ✅ |
-| Hotkey speaks clipboard; second press stops < 50 ms | ⚠️ **kill-to-exit ~3 ms** `[measured-here]` (`afplay`, n=10 ×2, `docs/.research/latency-measurements.md` 1.5). That is the *process dying*, not audio stopping; **drain is unmeasured**. And the contract gate asserts `<= 1000 ms`, not 50 (`packages/providers/src/contract.ts:69`) — a check that could not have failed. |
+| Hotkey speaks clipboard; second press stops < 50 ms | ⚠️ **kill-to-exit ~3 ms** `[measured-here]` (`afplay`, n=10 ×2, `docs/.research/latency-measurements.md` 1.5). That is the *process dying*, not audio stopping; **drain is unmeasured**. **The contract gate is FIXED** — amended 2026-08-21, forced by round-7 finding R7-10. This row read *"the contract gate asserts `<= 1000 ms`, not 50 (`contract.ts:69`) — a check that could not have failed"*, in the present tense, long after `22269aa` fixed it. The gate today is `.toBeLessThanOrEqual(CANCEL_BUDGET_MS)` at `packages/providers/src/contract.ts:80`, against `CANCEL_BUDGET_MS = 50` (`packages/providers/src/contract.ts:12`), **with no multiplier**; `docs/.research/test-audit.md` 2.1 records the fix. What remains true is the first half: kill-to-exit is not audio-stop, and drain is `[claimed]`. |
 | Huddle speaks replies, never thinking, never tool noise | ✅ fixture-asserted |
 | CI green on three OSes | ✅ run 32403931195 |
 | README documents limitations verbatim | ✅ |

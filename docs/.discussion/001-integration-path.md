@@ -1,6 +1,13 @@
 # D001 — How does the TTS system attach to ORCA?
 
-**Status:** open, pending empirical results (E1, E2 in `docs/.research/orca-empirical-findings.md`)
+**Status:** **RESOLVED 2026-08-20** — option A, the plugin, with the conditional discharged against
+measured E1/E2/E6/E7/E8 results. The full reasoning is in **RESOLUTION** below; read that, not this line.
+
+> **Amended 2026-08-21 — forced by round-7 finding R7-14.** This line read *"open, pending empirical
+> results (E1, E2 in `docs/.research/orca-empirical-findings.md`)"* while the document's own RESOLUTION
+> sat ninety-seven lines below it. **A stranger reading top-down saw the project's foundational
+> decision as still open.** The status line is the first thing read and the last thing updated; that
+> is the defect, and the fix is that a status line states the outcome, not the question.
 **Raised:** 2026-08-20, after `docs/.research/orca-plugin-api.md` landed.
 **Blocks:** the constitution, `specs/001-*`, and every class in the design.
 

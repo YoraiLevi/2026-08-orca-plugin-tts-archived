@@ -54,7 +54,7 @@ not refined**, which is the author's own summary after one day of listening.
 |---|---|
 | Repo | https://github.com/YoraiLevi/orca-plugin-tts (public) |
 | CI | green on macOS, Linux, Windows |
-| Tests | 145 |
+| Tests | **337 passing, 18 files** at `745d36c` `[measured-here]`, `pnpm test` |
 | Verified by a human | huddle mode spoke live agent replies, 2026-08-21 |
 | Next | **M11 Voice Lab** — and nothing else until it exists |
 

@@ -1,6 +1,7 @@
 # 016 — Round-7 reconciliation ledger
 
-**Status:** in progress, written incrementally. **Started:** 2026-08-21.
+**Status:** complete for the findings this job could reach; section 3 names what it could not and why.
+**Started and finished:** 2026-08-21, written incrementally as each finding closed.
 **Work order:** `docs/design/014-review-round7.md` — 39 findings, of which 31 clear the ledger bar
 (`014` section 10).
 
@@ -109,15 +110,136 @@ is the work. Any future reconciliation should verify the body, as section 0 says
 | **R7-29** (`013`'s half) | needs-decision | **`013` section 9a is new** — it was referenced twice by a section that did not exist. Six rows, each an `011` `FieldDescriptor` at `since: 3`: the four `011`'s register already reserved, plus **`input.talkWindowIdleMs`** and **`input.paneFallbackWatch`**, which section 3.3a needs and which did not exist when that register was written. Both are added to `011` section 4.2a's register in the same change (nine → eleven), per its rule 3. It also says what is deliberately **not** a setting: the spoken clauses (`011`'s `announce.*`), the earcon ids (`005` section 11.1b) and the two budgets (R7-28). |
 | **R7-30** (gate half) | blocks-impl | `013` section 3.3a was complete; **gate M17a was not** — every close-condition row assumed `\|F\| ≥ 1`, the configuration section 3.3a shows is the unusual one. Two rows added: `F = ∅` with a control pane (closing on the pane's own cwd record, **negative control:** watch disabled must fall through to `input.talkWindowIdleMs` and not `input.talkWindowMs`), and `F = ∅` with nothing readable. |
 | **id drift** | — | `013` section 3.3a named the clock `session.talkWindowMs`; `011`'s register reserves **`input.talkWindowMs`**. Eight references renamed to `011`'s id. Two documents naming one control two ways is the shape R7-06 was. |
+| **R7-23** | worth-noting | **`010` swept into R006's vocabulary.** It declared **MEASURED / DOCUMENTED / ESTIMATED** and attributed them to R006, which uses none of those words, then mixed both vocabularies inside one six-row table. The mapping is one-to-one and is declared in `010`'s header: MEASURED → `[measured-here]` (every one was this project's own probe), DOCUMENTED → `[documented]`, ESTIMATED and `UNMEASURED` → `[claimed]`. **No claim was upgraded by the rename.** `HANDOFF.md`'s clause (3) — *"every latency number in this repo now carries an R006 label"* — **was false when written**, and is corrected to name what was swept (`010`–`013`, `002`–`005`, `009`, research) and what was not (`006`, exempt as the record — R7-08). A repo-wide claim no probe backs is P32's shape. |
+| **R7-12** | worth-noting | `009:36` cited `#highWater` at `HUDDLE_HIGH_WATER_KEY`'s line. Re-derived by symbol: `#highWater` `huddle/index.ts:138`, `HUDDLE_HIGH_WATER_KEY` `:68`, the gate `:380`. `009:33`'s `provider.linuxBackend` re-anchored to the getter at `os-synth/index.ts:256`, and `LINUX_INSTALL_HINT` given its **own** citation instead of stealing the row's anchor. |
+| **R7-09** | worth-noting | Three documents carried three wrong test counts (145 / 106 / 145; actual then 186). `HANDOFF.md:57` and `STATE.md:16` now read **337 passing, 18 files**, **recorded with the SHA they were measured at** (`745d36c`) — per R7-13, because a bare count goes stale the next time anyone adds a test. `006:3`'s count is untouched: `006` is the record. |
+| **R7-10** | worth-noting | `STATE.md`'s DoD row asserted, in the present tense, that *"the contract gate asserts `<= 1000 ms`, not 50"* — fixed in `22269aa` long before. Corrected to the gate as it is: `.toBeLessThanOrEqual(CANCEL_BUDGET_MS)` at `contract.ts:80` against `CANCEL_BUDGET_MS = 50` at `:12`, no multiplier. **The half that is still true is kept**: kill-to-exit is not audio-stop, and drain is `[claimed]`. |
+| **R7-14** | worth-noting | `001:3` read *"Status: open"* ninety-seven lines above its own RESOLUTION. The status line now states the outcome, with a dated note saying why the defect happens: **a status line is the first thing read and the last thing updated.** |
+| **R7-07** | blocks-impl | See section 4. **190 → 80 stale**, and every one of the 80 is in a document this job may not edit. |
+| **new: P35** | — | `PITFALLS.md` gains one entry (34 → 35 entries, `grep -c '^## P[0-9]'` 35 → 36 including the header rule): **a suppression marker the tool does not parse is a suppression that never happened.** It was earned here — see section 4. |
 
 ---
 
 ## 3. Not resolved, and why
 
-*(appended as each is decided)*
+Listed so that round 8 does not have to rediscover which were skipped **on purpose**, and who is
+blocked on what. `009` section 3 is the pattern.
+
+| # | Severity | Why not resolved here | Who must act |
+|---|---|---|---|
+| **R7-04** | blocks-impl · **violates a NON-NEGOTIABLE principle** | Huddle fails silently and permanently for any user without `~/.claude/projects`. **The fix is in `packages/plugin`, which another agent owns and was actively committing into during this pass** (`7d4b8a8` landed mid-job). A documentation pass cannot close a silent-failure defect; naming it in a design doc while the code stays silent is exactly the failure R7-04 reports. **Nothing here changes it, and it is still live.** | an agent with `packages/` — the principle (I / R009) already decides the behaviour |
+| **R7-05** | needs-decision | No `deactivate`; `dispose()` is a dead wire; post-M9 the orphan holds the audio device; the inbox and an 87.7 MiB cache survive uninstall unnamed. `010` names it in place (*"which is itself unfinished business, see finding R7-05"*), which is the honest doc-side state. The `deactivate` half is `packages/`; **the cache half is the author's** — it is a decision about what to leave on their machine. | **author** for the cache; an agent with `packages/` for `deactivate` |
+| **R7-08** | needs-decision | `006-fma.md` carries two claims citing a header that now says the opposite, and ID12's severity is wrong by 6.2×. The resolution `014` proposes — give `006` the dated amendment note `004` and `005` got — **reverses `009`'s stated exemption of the record**, and this job is instructed not to edit `006`. So it is correctly *not* an agent's call. **It is also the single largest cost in the repo right now**: 63 of the 80 remaining stale citations are in `006`, and `check:citations` cannot come back under its ratchet of 34 while that file is exempt. | **author** — it reverses a rule they set |
+| **R7-07** | blocks-impl | **Partly resolved** (section 4). The residue is structural, not neglect: 80 stale, 80 of them in `006`/`014`/`008`. It cannot go below 34 without R7-08. | gated on **R7-08** |
+| **R7-13** | worth-noting | Resolved *as a rule* by the killed pass (`PITFALLS`: record the SHA and the dirty state beside every measured number) and **re-earned as a fact during this one** — see section 4's decomposition. The rule now exists; the condition it describes has not gone away. | nobody; it is a standing hazard |
+| round 7's **eleven parking-lot entries** | — | Out of scope by instruction. They are recorded in `014` section 8 as rejected-against-the-bar, and re-proposing them is what that section exists to prevent. | nobody |
+| re-reading **`002`–`005`** | — | Out of scope by instruction, and `014` section 10 argues why: that set produced one finding across five rounds and has converged. **Their citations were still re-anchored here** — a mechanical repair against a moved tree is not a re-read, and leaving them stale would have been leaving a known-red instrument red. | nobody |
+
+**One thing this job could not do and did not fake.** `014`'s recommendation for rounds 8–10 is to
+read `PLAN.md`, `TASKS.md`, the constitution's budget table and `006`. The first three were reached
+by the killed pass and verified here (section 5). **`006` was not, and cannot be, while it is
+exempt.**
 
 ---
 
-## 4. Citations
+## 4. Citations — R7-07
 
-*(before/after, with the false positives named)*
+### 4.1 The numbers
+
+| Reading | Verified | **Stale** | Unanchored | Where taken |
+|---|---|---|---|---|
+| Clean `HEAD` `9c36dcc`, round 7's own measurement | 500 | **38** | 894 | `014` R7-07 |
+| Before this pass (after the killed pass landed) | 363 | **190** | 1,055 | `pnpm check:citations`, this session |
+| Peak, after this pass's own new material | 347 | **206** | 1,062 | mid-pass |
+| **After** | **475** | **80** | 1,059 | `pnpm check:citations`, this session |
+
+**All 80 are in documents this job may not edit**: `006` (63), `014` (13), `008` (4). **Zero remain in
+any document it may.** The CI ratchet is `--max-stale=34` (`ci.yml:57`), so **CI is still red on
+`main`** — and it cannot go green without R7-08, because 63 of the 80 are in `006`. That is stated
+rather than worked around: the ratchet must never go up (`ci.yml:51-54`), and raising it is how a
+checker becomes decoration.
+
+### 4.2 Why 33 became 190 — and it is mostly not what the commit message said
+
+The killed pass's own commit message blames itself: *"the new material added citations faster than
+they were verified."* **That is a third of the answer, and the smaller third.** Decomposed by measuring
+stale counts **per document** and separating documents the killed pass touched from documents it did
+not:
+
+| Cause | Evidence | Share |
+|---|---|---|
+| **Code moved under every document at once.** J03's four `packages/` commits (`ee8c1cf`, `ff7924b`, `e80f0d3`, `2772a01`) inserted lines throughout `huddle/index.ts`, `speech-service.ts`, `main.ts` and `os-synth/index.ts`. Every line-pinned citation in the repo drifted together | at the before-reading, **143 of the 190 were in documents the killed pass never opened** — `006`, `005`, `004`, `003`, `008`, `002`, `009` and the research files | **~75 %** |
+| New material in `010`–`013` citing a tree that had already moved | 47 stale across `010` (18), `012` (30 — up from a verified 0), `013` (1) | ~25 % |
+
+**This is R7-13 arriving as a fact rather than a warning**, and it happened again *during* this pass:
+`7d4b8a8` landed in `packages/` between two of this job's own commits, and the same anchor moved from
+`main.ts:152` to `:162` between two readings with no document edited in between. **A stale count taken
+while another agent is writing to `packages/` is not a property of the documents.** The durable answer
+is not a number — it is the **symbol**: `004` Panel E's *"cite a symbol plus the line"*, and a
+re-derivation that is one command:
+
+```
+CITATION_LOCKED='docs/design/006-fma.md,docs/design/007-user-stories.md,docs/design/008-crossreview-round3.md,docs/design/014-review-round7.md' \
+  node scripts/check-citations.mjs --fix
+```
+
+`CITATION_LOCKED` keeps `--fix` off the record. **Run it when the tree is quiet, and re-read the diff:**
+`--fix` handles only unique anchors, and its refusal on multi-occurrence anchors is a feature — see 4.4.
+
+### 4.3 The false positives, and how each was distinguished from a real one
+
+**A real one moves the reader to the wrong place. A false one moves nothing.** The test applied to
+every flag was: *open the cited file at the cited line and read it.* Four shapes came out.
+
+| Shape | Example | Treatment |
+|---|---|---|
+| **Genuine drift** — the symbol is real, the line moved | `os-synth/index.ts:240` for `SIGKILL`, now `:298` | re-anchor on the **declaration**, not the first use |
+| **Path inheritance** — a bare `:NN` inherits the *preceding* path, so it is checked against a file the prose never names | `003` section 8.7's `:1283-1296` checked against a research file; `speechd`'s `parse.c:424-680` checked against `os-synth` | `citation-check: ignore`, with the reason in a second comment |
+| **Anchor mis-pairing** — the line carries several symbols and one anchor per citation, so the tool pairs them wrongly and calls a correct row stale | `010`'s six `contract.ts` pointers all read as citations of `CANCEL_BUDGET_MS`; `009`'s two rows | **restructure the prose** — one claim per line, each carrying its own symbol — and only where that is impossible, `ignore` with the hand-verified mapping written into the marker |
+| **Deliberate quotation** — the document quotes a stale citation *as the finding* | `010`'s R7-21 block quoting `005`/`006`'s wrong `:366`; `014`'s six declared self-citations | `ignore`. Re-anchoring it would delete the defect it reports |
+
+**Two named-in-advance false positives were protected**, and the protection failed the first time —
+see 4.4: `plugin-host-api.ts:261-265` and `orca-runtime.ts:39794-39810`, which `009` E-01 records as
+correct at the pinned ORCA commit with the instruction *"Do not 'fix' them."* Both now carry a working
+marker **on the citation itself**, so the decision no longer lives only in another document's prose. A
+false positive that must be re-litigated every round is a broken indicator.
+
+### 4.4 What went wrong in this pass, recorded because it is the useful part
+
+**The first set of `ignore` markers did nothing, and one of them let real damage through.** They were
+written with the reason inside the comment; the tool matches
+`/<!--\s*citation-check:\s*ignore\s*-->/` and nothing may sit between `ignore` and `-->`. So the
+markers parsed as prose, `--fix` ran, and it rewrote `plugin-host-api.ts:261-265` → `:144-148` — the
+one citation the repo had explicitly written down as *do not touch*. Reverted; markers repaired;
+**`PITFALLS` P35** records it.
+
+The lesson is not about this tool. **A suppression you added and did not re-measure is a comment
+addressed to a human, and the machine never read it.** The marker was present; the effect was absent.
+
+`--fix`'s refusal to guess between multiple occurrences also earned its keep. Four citations were
+re-anchored **by hand against the tool's own suggestion**, because the tool's anchor and the prose's
+subject were different symbols: `prepare()` is `os-synth/index.ts:273`, not the `listVoices()` call
+inside it at `:277`; `#command()` is `:428`, not the `$s.Speak` line; and `009`'s `#highWater` is
+`:138`, not `HUDDLE_HIGH_WATER_KEY`'s `:68` — which is finding R7-12 itself. **A citation that passes
+while pointing somewhere else is worse than one that fails**, and one nearly shipped: a bare `:NN` in
+`012` was inheriting `speech-service.ts` while the prose discussed `huddle/index.ts`, and a naive
+re-anchor would have turned it green against the wrong file. It is now written out in full.
+
+---
+
+## 5. `PLAN.md` and `TASKS.md` — verified, not assumed
+
+The killed pass reached both and left no record, so each debunked claim was re-checked by grep.
+
+| Must no longer say | Probe | Result |
+|---|---|---|
+| the inter-chunk gap is process spawn | `grep -n spawn docs/PLAN.md docs/TASKS.md` | **clean.** Every surviving mention is inside a dated correction: `TASKS.md:219` *"not the process spawn — spawn is 2.3 ms of it, the temp file 0.33 ms, ~893 ms is the device"*; `PLAN.md:54-55` *"a fix that stops spawning a player per chunk recovers 0.25 % and alters nothing a listener hears"* |
+| M9 justified by neural-engine latency | `grep -n neural` | **clean.** `TASKS.md:217` quotes the old sentence *inside* the amendment that withdraws it; `PLAN.md:40` scores the two rungs separately, which is R7-03's resolution |
+| the unsupported `927 ms` first-audio figure | `grep -n 927` | **zero hits in both files** |
+| the `140 ms` earcon | `grep -n '140 ms'` | **zero hits in both files** |
+| the *"414 ms spawn leaves 86 ms"* arithmetic | `grep -n '86 ms'` | **present, and correctly so** — `PLAN.md:80-81` quotes it as the withdrawn claim and says *"There is no 86 ms"*, which is `010`'s amendment discipline: leave the falsified reasoning visible (R016) |
+
+**Both files are fixed.** The distinction that matters and that a bare grep would get wrong: a
+debunked number appearing inside a note that withdraws it is the *record of the correction*, not the
+error surviving. Deleting those quotes would hide the work, which is the rule `009` opens with.
+
