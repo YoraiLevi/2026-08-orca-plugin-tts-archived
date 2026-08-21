@@ -6,6 +6,41 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P32 — The ~950 ms inter-sentence gap is the audio DEVICE, not the process spawn
+**Symptom:** every document in this repo explained macOS's inter-sentence silence as *"one process
+per chunk"*, and M9 was on the way to being scoped as *"stop spawning a player per chunk"*. That fix
+would have shipped and changed nothing a listener could hear.
+**Cause:** the framing entered at `packages/plugin/src/sinks/subprocess-sink.ts:8-10` as bare prose
+and was copied into HANDOFF, STATE, the constitution, `architecture.md` and designs 004, 005, 006,
+007 and 010. Nobody decomposed it. Measured (`docs/.research/latency-measurements.md` section 1.1,
+2026-08-21) against the shipped `SubprocessSink` with real `say` output, gap p50 950 / 937 / 897 ms
+over three runs of n=18 `[measured-here]`:
+
+| component | p50 | share |
+|---|---|---|
+| `afplay` fork/exec with the device never opened (spawned on a missing file), n=12 | **2.3 ms** | 0.25 % |
+| `mkdtemp` + `writeFile(56 kB)` + `rm` — the sink's whole temp-file round trip, n=20 | **0.33 ms** | 0.03 % |
+| CoreAudio device open, pre-roll, post-roll, teardown | **~893 ms** `[derived]` | **99.7 %** |
+
+A regression of `afplay` lifetime against audio duration over 200/500/1,000/2,000 ms tones gives
+slope ~1.0 and intercept **905–915 ms** — a fixed per-invocation cost, not a duration-proportional
+one (`latency-measurements.md` 2.5).
+**Instead:** scope M9 as *hold the audio **device** open across chunks*. Pooling or pre-warming
+player **processes** saves 2 ms of 950. The question to ask any candidate player, on any platform,
+is **"does it hold the device open between buffers"** — never "how fast does it start". The same
+arithmetic kills the latency argument for `--stdout` in either direction (P29): it removes 0.03 %
+of the cost.
+**Why the wrong answer is sticky:** "a process spawn is expensive" is intuitive, `say ""` really
+does cost 414 ms (P10), and the two numbers sit one paragraph apart in most of these documents. The
+intuition is right about the *synth* spawn and wrong about the *player* spawn, and nothing in the
+prose distinguished them.
+**Corroboration:** 2 of 10 / 3 of 10 earcon samples came in at ~370 ms instead of ~870 ms, and only
+when a previous `afplay` had exited moments earlier — a **warm device** is where the ~500 ms of
+headroom lives (`latency-measurements.md` 1.4).
+**Verify by effect:** `pnpm bench:latency` (silent) prints `player.no-device` — `afplay` spawned on
+a missing file, which exits before reaching CoreAudio. If that number is ~2 ms and the gap is
+~950 ms, the spawn is not the gap. Both readings, before and after any M9 change.
+
 ## P31 — A subagent swarm in the watched worktree is the P22 scenario at a scale nothing was tested against
 **Symptom:** the author, sitting at the machine, hears agent replies they never asked for — including
 one agent talking over another — while huddle is following "their" session. Reported live:
