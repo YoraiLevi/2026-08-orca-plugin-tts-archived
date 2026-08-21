@@ -48,13 +48,22 @@ jobs:
       # here; the script says so out loud rather than counting them as passing. To check those too,
       # run it locally with ORCA_SRC set (see docs/.research/citation-audit.md).
       #
-      # --max-stale is a RATCHET, not an amnesty. 34 citations are still stale, all of them in
-      # documents that were being written while the code moved underneath them; each one is listed
-      # in docs/.research/citation-audit.md with why it is still open. Lower this number as they are
-      # re-derived. It must never go up: raising it is how a checker becomes decoration.
+      # THE RATCHET IS NO LONGER A NUMBER ON THIS LINE. It was `--max-stale=34`, and that flag is
+      # now refused by name: a bare threshold is calibrated in one CONFIGURATION and enforced in
+      # another, and the two do not agree -- seven repairs once moved the local count by seven and
+      # the CI count by zero, which is a gate reporting on a tree nobody was standing in. The
+      # ratchet lives in docs/.research/citation-ratchet.json, keyed by configuration, and
+      # `--ratchet` reads the entry for the configuration it is ACTUALLY running in. `34` is
+      # recorded there as superseded, so the old flag fails with an explanation rather than a
+      # number. It is still a ratchet and not an amnesty: it must never go up.
+      #
+      # The gain over a flag is that every run now prints the configuration it measured under --
+      # ORCA SHA, counts by bucket, and whether the working tree was dirty. A count without its
+      # configuration is noise: this repo has read 139 stale where it should have read 85, purely
+      # because a peer had one source file open at the time.
       - name: Citations must still point at what the documents say they do
         if: runner.os == 'Linux'
-        run: pnpm check:citations --max-stale=34
+        run: pnpm check:citations --ratchet
 
       # The gate that checks the GATES. `pnpm test` answers "did the suite pass?"; this answers the
       # question the constitution actually asks -- what result would have proved me wrong? It breaks
@@ -91,14 +100,36 @@ jobs:
       - name: Smoke test — activate() registers every command the manifest declares
         run: node scripts/smoke-activate.mjs
 
-      # The gate that checks the next gate. The probe below concludes from a CONTROL string
-      # rendering differently from the string under test; this substitutes a stub engine that
-      # renders every string to identical bytes and requires the probe to refuse to give a
-      # verdict (exit 3). Needs no synthesizer, so it runs on all three legs — a control nobody
-      # has watched fail is a control nobody can trust.
-      - name: The million-ceiling probe's control must be able to fail
-        run: node scripts/ci/number-ceiling-probe.mjs --prove-control || test $? -eq 3
+      # The gate that checks the next gate. The probe below reaches its verdict BY COMPARISON, so
+      # it has two ways of being worthless and both are demonstrated here against stub engines
+      # rather than asserted in a comment:
+      #   exit 3  the control string renders identically to everything else, so the harness can
+      #           tell no two utterances apart and must refuse to give a verdict at all;
+      #   exit 4  the harness works but CANNOT TELL — either the two reference renders do not
+      #           separate on this engine (`refs`), or the string under test lands in the dead
+      #           band between them (`tie`). Inconclusive is a real outcome, not a rounding of
+      #           "acceptable": a probe that can only return pass-or-absent cannot go red for the
+      #           thing it was built to detect, which is PITFALLS P32's shape.
+      # None of these need a synthesizer, so they run on all three legs.
+      #
+      # `expect` demands the EXACT code, and that is not pedantry. Written the obvious way --
+      # `node probe --prove-control || test $? -eq 3` -- the step stays GREEN when the stub exits
+      # 0, because `||` never runs its right-hand side on success. A stub that started PASSING is
+      # exactly the regression this guard exists to catch, and the obvious spelling would have
+      # blessed it. Caught by running the guard against a deliberately-green stub before trusting
+      # it, which is the whole method: what result would have proved me wrong?
+      - name: The million-ceiling probe must be able to refuse a verdict
         shell: bash
+        run: |
+          expect() {
+            want=$1; shift
+            "$@"; got=$?
+            if [ "$got" -ne "$want" ]; then echo "expected exit $want from: $* -- got $got"; exit 1; fi
+            echo "ok: exit $want from $*"
+          }
+          expect 3 node scripts/ci/number-ceiling-probe.mjs --prove-control
+          expect 4 node scripts/ci/number-ceiling-probe.mjs --prove-inconclusive=refs
+          expect 4 node scripts/ci/number-ceiling-probe.mjs --prove-inconclusive=tie
 
       # packages/core/src/normalizer/index.ts expands numbers to words only BELOW 1,000,000; at
       # or above the ceiling the numeral is handed to the engine untouched. That was measured on
