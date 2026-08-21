@@ -36,7 +36,33 @@ export interface ActivateOptions {
 const EXPECTED_COMMANDS = 9
 
 export default function activate(orca: OrcaApi, options: ActivateOptions = {}): void {
-  const host = makeHost(orca)
+  /**
+   * Forward declaration: `makeHost` needs the hooks, and the hooks need `announce`, which needs
+   * `speech`, which is created after the host exists. Declared here rather than restructured so
+   * the ordering is visible instead of implied.
+   */
+  let announce: (message: string, urgency?: 'now' | 'next') => void = () => {}
+
+  const host = makeHost(orca, {
+    // 006 section 19 rank 2: `{ delivered }` was computed by ORCA and discarded here, so a muted
+    // tray, focus assist or a revoked permission silenced every announcement in this plugin while
+    // it reported success. Anything that was NOT already spoken now falls back to speech.
+    onUndelivered: (m) => { announce(m) },
+    // Site 19/20: `undefined` was indistinguishable from "the key is not set". Storage failing is
+    // why huddle comes back off after a reap, and why a re-forked worker replays a backlog.
+    onStorageFailure: (f) => {
+      host.log(`read-aloud: storage.${f.op}(${f.key}) failed: ${f.reason}`)
+      if (f.op === 'get') {
+        announce('Huddle could not read its saved settings, so it started from defaults.')
+      }
+    },
+    // Site 22, and section 19 rank 4 — "whether a control fired". A dead chord and a handler that
+    // threw are the same absence of sound. 'now', because the listener pressed a key THIS second
+    // and is waiting to find out whether anything happened.
+    onCommandFailed: (id, reason) => {
+      announce(`That control did not work: ${id.replace('read-aloud.', '')}. ${reason}`, 'now')
+    }
+  })
   host.log('read-aloud: activating')
 
   const registry = new ProviderRegistry()
@@ -80,9 +106,11 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
    * was wired to a channel they do not have (006 section 16: 55 silent-failure sites, zero of them
    * reaching audio).
    */
-  const announce = (message: string, urgency: 'now' | 'next' = 'next'): void => {
+  announce = (message: string, urgency: 'now' | 'next' = 'next'): void => {
     host.log(`read-aloud: ${message}`)
-    host.notify('Read Aloud', message)
+    // `alreadySpoken`: this message is going into the audio stream on the next line, so an
+    // undelivered notification must NOT speak it a second time.
+    host.notify('Read Aloud', message, { alreadySpoken: true })
     if (speech !== null) speech.announce(message, urgency)
     else deferredAnnouncements.push(message)
   }
@@ -288,9 +316,26 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     })
   })
 
+  /**
+   * Site 23: a payload that failed narrowing was dropped with no count and no warning. If ORCA
+   * changes the shape of `agent.status.changed`, huddle simply stops working — and the symptom is
+   * silence, which is indistinguishable from "the agent has not answered yet".
+   *
+   * Announced ONCE, and only after a few have gone by, because one malformed event during startup
+   * is noise and a steady stream of them is the schema having moved under us.
+   */
+  let malformedEvents = 0
+  let announcedMalformed = false
   host.onEvent('agent.status.changed', (payload) => {
     const status = asAgentStatus(payload)
-    if (status === null) return
+    if (status === null) {
+      malformedEvents++
+      if (malformedEvents >= 3 && !announcedMalformed) {
+        announcedMalformed = true
+        announce('Huddle is not recognising this version of Orca\u2019s agent events, so replies may not be spoken.')
+      }
+      return
+    }
     huddle.onAgentStatus(status, worktreePathFrom(status.worktreeId))
   })
 
