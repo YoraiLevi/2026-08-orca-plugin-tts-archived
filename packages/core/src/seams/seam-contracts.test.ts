@@ -133,14 +133,19 @@ function argvIsSafeForBareExec (text: string): boolean {
  */
 describe('SC-1 — normalize() emits either nothing, or something with a speakable glyph in it', () => {
   /**
-   * VIOLATED TODAY (017 R8-07). `normalize("...!!!???")` returns ".!!!???" -- length 7, so the
-   * `s.length <= 1` guard passes it -- and `SpeechService` checks `spoken.length === 0`, so the
-   * `'empty'` outcome never fires, so the `unspeakable` loss sentence is never spoken. The listener
-   * is told nothing and hears nothing.
+   * CLOSED by J26. It used to be that `normalize("...!!!???")` returned ".!!!???" -- length 7, so
+   * the `s.length <= 1` guard passed it -- and `SpeechService` checks `spoken.length === 0`, so
+   * the `'empty'` outcome never fired, so the `unspeakable` loss sentence was never spoken. The
+   * listener was told nothing and heard nothing.
    *
-   * Remove `.fails` when the length test becomes a speakability test.
+   * The length test is now a speakability test. `providerWouldSpeak` above is still an INDEPENDENT
+   * restatement and is deliberately not imported from `packages/core/src/speakable.ts`, which is
+   * where the shipping predicate now lives -- importing it would compare the guard against itself
+   * (P36) and this test could never fail again.
+   *
+   * [CLOSED: 017 R8-07 -- seen red before the marker came off]
    */
-  it.fails('holds for every corpus input [OPEN: R8-07]', () => {
+  it('holds for every corpus input [was OPEN: R8-07]', () => {
     for (const [name, src] of corpus()) {
       const spoken = normalize(src, {})
       if (spoken.length === 0) continue
@@ -162,14 +167,24 @@ describe('SC-1 — normalize() emits either nothing, or something with a speakab
  */
 describe('SC-2 — every chunk the Chunker mints carries a speakable glyph', () => {
   /**
-   * VIOLATED TODAY (017 R8-08). `#isSentenceEnd` returns true unconditionally for '!' and '?'
-   * (`chunker/index.ts:222` -- "'!' and '?' are never abbreviations"), which is true as written and
-   * wrong as a sentence rule: '.' gets six context tests and '!' gets none. So `#!/usr/bin/env node`
-   * yields a first chunk of "#!" and `![alt](url)` yields "!". Both cost a full synthesis round
-   * trip and return near-silence, and both land on chunk 0 -- the one `isolateFirstSentence` exists
-   * to make fast.
+   * CLOSED by J26. `#isSentenceEnd` returned true unconditionally for '!' and '?'
+   * ("'!' and '?' are never abbreviations"), which is true as written and wrong as a sentence
+   * rule: '.' gets six context tests and '!' got none. So `#!/usr/bin/env node` yielded a first
+   * chunk of "#!" and `![alt](url)` yielded "!". Both cost a full synthesis round trip and return
+   * near-silence, and both land on chunk 0 -- the one `isolateFirstSentence` exists to make fast.
+   *
+   * The fix is a property of the CHUNK, not of the punctuation mark: a cut that would mint a
+   * chunk with no speakable glyph is not taken, so the fragment travels with the text after it.
+   *
+   * KNOWN RESIDUE, named rather than hidden: the `scalar` fallback, which fires only when a single
+   * token overruns `maxUnits` with no boundary anywhere, is exempt -- it guarantees forward
+   * progress and refusing it would hang the chunker. A 200-character wall of '!' still reaches the
+   * provider. No corpus input produces one; `OsSynthEmptyOutputError` (006 site 43) is where that
+   * case is named.
+   *
+   * [CLOSED: 017 R8-08 -- seen red before the marker came off]
    */
-  it.fails('holds for every corpus input [OPEN: R8-08]', () => {
+  it('holds for every corpus input [was OPEN: R8-08]', () => {
     for (const [name, src] of corpus()) {
       const spoken = normalize(src, {})
       if (spoken.length === 0) continue
@@ -309,21 +324,49 @@ describe('SC-6 — a number written in this repo survives to the listener as the
   })
 
   /**
-   * VIOLATED TODAY (017 R8-20). `Number("007")` is 7, so the leading zeros are dropped with no
-   * announcement: the listener hears a DIFFERENT number than was written, and has no way to know.
+   * CLOSED by J26. `Number("007")` is 7, so the leading zeros used to be dropped with no
+   * announcement: the listener heard a DIFFERENT number than was written, and had no way to know.
    * This is the property `token-conservation.test.ts` exists to defend, in a form it does not test.
+   *
+   * A leading zero now means "identifier, not quantity" and the digits are spoken one by one.
+   *
+   * [CLOSED: 017 R8-20 -- seen red before the marker came off]
    */
-  it.fails('preserves leading zeros [OPEN: R8-20]', () => {
+  it('preserves leading zeros [was OPEN: R8-20]', () => {
     expect(normalize('Call 007 now.', {})).toContain('zero zero seven')
+    // The clock is NOT an identifier and must not have been swept up: 09:30 is a time.
+    expect(normalize('At 09:30 sharp.', {}), '09:30 is a clock, not a padded code')
+      .toContain('nine thirty')
+    // CONTROL: a number with no leading zero still becomes one word, not seven digits.
+    expect(normalize('It saw 1234 rows.', {})).toContain('one thousand two hundred thirty four')
   })
 
   /**
-   * VIOLATED TODAY (017 R8-21). The minus sign reaches the engine as a bare hyphen, which is
-   * rendered as nothing or as a pause -- so a regression of -42 ms and an improvement of 42 ms
-   * become the same sentence, in a project whose entire subject is measured deltas.
+   * CLOSED by J26. The minus sign used to reach the engine as a bare hyphen, which is rendered as
+   * nothing or as a pause -- so a regression of -42 ms and an improvement of 42 ms became the same
+   * sentence, in a project whose entire subject is measured deltas.
+   *
+   * [CLOSED: 017 R8-21 -- seen red before the marker came off]
    */
-  it.fails('speaks the sign of a negative measurement [OPEN: R8-21]', () => {
+  it('speaks the sign of a negative measurement [was OPEN: R8-21]', () => {
     expect(normalize('The delta was -42 ms.', {})).toContain('minus forty two')
+  })
+
+  /**
+   * The other half of the sign fix, and the half that could quietly make things WORSE: a hyphen
+   * that is not a minus must not be spoken as one. Restated as the strings this repo really
+   * writes, because a rule that says "minus" in the middle of `sherpa-onnx-node` or `UTF-8` would
+   * be a new defect wearing the fix's uniform.
+   */
+  it('does not hear a minus in a hyphen that is not one', () => {
+    for (const [src, forbidden] of [
+      ['We support UTF-8 here.', 'minus'],
+      ['It ran 10-20 times.', 'minus'],
+      ['The p50-p99 spread.', 'minus'],
+      ['Use sherpa-onnx-node 1.9.', 'minus']
+    ] as Array<[string, string]>) {
+      expect(normalize(src, {}), src).not.toContain(forbidden)
+    }
   })
 })
 

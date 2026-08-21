@@ -38,6 +38,8 @@ import { dirname, join } from 'node:path'
 
 import { STAGES, computeStages, stageFns } from './voice-lab.mjs'
 import { CONTROLS } from '../voice-lab/lib/controls.mjs'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FIXTURES = join(HERE, '../fixtures')
@@ -151,7 +153,8 @@ const ALTERNATE = {
   'NormalizeOptions.pathStyle': 'verbatim',
   'NormalizeOptions.extensionStyle': 'omit',
   'NormalizeOptions.orderedLists': 'word',
-  'NormalizeOptions.expandNumbers': false
+  'NormalizeOptions.expandNumbers': false,
+  'NormalizeOptions.expandUnits': false
 }
 
 /** A probe that exercises every wired option at once: a fence, a path, a list and a number. */
@@ -168,7 +171,7 @@ describe('SC-8 — a control changes the stage it says it changes, and not a dif
 
   it('covers every NormalizeOptions field that any control claims', () => {
     // Guards against the suite passing because the wired set silently emptied.
-    expect(wired.length).toBeGreaterThanOrEqual(5)
+    expect(wired.length).toBeGreaterThanOrEqual(6)
     for (const c of wired) expect(ALTERNATE, c.id).toHaveProperty(c.wire)
   })
 
@@ -177,15 +180,25 @@ describe('SC-8 — a control changes the stage it says it changes, and not a dif
    * BECAUSE it fails, and turns red the moment the defect is fixed -- at which point the entry
    * comes off this list. See the `it.fails` rationale in seam-contracts.test.ts.
    *
-   * `num.expandIntegers` -- 006 NM12, rediscovered here as a CONTROL-MAP defect rather than an
-   * option-shape one. `normalize()` gates both `expandUnits` and `expandNumbers` behind the single
-   * `expandNumbers` flag (`if (doNumbers) { s = expandUnits(s); s = expandNumbers(s) }`), so a
-   * listener who turns off "whether numbers become words" -- a stage-14 control by its own
-   * declaration -- silently also turns off stage 13 and re-breaks "52 ms", which is the exact
-   * defect they asked to have fixed. The Lab would show them a stage-13 row that changed for a
-   * reason no control on screen explains.
+   * EMPTY since J26. What used to be here:
+   *
+   *   `num.expandIntegers` -- 006 NM12, rediscovered here as a CONTROL-MAP defect rather than an
+   *   option-shape one. `normalize()` gated both `expandUnits` and `expandNumbers` behind the
+   *   single `expandNumbers` flag (`if (doNumbers) { s = expandUnits(s); s = expandNumbers(s) }`),
+   *   so a listener who turned off "whether numbers become words" -- a stage-14 control by its own
+   *   declaration -- silently also turned off stage 13 and re-broke "52 ms", which is the exact
+   *   defect they had asked to have fixed. The Lab would show them a stage-13 row that changed for
+   *   a reason no control on screen explained.
+   *
+   * The fix was to SPLIT the flag, not to widen the claim: `NormalizeOptions.expandUnits` now
+   * exists and `normalize.expandUnits` owns it, so each control governs exactly the stage it
+   * names. Re-pointing `num.expandIntegers` at stages [13, 14] would also have turned this row
+   * green and would have been the wrong answer -- it makes the control map agree with a defect
+   * instead of describing a fixed one, and the listener would still have no way to keep unit words
+   * while leaving numerals alone. (P37's family: the temptation is to renumber; the fix is to make
+   * the thing the number names actually exist.)
    */
-  const OPEN = new Set(['num.expandIntegers'])
+  const OPEN = new Set([])
 
   for (const c of wired) {
     /**
@@ -204,4 +217,62 @@ describe('SC-8 — a control changes the stage it says it changes, and not a dif
         .toContain(firstMoved + 1)
     })
   }
+})
+
+/* ================================================================== SC-13
+ * seam: the normalizer SOURCE -> `stageFns()`'s data-URL compile step
+ */
+
+/**
+ * SC-13 — the normalizer's "DEPENDENCY-FREE" property is load-bearing, and nothing enforced it.
+ *
+ * `packages/core/src/normalizer/index.ts` opens with:
+ *
+ *   "Pure, synchronous, and DEPENDENCY-FREE -- this module imports nothing, not even `node:`
+ *    builtins, so it runs identically in a plugin worker, a panel, a service, and a test."
+ *
+ * That is not documentation. `stageFns()` (`scripts/voice-lab.mjs`) compiles this file's SOURCE
+ * into a `data:text/javascript;base64,...` module so it can export the private stage functions --
+ * and **a relative specifier cannot be resolved from a data: URL**. Proved by effect, with a
+ * control that passes:
+ *
+ *   import(data: + b64("import { x } from '../speakable.js'\nexport const y = 1"))
+ *     -> Failed to resolve module specifier "../speakable.js"
+ *   import(data: + b64("export const y = 1"))
+ *     -> CONTROL OK, y = 1
+ *
+ * So one relative import anywhere in that file makes `assertLoadedModuleIsOnDiskSource()` throw at
+ * boot and the Voice Lab REFUSE TO START on every fixture -- P37's failure mode arriving through a
+ * different door, and it happened for real during round 10 (019 R10-05).
+ *
+ * A hard technical contract between two components, carried in a prose comment, with no
+ * instrument. `006` section 22's shape exactly.
+ *
+ * **Deliberately NOT marked `it.fails`, unlike section 22's other open rows.** Those describe
+ * defects a listener might one day hit; this one means the tuning instrument does not launch. A row
+ * that should block is left able to block.
+ */
+describe('SC-13 — the normalizer source still compiles the way the Voice Lab compiles it', () => {
+  const NORMALIZER = join(HERE, '../packages/core/src/normalizer/index.ts')
+
+  it('carries no relative or bare import, because a data: URL cannot resolve one', () => {
+    const src = readFileSync(NORMALIZER, 'utf8')
+    const imports = [...src.matchAll(/^\s*import\s[^\n]*?from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1])
+    expect(imports, `normalize() imports ${JSON.stringify(imports)} — see 019 R10-05. ` +
+      'Either inline the helper, or teach stageFns() to rewrite specifiers to absolute file:// URLs ' +
+      'AND rewrite the "DEPENDENCY-FREE" sentence at the top of the file.').toEqual([])
+  })
+
+  it('VERIFY BY EFFECT: the compiled module actually loads, with a control that proves the probe works', async () => {
+    const js = stripTypeScriptTypes(readFileSync(NORMALIZER, 'utf8'), { mode: 'strip' })
+    const load = (code) => import('data:text/javascript;base64,' + Buffer.from(code, 'utf8').toString('base64'))
+
+    // The control FIRST: if a relative import somehow resolved here, this probe would be measuring
+    // nothing and its verdict on the real file would be worthless.
+    await expect(load("import { x } from '../nowhere.js'\nexport const y = 1"))
+      .rejects.toThrow(/resolve module specifier/)
+
+    await expect(load(js + '\nexport const __probe = 1'), 'the Voice Lab cannot boot: ' +
+      'the normalizer source no longer compiles as a standalone module (019 R10-05)').resolves.toBeTruthy()
+  })
 })

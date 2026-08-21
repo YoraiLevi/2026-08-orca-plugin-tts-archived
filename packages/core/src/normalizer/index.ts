@@ -43,6 +43,20 @@ export interface NormalizeOptions {
   /** Expand integers and clock times to words. Default true. */
   expandNumbers?: boolean
   /**
+   * Expand unit symbols to words — "52 ms" -> "52 milliseconds". Default true.
+   *
+   * SEPARATE FROM `expandNumbers`, and that separation is the whole point of this field
+   * (006 NM12 / section 22 SC-8). Until J26 these two stages shared one flag, so the Voice Lab
+   * control `num.expandIntegers` — which declares stage 14, `expandNumbers` — also switched off
+   * stage 13, `expandUnits`. A listener turning off "whether numbers become words" silently
+   * re-broke "52 ms", which is the exact defect they had asked to have fixed, and the Lab showed
+   * them a stage-13 row that moved for a reason no control on screen explained.
+   *
+   * A control that claims a stage it does not govern is a lie told to the person tuning by ear,
+   * and tuning by ear is what the Voice Lab is for.
+   */
+  expandUnits?: boolean
+  /**
    * Ordered-list ordinals. Default 'numeral' — CHANGED from v1, which dropped them.
    *
    * `"1. alpha"` becomes:
@@ -67,7 +81,7 @@ export interface NormalizeOptions {
  * compile guard keeps this list honest, and the runtime test keeps the schema honest.
  */
 export const NORMALIZE_OPTION_KEYS = [
-  'codeBlocks', 'pathStyle', 'extensionStyle', 'expandNumbers', 'orderedLists'
+  'codeBlocks', 'pathStyle', 'extensionStyle', 'expandNumbers', 'expandUnits', 'orderedLists'
 ] as const satisfies readonly (keyof NormalizeOptions)[]
 
 type _MissingNormalizeKey =
@@ -131,10 +145,33 @@ const UNCLOSED_CODE_PLACEHOLDER =
   ' . Here, a code block is omitted, and the reply ends inside it, so anything after it was not read. '
 
 
+/**
+ * "Is there a glyph here a synthesizer can turn into sound?" — a letter or a digit, any script.
+ *
+ * DELIBERATELY A LOCAL COPY of `packages/core/src/speakable.ts`, which is the same predicate and
+ * is what the `Chunker` uses. It is copied rather than imported because this module's header
+ * constraint is real and is enforced by effect: `normalize()` is loaded FROM SOURCE, as a plain
+ * `.ts` file, by `scripts/voice-lab.mjs` and `scripts/ci/voice-lab-ci.mjs`, and by the data-URL
+ * stage extractor the Voice Lab ladder is built from. A single `import` here fails all three with
+ * `Cannot find module '.../speakable.js'` — verified, not assumed, while making this change.
+ *
+ * So the two copies are compared BY EFFECT instead of shared by reference: SC-1 in
+ * `packages/core/src/seams/seam-contracts.test.ts` feeds real `normalize()` output to a THIRD,
+ * independently restated version of this predicate. If any of the three drifts, that test goes
+ * red. Two definitions that must agree is a check; one definition imported everywhere is not
+ * (P36) — which is the reason this duplication is a mechanism rather than debt.
+ */
+const SPEAKABLE_GLYPH = /[\p{L}\p{N}]/u
+
+function hasSpeakableGlyph(text: string): boolean {
+  return SPEAKABLE_GLYPH.test(text)
+}
+
 export function normalize(md: string, opts: NormalizeOptions = {}): string {
   const codeBlocks = opts.codeBlocks ?? 'announce'
   const pathStyle = opts.pathStyle ?? 'spoken'
   const doNumbers = opts.expandNumbers ?? true
+  const doUnits = opts.expandUnits ?? true
 
   let s = stripFencedCode(md, codeBlocks)
   s = stripHtmlComments(s)
@@ -148,12 +185,25 @@ export function normalize(md: string, opts: NormalizeOptions = {}): string {
   s = stripMarkdownMarkers(s)
   s = speakKeyGlyphs(s)
   s = stripEmoji(s)
-  if (doNumbers) { s = expandUnits(s); s = expandNumbers(s) }
+  // One `if` per stage, because one `if` for two stages is what SC-8 was. Stage 13 then stage 14:
+  // units must be words BEFORE the numeral becomes one, or "52 ms" is "fifty two m s".
+  if (doUnits) s = expandUnits(s)
+  if (doNumbers) s = expandNumbers(s)
   s = collapseWhitespace(s)
   s = tidyPunctuation(s)
 
-  // "." or "," alone would be spoken as "period" / "comma". Say nothing instead.
-  return s.length <= 1 ? '' : s
+  /**
+   * SC-1 (006 section 22, finding R8-07). This used to be `s.length <= 1 ? '' : s` — a LENGTH
+   * test standing in for a SPEAKABILITY test. `normalize("...!!!???")` returns ".!!!???", length
+   * 7, so the guard passed it; `SpeechService` then checks `spoken.length === 0`, so the 'empty'
+   * outcome never fired, so the `unspeakable` loss sentence was never spoken. The listener was
+   * told nothing and heard nothing, and a full synthesis round trip was spent producing the
+   * nothing.
+   *
+   * Returning '' is what makes the loss AUDIBLE: it is the value `SpeechService` already reads as
+   * 'empty', and 'empty' already has a sentence. The fix is one predicate, not a new channel.
+   */
+  return hasSpeakableGlyph(s) ? s : ''
 }
 
 /* ---------------------------------------------------------------- stage 1 */
@@ -724,11 +774,41 @@ function isLetter(c: string | undefined): boolean {
   return c !== undefined && LETTER.test(c)
 }
 
+/**
+ * Is the '-' at `pos` a MINUS SIGN, or a hyphen doing some other job?
+ *
+ * SC-6 / 017 R8-21. A minus is only a minus when nothing word-like precedes it. That excludes the
+ * three hyphens this repo actually writes: `UTF-8` and `sherpa-onnx-node` (letter before),
+ * `10-20` and `p50-p99` (digit before), and a markdown horizontal rule `---` (another hyphen
+ * before). What is left — start of text, after a space, after an opening bracket — is arithmetic.
+ */
+function isMinusSign(src: string, pos: number): boolean {
+  if (src[pos] !== '-') return false
+  const before = src[pos - 1]
+  if (before === undefined) return true
+  return before === ' ' || before === '\n' || before === '\t' || before === '(' || before === '['
+}
+
 function expandNumbers(src: string): string {
   let out = ''
   let i = 0
   while (i < src.length) {
     if (!isDigit(src[i])) { out += src[i]; i++; continue }
+
+    /**
+     * SPEAK THE SIGN — SC-6 / 017 R8-21.
+     *
+     * The minus reached the engine as a bare hyphen, which macOS `say` renders as nothing or as a
+     * short pause. So a regression of -42 ms and an improvement of 42 ms became the SAME sentence,
+     * in a project whose entire subject is measured deltas. There is no ambiguity to warn about
+     * and no way for the listener to recover it; the word has to be said.
+     *
+     * The '-' has already been copied to `out` by the loop above, so it is replaced rather than
+     * skipped — which keeps this a rewrite of what was written, not a re-scan.
+     */
+    if (out.endsWith('-') && isMinusSign(src, i - 1)) {
+      out = out.slice(0, -1) + 'minus '
+    }
 
     let j = i
     while (isDigit(src[j])) j++
@@ -792,6 +872,25 @@ function expandNumbers(src: string): string {
      * fixtures. Same judgement as the `#42` rule immediately above.
      */
     if (isLetter(src[i - 1])) { out += raw; i = j; continue }
+
+    /**
+     * A LEADING ZERO IS PART OF THE NUMBER — SC-6 / 017 R8-20.
+     *
+     * `Number("007")` is 7, so "Call 007 now" was spoken as "Call seven now": a DIFFERENT number
+     * than was written, delivered with no announcement and no way for the listener to know. That
+     * is the one failure this project ranks above not expanding at all, because an un-expanded
+     * numeral is at worst awkward while a wrong numeral is undetectable by ear.
+     *
+     * A leading zero is never a quantity — it is an identifier, a zero-padded field, a code, a
+     * flight number, a version segment. So the digits are spoken ONE BY ONE, which is both
+     * faithful and how a person reads "007" aloud. `09:30` never reaches here: the HH:MM branch
+     * above claims it first, and "oh nine thirty" is what a clock should sound like.
+     */
+    if (digits.length > 1 && digits.startsWith('0')) {
+      out += [...digits].map((d) => ONES[Number(d)] as string).join(' ')
+      i = j
+      continue
+    }
 
     const value = Number(digits)
     if (value >= 1_000_000 || digits.length > 6) { out += raw; i = j; continue }

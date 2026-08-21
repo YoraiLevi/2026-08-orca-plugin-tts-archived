@@ -61,11 +61,23 @@ describe('the 16-stage ladder is the pipeline, not a description of it', () => {
   })
 
   it('keeps 16 rows when a stage is switched off, and marks it not-applied', async () => {
-    const { stages } = await computeStages('a/b/c.ts\n', { pathStyle: 'verbatim', expandNumbers: false })
+    // `expandUnits: false` is now its OWN switch (SC-8 / 006 NM12) — before J26 one flag turned
+    // off both stage 13 and stage 14, which is the defect. Both are named here so a future merge
+    // of the two flags fails this row rather than quietly passing it.
+    const { stages } = await computeStages('a/b/c.ts\n',
+      { pathStyle: 'verbatim', expandNumbers: false, expandUnits: false })
     expect(stages).toHaveLength(16)
     expect(stages.find((s) => s.name === 'speakFilePaths').applied).toBe(false)
     expect(stages.find((s) => s.name === 'expandUnits').applied).toBe(false)
     expect(stages.find((s) => s.name === 'expandNumbers').applied).toBe(false)
+
+    // ...and one flag must not move the other stage. This is the row that would have caught NM12.
+    const numbersOnly = await computeStages('it took 52 ms\n', { expandNumbers: false })
+    expect(numbersOnly.stages.find((s) => s.name === 'expandUnits').applied,
+      'expandNumbers: false must not switch off stage 13').toBe(true)
+    const unitsOnly = await computeStages('it took 52 ms\n', { expandUnits: false })
+    expect(unitsOnly.stages.find((s) => s.name === 'expandNumbers').applied,
+      'expandUnits: false must not switch off stage 14').toBe(true)
     // A stage that did not run must not claim it changed anything.
     expect(stages.find((s) => s.name === 'speakFilePaths').changed).toBe(false)
   })

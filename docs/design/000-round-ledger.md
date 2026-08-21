@@ -50,6 +50,7 @@ The bar makes the counter measure convergence rather than enthusiasm.
 | 7 | Adversarial review of everything rounds 4–6 produced | 1 | **31** | **no** | see `014-review-round7.md` |
 | 8 | Adversarial review of `PLAN.md`, `TASKS.md`, the constitution's budget table, `006` and `packages/core/src/**` — run, not read | 1 | **26** | **no** | see `017-review-round8.md`. 22 of 26 came from executing the code, 2 from a peer's implementation work re-verified here; **0** from reading a document |
 | 9 | **Build**, not review: `006` section 22 — seam contracts, one row per adjacent pair, each seen red | 1 | **7** | **no** | see `018-review-round9.md`. 10 rows, 3 seams asked-and-empty, 6 rows OPEN. Every row proved red; the mutation log is `018` section 4 |
+| 10 | Close section 22.5's own list; extend section 22 to the seams **into ORCA** | 1 | **5** | **no** | see `019-review-round10.md`. Seam 10 closed; the decoder gets rows; a 32,525-record census of the real transcript format, never taken before. **Recommends continuing past 10** — see below |
 
 ## Parking lot
 
@@ -195,3 +196,54 @@ One caution the round-9 record puts on itself, and the ledger keeps: **three of 
 were on seams nobody had looked at** — two found by one probe in ten minutes one layer below the
 layer the brief named, and one (R9-09) on a decision nine rounds had read as a tuning choice. There is no evidence the layer below that has been examined either. A thin round 10
 is necessary for a dry signal; on its own it is not sufficient.
+
+## Close of round 10 — the last mandated round, and why it is not the last round
+
+Round 10 closed the row round 9 called its own weakest, opened the first seam into ORCA, and took a
+census of the transcript format that ten rounds had only ever reasoned about.
+
+**5 items clear the bar**, against 7 and 26:
+
+| Item | Clause |
+|---|---|
+| **R10-01** — an unrecognised content block and a deliberately-filtered one are one observable; the instrument for exactly this distinction exists one layer up (file-level) and not one layer down (block-level). **Latent**: 0 unknown block types in 6,022 assistant records `[measured-here]`. The fix is constrained by principle VIII | 3 |
+| **R10-02** — ORCA writes `{"type":"system","subtype":"compact_boundary"}`; huddle infers the same event from *"the file got shorter"* and never reads `subtype`. A strictly weaker proxy for a fact that is in the file, guarding the *"replayed session"* harm the code itself calls unrecoverable | 3, 5 |
+| **R10-03** — the huddle fixture corpus models **2 of the 18** record types the real format emits, and omits the most common one entirely, so it cannot raise the question it would need to answer | 5 |
+| **R10-04** — seam 10 closed (SC-11); and a control assertion that could only recognise a report whose words it already knew, which mutation M11b walked straight through | 1 |
+| **R10-05** — the normalizer's *"DEPENDENCY-FREE"* header is load-bearing infrastructure for the Voice Lab's data-URL compile, written as prose with no instrument. **Violated during this round** and the Lab stopped booting; SC-13 is now the instrument | 3 |
+
+**Excluded and named**, so the count can be checked: mutation **M9** survived and the repo already
+knew why — `scripts/mutation-check.mjs` carries it as `thinking-continue-only`, marked
+`equivalent: true` with a better explanation than this round reached independently. And **three
+census hypotheses came back empty** (unknown block types 0 of 6,022; the 200-line prefix 0 of 60;
+non-assistant prose 0 of 17 types), which is why R10-01 is filed as latent rather than live.
+
+**Dry counter: 0 of 3.** Round 10 was not dry. **In ten rounds the counter has never started.**
+
+### The recommendation: continue past ten
+
+| Round | Items | Method |
+|---|---|---|
+| 8 | 26 | running the pipeline over real and hostile input, first time ever |
+| 9 | 7 | seam instruments for the audio path |
+| 10 | **5** | seam instruments for the first ORCA-facing seam |
+
+The bend is real. It is still not a dry signal, for two reasons the record states plainly:
+
+1. **The contract is `10 minimum AND 3 consecutive dry`.** Ten is the floor, not the finish, and the
+   dry counter has not started once.
+2. **Round 10 reached one of the three ORCA-facing seams.** The transcript **tailer** (`006`
+   section 1 — `fs.watch`, debounce, truncation, high-water, session switching) and the **adapter**
+   (section 8 — the actual ORCA host API, where the other side is a genuine third party) still have
+   **no seam rows**. The decoder alone yielded two open rows and a census that invalidated a test
+   corpus. Concluding convergence from one third of an inventory would be the same error section 22
+   exists to correct: reasoning from a component about the space between components.
+
+**What makes round 11 a real dry signal.** Give the tailer and the adapter seam rows by the same
+rule — a row closes only when a test feeds one component's real output to the next and has been seen
+red. Thin there, and the counter can start with evidence behind it: three inventories, the last one
+empty. Thick there, and this round's bend was the decoder being a small seam rather than the seams
+being clean.
+
+**Stated so it is not soft: the recommendation is to continue, and the reason is coverage, not
+enthusiasm.**

@@ -81,9 +81,16 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   const sink = options.sink ?? new SubprocessSink({
     log: host.log,
     onFailure: (f) => {
-      announce(f.kind === 'no-player'
-        ? `${f.reason}. Speech is being produced but nothing can play it.`
-        : `Audio playback failed: ${f.reason}.`)
+      if (f.kind === 'no-player') {
+        announce(`${f.reason}. Speech is being produced but nothing can play it.`)
+      } else if (f.kind === 'unverified-format') {
+        // SC-9 / R9-06. Not "playback failed" -- the player may well have played it. What the
+        // listener is being told is that the system has no evidence either way, which is a
+        // different sentence and must not be dressed up as the confident one.
+        announce(`That may not have been played: ${f.reason}.`)
+      } else {
+        announce(`Audio playback failed: ${f.reason}.`)
+      }
     }
   })
   let speech: SpeechService | null = null

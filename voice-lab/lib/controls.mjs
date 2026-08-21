@@ -154,13 +154,13 @@ export const CONTROLS = [
 
   // ── Panel D — numbers and units ──────────────────────────────────────────────────────
   { row: 24, id: 'num.expandIntegers', panel: 'D', tier: 'common', tag: 'EI', stages: [14],
-    label: 'Whether numbers become words', help: 'One flag gates both this and units today, so "fifty two milliseconds" with numeral-shaped counts is unreachable. Split here.',
+    label: 'Whether numbers become words', help: 'Whether a numeral becomes words. Units are their own switch below — turning this off leaves "52 milliseconds".',
     kind: 'bool', default: true, words: { true: 'spoken as words', false: 'left as numerals' },
     owner: 'normalize', settingsId: 'normalize.expandIntegers', wire: 'NormalizeOptions.expandNumbers' },
   { row: 25, id: 'num.expandUnits', panel: 'D', tier: 'common', tag: 'EI', stages: [13],
     label: 'Whether units become words', help: '"52 ms was odd to hear" — units are expanded before the number.',
     kind: 'bool', default: true, words: { true: 'spoken as words', false: 'left as symbols' },
-    owner: 'normalize', settingsId: 'normalize.expandUnits', wire: null },
+    owner: 'normalize', settingsId: 'normalize.expandUnits', wire: 'NormalizeOptions.expandUnits' },
   { row: 26, id: 'num.unitWords', panel: 'D', tier: 'more', tag: 'EI', stages: [13],
     label: 'What each unit is called', help: 'The symbol-to-word table for units.',
     kind: 'map', default: {}, owner: 'normalize', settingsId: 'normalize.unitWords', wire: null },

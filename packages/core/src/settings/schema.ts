@@ -282,11 +282,13 @@ export const SETTINGS_SCHEMA: Readonly<Record<string, FieldDescriptor>> = {
   'normalize.expandIntegers': d({
     id: 'normalize.expandIntegers', owner: 'normalize', panel: 'D',
     label: 'Whether numbers become words',
-    help: 'One flag gates both this and units today, so "fifty two milliseconds" with numeral-shaped counts is unreachable.',
+    help: 'Whether a numeral becomes words. Units are a separate switch — turning this off leaves "52 milliseconds".',
     kind: 'bool', default: true,
     provisional: true, effect: 'utterance', enginePersonal: false,
-    // FR-017: this and `normalize.expandUnits` are two controls over ONE field today. This id owns
-    // the wire; the other is `wire: null` and counted in the gap until the normalizer splits them.
+    // FR-017 used to read: "this and `normalize.expandUnits` are two controls over ONE field
+    // today. This id owns the wire; the other is `wire: null`." That WAS the SC-8 defect (006
+    // NM12): this control declares stage 14 and also governed stage 13. J26 split the normalizer
+    // flag, so each id now owns its own wire and its own stage.
     wire: 'NormalizeOptions.expandNumbers', since: 2
   }),
   'normalize.expandUnits': d({
@@ -294,7 +296,10 @@ export const SETTINGS_SCHEMA: Readonly<Record<string, FieldDescriptor>> = {
     label: 'Whether units become words',
     help: '"52 ms was odd to hear" — units are expanded before the number.',
     kind: 'bool', default: true,
-    provisional: true, effect: 'utterance', enginePersonal: false, wire: null, since: 2
+    // Wired by J26 closing SC-8. Before that this was `wire: null` and the field was governed by
+    // `normalize.expandIntegers` — a control claiming a stage it did not own.
+    provisional: true, effect: 'utterance', enginePersonal: false,
+    wire: 'NormalizeOptions.expandUnits', since: 2
   }),
   'normalize.unitWords': d({
     id: 'normalize.unitWords', owner: 'normalize', panel: 'D',

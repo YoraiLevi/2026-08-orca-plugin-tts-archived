@@ -161,6 +161,19 @@ describe('T124 (c) — the value ARRIVES at the consumer, with its control case'
     expect(spokenDefault, 'expandNumbers default expands 52').toContain('fifty two')
     expect(spokenTuned, 'expandIntegers: false did not reach normalize()').not.toContain('fifty two')
 
+    // SC-8 / 006 NM12. The two number controls are SEPARATE wires, and the way to assert that is
+    // to move one and watch the OTHER stage stay put. `expandIntegers: false` above must leave the
+    // unit word alone; `expandUnits: false` must leave the number word alone. One shared flag
+    // passes neither of these.
+    expect(spokenTuned, 'expandIntegers: false must not also switch off expandUnits (stage 13)')
+      .toContain('52 milliseconds')
+    const unitsOff = normalize(FIXTURE, toNormalizeOptions(parse({
+      ...DEFAULTS_ONLY, revision: 18, settings: { 'normalize.expandUnits': false }
+    }).settings))
+    expect(unitsOff, "expandUnits: false did not reach normalize()").not.toContain('milliseconds')
+    expect(unitsOff, 'expandUnits: false must not also switch off expandNumbers (stage 14)')
+      .toContain('fifty two')
+
     // orderedLists 'drop' removes the ordinal that the default keeps.
     const listTuned = normalize('1. alpha\n2. beta', toNormalizeOptions(tuned.settings))
     const listDefault = normalize('1. alpha\n2. beta', toNormalizeOptions(parse(DEFAULTS_ONLY).settings))
@@ -241,6 +254,7 @@ describe('T124 (c) — the value ARRIVES at the consumer, with its control case'
       pathStyle: defaults['normalize.pathStyle'],
       extensionStyle: defaults['normalize.extensionStyle'],
       expandNumbers: defaults['normalize.expandIntegers'],
+      expandUnits: defaults['normalize.expandUnits'],
       orderedLists: defaults['normalize.orderedLists']
     })
     expect(toChunkerOptions(s)).toEqual({
@@ -260,27 +274,30 @@ describe('T124 (d) — the gap report', () => {
     // and that edit is the point: it makes a change to the listener's control surface a decision
     // visible in the diff.
     expect(r.total, 'shipping fields at schemaVersion 2').toBe(47)
-    expect(r.wired, 'fields some consumer reads today').toBe(10)
-    expect(r.optionSurfaceWired, '011 section 3.2: 5 normalize + 2 chunk + 2 synthesize').toBe(9)
-    expect(r.designedNotWired, 'rendered and recorded; nothing consumes them yet').toBe(37)
+    // +1 wired, -1 designed-not-wired since J26 closed SC-8: `normalize.expandUnits` used to be
+    // rendered-but-unconsumed, governed in fact by `normalize.expandIntegers`. It now owns a wire.
+    expect(r.wired, 'fields some consumer reads today').toBe(11)
+    expect(r.optionSurfaceWired, '011 section 3.2: 6 normalize + 2 chunk + 2 synthesize').toBe(10)
+    expect(r.designedNotWired, 'rendered and recorded; nothing consumes them yet').toBe(36)
     expect(r.excluded, 'named exclusions: chunk.countUnits, synthesize.signal').toBe(2)
     expect(r.future, 'ids reserved at since:3 by 011 section 4.2a').toBe(11)
     expect(r.provisional, 'defaults nobody has settled by ear').toBe(45)
 
     const text = formatGapReport(r)
-    expect(text).toContain('of which options .... 9')
+    expect(text).toContain('of which options .... 10')
     // CI attaches this. An indicator nobody can read is an indicator nobody watches.
     // eslint-disable-next-line no-console
     console.log('\n' + text + '\n')
   })
 
-  it('the 9 option-surface-wired fields are exactly these, by id', () => {
+  it('the 10 option-surface-wired fields are exactly these, by id', () => {
     // Restated independently (P36). 002 spec FR-012's list, expressed in schema ids.
     expect(Object.values(SETTINGS_SCHEMA).filter(isOptionWired).map((f) => f.id).toSorted()).toEqual([
       'chunk.isolateFirstSentence',
       'chunk.maxUnits',
       'normalize.codeBlocks',
       'normalize.expandIntegers',
+      'normalize.expandUnits',
       'normalize.extensionStyle',
       'normalize.orderedLists',
       'normalize.pathStyle',
@@ -289,7 +306,7 @@ describe('T124 (d) — the gap report', () => {
     ])
   })
 
-  it('the tenth wired field is the settings report itself, and it is not an options surface', () => {
+  it('the eleventh wired field is the settings report itself, and it is not an options surface', () => {
     const extra = Object.values(SETTINGS_SCHEMA).filter((f) => isWired(f) && !isOptionWired(f))
     expect(extra.map((f) => f.id)).toEqual(['announce.reportChannel'])
     expect(extra[0]!.wire).toBe('SettingsReport.channel')

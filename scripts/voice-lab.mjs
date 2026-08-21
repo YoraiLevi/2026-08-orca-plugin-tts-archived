@@ -152,6 +152,7 @@ export async function computeStages (md, opts = {}) {
   const extensionStyle = opts.extensionStyle ?? 'word-last'
   const orderedLists = opts.orderedLists ?? 'numeral'
   const doNumbers = opts.expandNumbers ?? true
+  const doUnits = opts.expandUnits ?? true
 
   // The ONE piece of duplicated knowledge in this file: the call order of `normalize()`.
   // `assertLoadedModuleIsOnDiskSource()` is what stops it from drifting silently.
@@ -168,7 +169,7 @@ export async function computeStages (md, opts = {}) {
     (s) => fn.stripMarkdownMarkers(s),
     (s) => fn.speakKeyGlyphs(s),
     (s) => fn.stripEmoji(s),
-    doNumbers ? (s) => fn.expandUnits(s) : null,
+    doUnits ? (s) => fn.expandUnits(s) : null,
     doNumbers ? (s) => fn.expandNumbers(s) : null,
     (s) => fn.collapseWhitespace(s),
     (s) => fn.tidyPunctuation(s)

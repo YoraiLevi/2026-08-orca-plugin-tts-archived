@@ -467,7 +467,10 @@ describe('C4 — the designed-not-wired fields round-trip their VALUES', () => {
   const parsed = () => parseSettingsText(labSettings.serializeJsonc(file()))
 
   it('the perturbation moved every designed control, not zero of them', () => {
-    expect(Object.keys(perturbed).length).toBe(37)
+    // 36 since J26 closed SC-8: `num.expandUnits` left the designed-not-wired set and became a
+    // wire of its own. Hand-edited on purpose (P36) — a count derived from the schema could not
+    // have noticed the move.
+    expect(Object.keys(perturbed).length).toBe(36)
   })
 
   it('nothing legal was rejected on the way through', () => {

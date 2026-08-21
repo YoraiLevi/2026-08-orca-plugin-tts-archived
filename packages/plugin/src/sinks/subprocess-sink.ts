@@ -42,11 +42,62 @@ const PLAYERS: Record<string, readonly Player[]> = {
  * asserted anywhere.
  */
 export interface PlaybackFailure {
-  readonly kind: 'no-player' | 'player-failed'
+  readonly kind: 'no-player' | 'player-failed' | 'unverified-format'
   readonly reason: string
   /** Players attempted, in ladder order. */
   readonly tried: readonly string[]
 }
+
+/**
+ * The file extension this sink gives a chunk of each declared format — SC-9 / 006 section 22,
+ * finding R9-05.
+ *
+ * `AudioChunk.format` is typed `string`, and its doc comment enumerates the intended vocabulary
+ * ("e.g. 'wav' | 'pcm-s16le' | 'mp3' | 'opus'"). `enqueue()` used to reduce that vocabulary to one
+ * bit — `chunk.${format === 'wav' ? 'wav' : 'bin'}` — and every player on every platform
+ * identifies audio BY EXTENSION AND HEADER. So a provider declaring `opus` had its audio written
+ * to a file called `chunk.bin`, which is the one name guaranteed to tell the player nothing.
+ *
+ * The table is deliberately a NAME map and not a capability claim. Naming the file correctly is
+ * the sink's whole job here; whether the machine can decode it is the separate question below.
+ */
+const FORMAT_EXTENSION: Record<string, string> = {
+  wav: 'wav',
+  'pcm-s16le': 'pcm',
+  mp3: 'mp3',
+  opus: 'opus',
+  ogg: 'ogg',
+  flac: 'flac',
+  aiff: 'aiff',
+  m4a: 'm4a'
+}
+
+/**
+ * The formats a zero exit is accepted as EVIDENCE FOR — SC-9 / 006 section 22, finding R9-06.
+ *
+ * This is the sharp half, and it is the "presence is not effect" rule applied to a child process.
+ * `#play` returns true on exit code 0, and `enqueue` then advances `bytesPlayed`, which
+ * `selfTest()` reads as the ONE piece of evidence in this system that audio is alive (006 section
+ * 19 rank 1). A player handed a container it does not understand can still exit 0 — `sh` in a test
+ * does, and so do several real players on a file whose header they skip — and the listener then
+ * gets silence while the instrument says "played".
+ *
+ * So the set is what has actually been exercised end to end, not what is plausible. Today that is
+ * `wav`, which is the only format `OsSynthProvider` declares and the only one every platform's
+ * default player is known to decode (`afplay`, `aplay`/`paplay`, `System.Media.SoundPlayer` —
+ * the last of which is WAV-ONLY by documentation, so a Windows mp3 would be silent-with-exit-0
+ * today).
+ *
+ * A format outside this set is played anyway — the player is given its best chance and the file
+ * carries the right extension — but a zero exit from it is announced as a loss rather than counted
+ * as a success. That is deliberately CONSERVATIVE: it will announce a loss for an opus file that
+ * ffplay really did play. A false "you may not have heard that" is recoverable by ear; a false
+ * "played" is not, and this project's worst failure shape is silence that reports success.
+ *
+ * **To add a format here, measure it**: render one chunk of it, play it on all three platforms,
+ * and add the row with the same `[measured-here]` discipline the rest of this repo's numbers carry.
+ */
+const VERIFIED_PLAYABLE_FORMATS = new Set(['wav'])
 
 export interface SubprocessSinkOptions {
   readonly platform?: string
@@ -75,6 +126,7 @@ export class SubprocessSink implements PlaybackSink {
   #stopping = false
   #bytesPlayed = 0
   #lastExit: number | null = null
+  #lastTried: readonly string[] = []
 
   constructor(opts: SubprocessSinkOptions = {}) {
     this.#platform = opts.platform ?? process.platform
@@ -97,10 +149,30 @@ export class SubprocessSink implements PlaybackSink {
 
   async enqueue(chunk: AudioChunk): Promise<void> {
     const dir = await mkdtemp(join(tmpdir(), 'orca-tts-play-'))
-    const file = join(dir, `chunk.${chunk.format === 'wav' ? 'wav' : 'bin'}`)
+    // An unknown format still gets its own name rather than `bin`: `chunk.speex` at least tells a
+    // reader of the temp directory, and a player's error message, what it was handed.
+    const ext = FORMAT_EXTENSION[chunk.format] ?? sanitiseExtension(chunk.format)
+    const file = join(dir, `chunk.${ext}`)
     await writeFile(file, chunk.data)
     try {
-      if (await this.#play(file)) this.#bytesPlayed += chunk.data.length
+      const played = await this.#play(file)
+      if (!played) return                              // already announced by #play, or barge-in
+      if (VERIFIED_PLAYABLE_FORMATS.has(chunk.format)) {
+        this.#bytesPlayed += chunk.data.length
+        return
+      }
+      // Exit 0 on a format nobody verified is not evidence a listener heard anything. Say so, and
+      // leave `bytesPlayed` where it was — the self-test's only real indicator must not move for
+      // audio that may never have reached the device.
+      const failure: PlaybackFailure = {
+        kind: 'unverified-format',
+        reason:
+          `the audio format '${chunk.format}' has never been verified on ${this.#platform}, ` +
+          'so the player reporting success is not evidence you heard it',
+        tried: this.#lastTried
+      }
+      this.#log(`read-aloud: ${failure.reason}`)
+      this.#onFailure(failure)
     } finally {
       await rm(dir, { recursive: true, force: true }).catch(() => undefined)
     }
@@ -119,6 +191,7 @@ export class SubprocessSink implements PlaybackSink {
   async #play(file: string): Promise<boolean> {
     const players = this.#players ?? PLAYERS[this.#platform] ?? []
     const tried: string[] = []
+    this.#lastTried = tried
     let lastReason = ''
     this.#stopping = false
     for (const p of players) {
@@ -162,4 +235,15 @@ export class SubprocessSink implements PlaybackSink {
     this.#onFailure(failure)
     return false
   }
+}
+
+/**
+ * A format string reduced to something safe to put after a dot in a filename.
+ *
+ * Never `bin`: the whole finding is that `bin` is the one extension that erases what the provider
+ * declared. An unrecognised format keeps its own name so the failure names itself.
+ */
+function sanitiseExtension(format: string): string {
+  const cleaned = format.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return cleaned.length === 0 ? 'unknown' : cleaned.slice(0, 24)
 }

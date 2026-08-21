@@ -50,15 +50,18 @@ describe('the control inventory, counted against 004 section 6', () => {
   // 011 section 3.2: "46 controls, and the number that reach a typed options object today is 9
   // (5 normalize + 2 chunk + 2 synthesize)". A wire that quietly grew or shrank would mean the lab
   // is claiming a value lands somewhere it does not.
-  it('claims exactly the nine wired controls 011 counts, and no more', () => {
+  it('claims exactly the ten wired controls 011 counts, and no more', () => {
+    // TEN since J26 closed SC-8 (006 NM12): `num.expandUnits` was designed-not-wired and was in
+    // fact governed by `num.expandIntegers`, a control claiming a stage it did not own. Splitting
+    // `NormalizeOptions.expandUnits` out gave it its own wire. Hand-edited on purpose (P36).
     const wired = CONTROLS.filter((c) => c.wire !== null)
-    expect(wired.length).toBe(9)
+    expect(wired.length).toBe(10)
     const byPrefix = wired.reduce((acc, c) => {
       const k = c.wire.split('.')[0]
       acc[k] = (acc[k] ?? 0) + 1
       return acc
     }, {})
-    expect(byPrefix).toEqual({ NormalizeOptions: 5, ChunkerOptions: 2, SynthesizeOptions: 2 })
+    expect(byPrefix).toEqual({ NormalizeOptions: 6, ChunkerOptions: 2, SynthesizeOptions: 2 })
   })
 
   it('never offers hex as a session label, and defaults the hex slider to zero', () => {

@@ -87,7 +87,13 @@ two underscores aloud in the far rarer `__bold__`.
 
 - `codeBlocks`: `'announce'` (default) | `'drop'`
 - `pathStyle`: `'basename'` (default) | `'verbatim'`
-- `expandNumbers`: `true` (default) | `false`
+- `expandNumbers`: `true` (default) | `false` — stage 14 only
+- `expandUnits`: `true` (default) | `false` — stage 13 only
+
+`expandNumbers` and `expandUnits` are SEPARATE switches, and that separation is load-bearing
+(006 NM12 / section 22 SC-8). One flag used to gate both, so the Voice Lab control that declares
+stage 14 also silently switched off stage 13 and re-broke "52 ms" — the exact defect the listener
+had asked to have fixed.
 
 ## Tests
 

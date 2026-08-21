@@ -8,13 +8,13 @@
  * THE SEAM. `AudioChunk.format` is a free-form `string` whose own doc comment enumerates the
  * intended vocabulary -- "e.g. 'wav' | 'pcm-s16le' | 'mp3' | 'opus'"
  * (`packages/core/src/types/index.ts`). `SubprocessSink.enqueue()` reduces that vocabulary to one
- * bit:
+ * bit -- as it did before J26 closed this row:
  *
  *     const file = join(dir, `chunk.${chunk.format === 'wav' ? 'wav' : 'bin'}`)
  *
- * Everything that is not `wav` is written to a file called `chunk.bin` and handed to `afplay` /
- * `aplay` / `powershell`, which identify audio BY EXTENSION AND HEADER. There is no validation, no
- * refusal, and -- the part that matters -- no announcement.
+ * Everything that was not `wav` was written to a file called `chunk.bin` and handed to `afplay` /
+ * `aplay` / `powershell`, which identify audio BY EXTENSION AND HEADER. There was no validation,
+ * no refusal, and -- the part that mattered -- no announcement.
  *
  * WHY IT IS NOT MERELY THEORETICAL. `OsSynthProvider` is the only provider today and it declares
  * `'wav'`, so the seam is currently held closed by there being one implementation. `010` plans the
@@ -58,13 +58,16 @@ describe('SC-9 — every format a provider may declare reaches the player as tha
   })
 
   /**
-   * VIOLATED TODAY. Every non-wav format collapses to `chunk.bin`, so a player that dispatches on
-   * extension is handed a file it cannot identify. Remove `.fails` when the sink either maps the
-   * full vocabulary or refuses an unknown format by name.
+   * CLOSED by J26. Every non-wav format used to collapse to `chunk.bin`, so a player that
+   * dispatches on extension was handed a file it could not identify. `SubprocessSink` now carries
+   * a format-to-extension table and never writes `bin`.
    *
-   * [OPEN: 018 R9-05]
+   * The expected extensions are RESTATED here (P36) rather than imported from that table: a test
+   * that asked the sink what extension it uses would agree with it by construction.
+   *
+   * [CLOSED: 018 R9-05 — seen red before the marker came off]
    */
-  it.fails('names the file after the format for every declared format [OPEN: R9-05]', async () => {
+  it('names the file after the format for every declared format [was OPEN: R9-05]', async () => {
     for (const format of DECLARED_FORMATS) {
       const seen: string[] = []
       await recordingSink(seen).enqueue(chunk(format))
@@ -77,15 +80,21 @@ describe('SC-9 — every format a provider may declare reaches the player as tha
    * format, SOMETHING must say so. It does not have to be this file's job to play opus; it does
    * have to be somebody's job to announce that opus was not played.
    *
-   * VIOLATED TODAY: an unknown format produces no `PlaybackFailure`, because the fake player exits
-   * 0 on the `.bin` file and the sink counts the bytes as played. On a real machine the player
-   * would exit non-zero and `onFailure` WOULD fire -- so the harm is not that failure is silent,
-   * it is that the sink reports SUCCESS for a format it never handled, and `bytesPlayed` (the
-   * self-test's only evidence that audio is alive) moves for audio nobody heard.
+   * CLOSED by J26. It used to be that an unknown format produced no `PlaybackFailure`, because the
+   * fake player exits 0 on the `.bin` file and the sink counted the bytes as played. On a real
+   * machine the player would exit non-zero and `onFailure` WOULD fire -- so the harm was never
+   * that failure is silent, it was that the sink reported SUCCESS for a format it never handled,
+   * and `bytesPlayed` (the self-test's only evidence that audio is alive) moved for audio nobody
+   * heard.
    *
-   * [OPEN: 018 R9-06]
+   * The fix is stated as a rule about EVIDENCE, not about decoding: a zero exit is accepted as
+   * proof of playback only for a format that has been verified end to end. Everything else is
+   * played, and then announced as unverified. Restated here rather than imported: this test says
+   * `opus` must not be counted, and says nothing about which table the sink keeps.
+   *
+   * [CLOSED: 018 R9-06 — seen red before the marker came off]
    */
-  it.fails('refuses a format it cannot play, rather than reporting bytes played [OPEN: R9-06]', async () => {
+  it('refuses a format it cannot play, rather than reporting bytes played [was OPEN: R9-06]', async () => {
     const seen: string[] = []
     const failures: unknown[] = []
     const sink = new SubprocessSink({
@@ -96,5 +105,23 @@ describe('SC-9 — every format a provider may declare reaches the player as tha
     await sink.enqueue(chunk('opus'))
     expect(failures.length, 'an unplayable format was reported as played').toBeGreaterThan(0)
     expect(sink.bytesPlayed, 'bytesPlayed moved for audio nobody heard').toBe(0)
+  })
+
+  /**
+   * CONTROL, and the reason the test above is not passing vacuously: the SAME sink, the SAME fake
+   * player exiting 0, and a format that IS verified must announce nothing and must move the byte
+   * counter. Without this row a sink that announced a loss for every chunk -- including wav --
+   * would pass the test above and be worse than the defect it replaced.
+   */
+  it('CONTROL: a verified format announces nothing and does move bytesPlayed', async () => {
+    const failures: unknown[] = []
+    const sink = new SubprocessSink({
+      platform: 'linux',
+      onFailure: (f) => failures.push(f),
+      players: [{ cmd: 'sh', args: () => ['-c', 'exit 0'] }]
+    })
+    await sink.enqueue(chunk('wav'))
+    expect(failures, 'wav is verified; announcing it would be a false alarm').toEqual([])
+    expect(sink.bytesPlayed, 'the one format that works must still count').toBe(4)
   })
 })

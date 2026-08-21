@@ -16,6 +16,8 @@
  * Invariant: `chunks.join('') === input`, exactly. Trailing whitespace travels with its chunk.
  */
 
+import { hasSpeakableGlyph } from '../speakable.js'
+
 export type BoundaryKind = 'sentence' | 'clause' | 'word' | 'scalar' | 'end'
 
 export interface Chunk {
@@ -151,7 +153,8 @@ export class Chunker {
         const after = this.#skipClosers(i + 1)
         if (this.#isSentenceEnd(i, after)) {
           const cut = this.#absorbSpaces(after)
-          if (cut <= buf.length && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits) {
+          if (cut <= buf.length && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits &&
+              this.#carriesSpeech(cut)) {
             if (firstSentence === -1) firstSentence = cut
             lastSentence = cut
             // The earliest sentence end is all the first chunk needs; stop scanning.
@@ -160,10 +163,15 @@ export class Chunker {
         }
       } else if (CLAUSE_END.has(ch)) {
         const cut = this.#absorbSpaces(i + 1)
-        if (this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits) lastClause = cut
+        if (this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits && this.#carriesSpeech(cut)) {
+          lastClause = cut
+        }
       } else if (SPACE.has(ch)) {
         const cut = this.#absorbSpaces(i)
-        if (cut > 0 && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits) lastWord = cut
+        if (cut > 0 && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits &&
+            this.#carriesSpeech(cut)) {
+          lastWord = cut
+        }
       }
     }
 
@@ -202,6 +210,38 @@ export class Chunker {
   #complete(cut: number, final: boolean): boolean {
     if (final) return true
     return cut < this.#buffer.length
+  }
+
+  /**
+   * SC-2 (006 section 22, finding R8-08). May the prefix `buf[0..cut)` be emitted as a chunk of
+   * its own, or would it be an utterance with nothing in it to say?
+   *
+   * `#isSentenceEnd` returns true unconditionally for '!' and '?' — "'!' and '?' are never
+   * abbreviations", which is true as written and wrong as a SENTENCE rule: '.' gets six context
+   * tests and '!' got none. So `#!/usr/bin/env node` yielded a first chunk of `"#!"` and
+   * `![alt](url)` yielded `"!"`. Each costs a full synthesis round trip and returns near-silence
+   * (p50 747 ms of provider time for 97 ms of noise, `017` R8-09), and each lands on chunk 0 — the
+   * one chunk `isolateFirstSentence` exists to make fast.
+   *
+   * Stated as a property of the CHUNK rather than of the punctuation mark, because that is the
+   * form the downstream provider actually needs: it does not care which glyph ended the sentence,
+   * it cares whether there is a word in the utterance. A boundary that would mint a speechless
+   * chunk is simply not a boundary, so the fragment travels with the text that follows it —
+   * `"#!/usr/bin/env node Run it."` becomes one chunk instead of two, and the invariant
+   * `chunks.join('') === input` is untouched (it is a refusal to cut, never a rewrite).
+   *
+   * Safe for streaming: this reads a PREFIX of the buffer, and a prefix never changes as more text
+   * arrives — so streaming still agrees with batch (SC-5, T035).
+   *
+   * NOT applied to the `scalar` fallback below. That path fires only when a single token overruns
+   * `maxUnits` with no boundary anywhere, and it exists to guarantee forward progress; refusing it
+   * would hang the chunker on a long enough run of punctuation. A 200-character wall of '!' is
+   * still speech-free and still reaches the provider — recorded here as the residue rather than
+   * fixed, because the provider's own empty-output guard is the right place for it and
+   * `OsSynthEmptyOutputError` (006 site 43) already names that outcome.
+   */
+  #carriesSpeech(cut: number): boolean {
+    return hasSpeakableGlyph(this.#buffer.slice(0, cut))
   }
 
   #skipClosers(from: number): number {

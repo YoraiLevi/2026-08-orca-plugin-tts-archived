@@ -1,3 +1,4 @@
+export * from "./speakable.js"
 export * from "./normalizer/index.js"
 export * from "./chunker/index.js"
 export * from "./types/index.js"
