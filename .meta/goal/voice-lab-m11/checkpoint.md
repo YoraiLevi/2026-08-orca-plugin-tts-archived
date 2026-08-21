@@ -14,6 +14,25 @@ because the machine reached **load average 51.62** with seven agents running and
 containing nothing unusual took **71 seconds and dropped a chunk**. A measurement there is a
 property of the swarm, not the code. **This is the first task on resume.**
 
+## UNCOMMITTED WORK IN THE TREE AT THE BREAK — read before you touch huddle
+
+`packages/plugin/src/huddle/{decoders.ts,index.ts,huddle.test.ts}` are **modified and NOT
+committed**, and they are **RED**: 1 of 28 huddle tests failing, `pnpm lint` exit 1. `tsc -b
+--force` is clean.
+
+**This was deliberately left uncommitted.** An earlier batch of the same agent's work was preserved
+at `20e64cc` after verifying 56/56 green; this later batch is mid-edit and committing it would land
+a red on a tree that is otherwise green at `20e64cc` (`lint` 0, `typecheck` 0). Preserving work is
+worth a byline, not a broken build.
+
+Most likely **R10-02**: huddle infers a compaction from *"the file got shorter"* instead of reading
+the `{"type":"system","subtype":"compact_boundary"}` record ORCA actually writes — a strictly weaker
+proxy for a fact that is in the file, guarding a harm the code itself calls unrecoverable.
+
+**On resume:** find the failing test, finish or revert the change, and commit it deliberately.
+Do not simply `git checkout` these files — P34's second half records `git checkout`-as-undo
+destroying 80 lines here once. Read them first.
+
 ## Resume here — the one task waiting on the reset
 
 1. **`uptime` first.** If the load average is not in single digits, do not measure. Say so and wait.
