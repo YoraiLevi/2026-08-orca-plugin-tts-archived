@@ -196,3 +196,13 @@ Append here as questions close. Format: `Qn — resolved <date> — <evidence>`.
 - **Q47 (`003`) / row 40 (`004`) — hex is closed, 2026-08-21** — `announce.sessionLabelHashChars`
   keeps the value 0 and loses the default of 8; `path-tail-3-plus-hash` is removed from row 39's
   option space entirely. Hex was shipped as taste and is correctness (007 C7).
+
+---
+
+## Q62–Q64 · opened by J21 (the normalizer number/comment pass, `packages/core/src/normalizer/index.ts`)
+
+| # | Kind | Question | Note |
+|---|---|---|---|
+| Q62 | D | **Should a numeric range be spoken as a range?** `1,112-2,017` now reads as two correct numbers with a hyphen between them — *"one thousand one hundred twelve, two thousand seventeen"* — which parses by ear but never says the word "to". The obvious fix, rewriting `N-M` to `N to M`, is **rejected as written**: it destroys ISO dates, and `2026-08-21` is a shape this repo emits constantly. Any rule needs a discriminator that separates a range from a date from a hyphenated identifier, and the discriminator is the whole question. | Left deliberately unfixed by J21 rather than shipped with a date-shaped hole in it. The range case is audible-but-survivable; the date case would be a regression. |
+| Q63 | D | **How should an ISO date be spoken?** Pre-existing and independent of Q62: `2026-08-21` reads today as *"two thousand twenty six-eight-twenty one"*. Nothing in the pipeline recognises a date. Options: leave it to the engine (which handles a bare `2026-08-21` better than the expanded form), recognise `YYYY-MM-DD` and speak it as a date, or recognise it only to suppress expansion. | Found while fixing thousands separators, out of that brief's scope. It is a *needs-a-decision*, not a bug report — what a date should sound like is partly taste (P23). |
+| Q64 | E | **Does espeak-ng read a bare `1234567` as words, or digit by digit?** `expandNumbers` stops at 999,999 and hands anything larger to the engine. On macOS that is now **measured** and correct: `say` renders `1234567`, `1,234,567` and the spelled-out words to the same utterance, and `1000000` to byte-identical audio with the literal `"one million"` (`normalizer/index.ts`, the `numberToWords` doc comment) `[measured-here]`. **espeak-ng and Windows SAPI are `[claimed]`** — espeak-ng is not installed on the machine that measured this. If espeak-ng spells it digit by digit, the ceiling is a **Linux-only defect hiding behind a macOS-only probe**. | The probe is the same one already used: render to a file (never the device, P31) and compare against a spelled-out reference and a digit-by-digit reference. Cheapest home is the Linux CI leg. |
