@@ -748,6 +748,26 @@ function under1000(n: number): string {
  * so. **The VERDICT is unaffected** — it never depended on any absolute sum, only on which
  * renders match each other within one run — but treat a checksum here as meaningful only against
  * other sums from the same engine, format and digest.
+ *
+ * A second reason to distrust an absolute sum here, and this one is measured: **`say` DITHERS on
+ * long strings.** Across pinned runs the 68-character spelled-out reference rendered to
+ * 167,560 B every time, but to `00ce2944` on most runs and `ff96c9f4` on one — same length,
+ * different bytes — while the short strings (`one million`, `1000000`) stayed sum-stable at
+ * `7d2c5386` throughout `[measured-here]` (n=3 pinned at `47871d0`, plus n=5 ad hoc). So on
+ * macOS the byte COUNT is the robust quantity for long utterances and the checksum is not. The
+ * probe reports this per run as `STABLE` / `DITHERS` rather than averaging it away, and reaches
+ * its verdict from lengths — using checksums only for within-run identity between two strings
+ * rendered seconds apart.
+ *
+ * WHAT THE PROBE CAN NOW SAY, which is four things and not three: **absent** (exit 2, and a
+ * missing espeak-ng COMMAND beside a present library is named as P25) · **words** (exit 0) ·
+ * **digits** (exit 1) · **inconclusive** (exit 4). The last one exists because the verdict is
+ * reached BY COMPARISON: if an engine's two reference renders do not separate, or if `1234567`
+ * lands in the dead band between them, the honest answer is that the harness cannot tell — not
+ * that the engine is acceptable. Both routes to it are demonstrated in CI against stub engines.
+ * The separation is comfortable on both shipped engines: `1234567` sits at position **0.049** of
+ * the way from the spelled-out reference to the digit-by-digit one on `say`, and **0.057** on
+ * espeak-ng, against a dead band of 0.35–0.65 `[measured-here]` (n=3 each, noise floor 0 B).
  */
 export function numberToWords(n: number): string {
   if (n < 1000) return under1000(n)
