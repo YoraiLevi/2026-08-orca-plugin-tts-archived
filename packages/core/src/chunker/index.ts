@@ -16,7 +16,11 @@
  * Invariant: `chunks.join('') === input`, exactly. Trailing whitespace travels with its chunk.
  */
 
-import { hasSpeakableGlyph } from '../speakable.js'
+// `.ts`, not `.js`: the Voice Lab loads this module through plain
+// `node --experimental-strip-types`, which will not resolve a `.js` specifier onto a `.ts` file.
+// Vitest's resolver does, which is why the suite stayed green while `pnpm voice-lab` could not
+// boot at all. Verified by effect under both resolvers before changing it.
+import { hasSpeakableGlyph } from '../speakable.ts'
 
 export type BoundaryKind = 'sentence' | 'clause' | 'word' | 'scalar' | 'end'
 
