@@ -58,7 +58,13 @@ tree AND the machine's load measures neither.
   racing anything and the number is a hang-detector justified by a measured worst case — as with
   `scripts/check-citations.test.mjs`, where the six tests that shell out to the whole-repo checker
   carry `{ timeout: 20_000 }` against a measured worst case of ~1.8 s at load ~30 `[measured-here]`,
-  an 11× margin, while the sixteen tests that run on tiny temp fixtures carry none.
+  an 11× margin, while the sixteen tests that run on tiny temp fixtures carry none. The margin is
+  what makes it legitimate: a 20 s bound over a 1.8 s worst case is a hang-detector, not a budget
+  inflated until a race stops losing. **Measure before deciding, then say which of the two you
+  chose** — the rule's wording does not distinguish them for you. Note also that BOTH halves of the
+  original report moved: the file was measured at 33.7 s under load ~51 when the 5,000 ms budget was
+  called too tight, and is 6.0–7.5 s now `[measured-here]`, because J21's checker work made it
+  materially faster as a side effect.
 
 **Verify by effect — and take the measurement in the FAILING condition, which is a busy machine.**
 Ten consecutive runs of `packages/plugin/src/main.test.ts`, load average ~17–33 `[measured-here]`:
@@ -71,6 +77,35 @@ Ten consecutive runs of `packages/plugin/src/main.test.ts`, load average ~17–3
 A green run on a quiet machine proves nothing about either. **A suite count taken today means "the
 machine was quiet", not "the code is correct"** — never quote one without naming the load it was
 taken at.
+
+**A THIRD way this instrument produces a number nobody can trust, and the reason the rule below is
+now earned three times over.** While measuring the above, one run of `scripts/check-citations.test.mjs`
+failed **13 of 20** `[measured-here]`. They were **not timeouts**. The output the assertions received
+was of a different SHAPE — no `config:` line at all, detail rows sitting where the counts belonged:
+
+    expected 'file:///Users/m5air/source/orca-plugi…' to match /^config: +orca:absent/m
+    expected 'stale      docs/note.md:1  packages/c…' to contain 'STALE CITATIONS'
+
+It has not recurred: 18 consecutive clean runs of the file afterwards, plus 20 direct invocations of
+the checker with no bad output. The failures correlate with three of J21's commits — `a03cbcb`,
+`547e5ed`, `4f54fca` — landing DURING the run. **Reading the suite in a shared tree while a peer is
+committing gives you a run that straddles two versions of the code**: the test file vitest collected
+and the script it shells out to were not from the same commit. **That the failure could not be
+reproduced afterwards is part of the evidence, not a weakness in it** — a run that straddles a commit
+is by construction unreproducible once the commit has landed, and demanding a repro before believing
+it is the same mistake as clearing a load flake by re-running on a quiet machine.
+
+Three distinct mechanisms have now produced a citation or suite number nobody could trust:
+
+| mechanism | what it produced |
+|---|---|
+| a peer has a file open, mid-write | 139 stale instead of 85 |
+| the machine is loaded | 657/658 and 653/658, same commit, minutes apart |
+| a peer commits mid-run | 13 of 20 failing, on assertions about output shape |
+
+One conclusion, stated so it can be checked: **a suite count is meaningful only from a detached
+worktree, at a named commit, at a named load.** Any count missing one of those three is a number
+about the machine, not about the code.
 
 **And prove the fix did not remove the test's teeth.** A determinism fix that also blinds the test is
 worse than the flake. Each of the three was mutated back to the bug it guards and watched go red
