@@ -178,7 +178,7 @@ for queue losses.
 produced byte-identical output, md5 `caba1118…` (`q-round1-platform.md`, macOS silent-fallback
 hazard). **`[documented]`** on Windows: `SelectVoice(name)` is a case-sensitive **substring** match, so a
 short id binds to the wrong voice with no error (Microsoft's own `SelectVoice` page). Our provider
-emits both verbatim (`os-synth/index.ts:353`, `:361`) and reads back neither. Under Rule B, a
+emits both verbatim (`os-synth/index.ts:445`, `:361`) and reads back neither. Under Rule B, a
 provider that cannot verify what it applied must **declare that it cannot**, not report success.
 
 ## 4. `TtsProvider` v2 — the contract
@@ -467,7 +467,7 @@ export class PauseUnsupportedError extends Error {
 > | Consumer | v1 code | What v2 does to it |
 > |---|---|---|
 > | `packages/plugin/src/sinks/subprocess-sink.ts:100` | ``join(dir, `chunk.${chunk.format === 'wav' ? 'wav' : 'bin'}`)`` | `format` is now an **object**, so `=== 'wav'` is permanently `false`: **every WAV is written as `.bin`.** Silent, in the audio path, and no test would see it |
-> | `packages/plugin/src/speech-service.ts:424-425` | `for await (const audio of …generate(…)) { if (!this.#playback.push(generation, audio)) … }` (also `:228`) | pushes `SpeechEvent`s — **including `degraded` and `end`** — into the playback queue |
+> | `packages/plugin/src/speech-service.ts:150-151` | `for await (const audio of …generate(…)) { if (!this.#playback.push(generation, audio)) … }` (also `:228`) | pushes `SpeechEvent`s — **including `degraded` and `end`** — into the playback queue |
 > | `packages/core/src/types/index.ts:3-10` and `packages/core/src/queue/index.ts:7` | `AudioChunk` with `format: string`, `sampleRate`, `channels`; the queue is typed on it | both typed on v1 throughout |
 
 **`PlaybackSink` v2.** The v1 shape is `enqueue(chunk) / stop() / isPlaying`
@@ -916,7 +916,7 @@ synthesis through three unrelated APIs. **Costed here rather than hidden**, per 
 | Platform | The API | Label | What it takes | Gets us |
 |---|---|---|---|---|
 | **macOS** | `AVSpeechSynthesizer.write(_:toBufferCallback:)`, `pauseSpeaking(at: .word)`, `continueSpeaking()`, `willSpeakRangeOfSpeechString` | **`[measured-here]`** headless | a **compiled Swift/ObjC binary**. There is no way to reach AVFoundation from Node without one, and P9 already concluded *"plan for a bundled Swift audio sidecar"* | PCM, word boundaries, word-granular pause, no spawn — all from one API |
-| **Windows** | `SetOutputToAudioStream(Stream, SpeechAudioFormatInfo)`, `SpeakProgress`, `Pause()`/`Resume()` | **`[documented]`** | **no compiled binary required** — a long-lived PowerShell/.NET host process reading commands on stdin. Our current `SetOutputToWaveFile` (`os-synth/index.ts:367`) throws the streaming sink away for a temp file | PCM, word progress, real pause/resume |
+| **Windows** | `SetOutputToAudioStream(Stream, SpeechAudioFormatInfo)`, `SpeakProgress`, `Pause()`/`Resume()` | **`[documented]`** | **no compiled binary required** — a long-lived PowerShell/.NET host process reading commands on stdin. Our current `SetOutputToWaveFile` (`os-synth/index.ts:451`) throws the streaming sink away for a temp file | PCM, word progress, real pause/resume |
 | **Linux** | speech-dispatcher **SSIP** over its socket | **`[documented]`** | **no compiled binary required** — a socket client in Node | `PAUSE`/`RESUME` and index marks. **No audio, ever** — see below |
 
 **The honest asymmetry.** "Three sidecars" is right about the *implementations* and wrong about the

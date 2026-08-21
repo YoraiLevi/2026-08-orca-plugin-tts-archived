@@ -84,7 +84,7 @@ single time the listener presses Play. That does not meet a two-second gate on t
 The provider already yields a `wav` buffer, not an OS-specific stream:
 
 - `packages/providers/src/os-synth/index.ts:338` — `yield { data, format: 'wav', sampleRate: …, channels: 1 }`
-- `packages/providers/src/os-synth/index.ts:352` — the darwin command forces
+- `packages/providers/src/os-synth/index.ts:436` — the darwin command forces
   `--data-format=LEI16@22050` with the comment *"WAV, never the default AIFF: decodeAudioData
   rejects AIFF-C (measured, E6e)"*.
 
@@ -165,7 +165,7 @@ already requires.
 | **spoke-elsewhere** | `packages/providers/src/os-synth/index.ts:321`: the backend is not in `LINUX_WAV_BACKENDS` (`:146`), so `#speakDirect()` (`:407`) hands the text to speech-dispatcher, **the daemon speaks it, and nothing is yielded** | a **named state**, below |
 
 **The `spoke-elsewhere` state is a capability read, not a guess.** The provider already knows which
-rung it is on — `get linuxBackend()` (`os-synth/index.ts:226`) — so `POST /speak` returns
+rung it is on — `get linuxBackend()` (`os-synth/index.ts:256`) — so `POST /speak` returns
 `200 { played: 'elsewhere', backend: 'spd-say' }` before synthesizing, and the page:
 
 1. **says it aloud, through the same daemon that will speak everything else**, because that is the
@@ -383,8 +383,8 @@ for darwin and win32; the Linux branch is `linuxCommand()`, `:175`) and are now 
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 28 | `voice.id` | select | populated at runtime from `provider.listVoices()` — never a hard-coded name | **reachable, unset** — the wire landed in `6b776d4`; nothing chooses a value yet | Common | `SynthesizeOptions.voice` | `speech-service.ts:257`; `os-synth/index.ts:351` (darwin `-v`), `:365` (win32 `SelectVoice`), `:175` `linuxCommand` (linux) | **EP** |
-| 29 | `voice.rate` | slider | 0.5–2.0, step 0.05 | **reachable, unset, and honoured on all three** — Linux no longer drops it (`5cab7eb`/`6b776d4`) | Common | `SynthesizeOptions.rate` | `os-synth/index.ts:366` (win32 `$s.Rate`); darwin `-r` and the Linux `-r`/`-s` are in `#command()` `:346-372` and `linuxCommand` `:175` | **EP** |
+| 28 | `voice.id` | select | populated at runtime from `provider.listVoices()` — never a hard-coded name | **reachable, unset** — the wire landed in `6b776d4`; nothing chooses a value yet | Common | `SynthesizeOptions.voice` | `speech-service.ts:257`; `os-synth/index.ts:445` (darwin `-v`), `:365` (win32 `SelectVoice`), `:175` `linuxCommand` (linux) | **EP** |
+| 29 | `voice.rate` | slider | 0.5–2.0, step 0.05 | **reachable, unset, and honoured on all three** — Linux no longer drops it (`5cab7eb`/`6b776d4`) | Common | `SynthesizeOptions.rate` | `os-synth/index.ts:450` (win32 `$s.Rate`); darwin `-r` and the Linux `-r`/`-s` are in `#command()` `:346-372` and `linuxCommand` `:175` | **EP** |
 | 30 | `voice.pitch` | slider | −50…+50, `engine` default | no field exists | More | needs `[[pbas]]` / SSML `<prosody>` / `-p` | `q-round1-platform.md` Q33 | **EP** |
 | 31 | `voice.volume` | slider | 0–100 | no field exists | More | `[[volm]]` / `Volume` / `-a` | `q-round1-platform.md` Q33 | **EP** |
 | 32 | `pace.chunkMaxUnits` | slider | 40–600, step 20 | 200 | Common | `ChunkerOptions.maxUnits` | `core/src/chunker/index.ts:53` | **PP** |
@@ -408,7 +408,7 @@ requirement rather than changing it).
 
 | # | Control | Type | Legal values | Today | Tier | Feeds | `path:line` | Tag |
 |---|---|---|---|---|---|---|---|---|
-| 36 | `queue.maxQueued` | slider | 1–20, **default 8** | **8** shipped at `main.ts:96`, while `DEFAULT_MAX_QUEUED = 20` at `speech-service.ts:74` — see the note below; **the one value is 8** | Common | `SpeechService` queue | `plugin/src/main.ts:96`; `speech-service.ts:74` | EI |
+| 36 | `queue.maxQueued` | slider | 1–20, **default 8** | **8** shipped at `main.ts:96`, while `DEFAULT_MAX_QUEUED = 20` at `speech-service.ts:89` — see the note below; **the one value is 8** | Common | `SpeechService` queue | `plugin/src/main.ts:96`; `speech-service.ts:74` | EI |
 | 37 | `queue.overflowPolicy` | select | `drop-oldest` · `drop-newest` | `drop-oldest` (P22's third fault) | More | queue | `speech-service.ts:74,155-177` | EI |
 | 38 | `announce.mode` | select | `replace` · `queue` | `replace` — status and toggle speech cuts off a reply in progress | Common | `speak(text, mode)` (P21) | `main.ts:121,134,148` | EI |
 | 39 | `announce.sessionLabel` | select | `call-sign` · `call-sign-plus-name` · `registry-name` · `branch` · `displayName` — **no hex value exists** | last 3 path segments + 8 hex chars, which is the defect M15 exists to remove | Common | huddle session label | `plugin/src/huddle/index.ts:55-60`; the chain is `003` §6, the call-sign is `005` §11.2 | EI |
@@ -445,8 +445,8 @@ requirement rather than changing it).
 characters read to a dyslexic listener is close to the worst case the project has. Q28 asks the same
 question from the other end, and `005` answers it.
 
-**The queue cap, settled (007 C3).** Three values existed: `main.ts:96` ships `maxQueued: 8`,
-`speech-service.ts:74` declares `DEFAULT_MAX_QUEUED = 20`, and `003` §8.7 reasoned against 20.
+**The queue cap, settled (007 C3).** Three values existed: `main.ts:162` ships `maxQueued: 8`,
+`speech-service.ts:89` declares `DEFAULT_MAX_QUEUED = 20`, and `003` §8.7 reasoned against 20.
 **The one value is 8.** It is what the listener has actually been living with, and twenty queued
 replies is roughly three minutes of unrequested speech — the P22 experience with a cap on it rather
 than a cure. `DEFAULT_MAX_QUEUED` must be changed to **8** so there is one constant and not two,
@@ -520,7 +520,7 @@ the comment says so). That is a pause expressed as a full stop — an on/off swi
    change to two modules and their 94 tests, not an addition.
 2. **Escaping becomes mandatory, in both directions.** Any `<` or `&` in an agent reply becomes
    malformed SSML. Windows already interpolates text into a PowerShell string escaped only for `'`
-   (`providers/src/os-synth/index.ts:360-370`; `$s.Speak('…')` at `:368`), and macOS `say` does not take SSML at all — it takes
+   (`providers/src/os-synth/index.ts:452-462`; `$s.Speak('…')` at `:368`), and macOS `say` does not take SSML at all — it takes
    the older in-band `[[...]]` commands, which means user text containing `[[` is a live injection
    today (MEASURED). See Q45.
 3. **It fragments the provider contract.** `say` needs `[[slnc 500]]`, `AVSpeechUtterance` needs

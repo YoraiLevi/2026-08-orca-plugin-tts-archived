@@ -288,11 +288,11 @@ observations that must be made deliberate.
 | Class | Meaning | Read-point today |
 |---|---|---|
 | **`utterance`** | takes effect on the next utterance; the one playing finishes as tuned | `speech-service.ts:399` (`normalize(text, …)`), `:405-409` (chunker constructed per utterance) |
-| **`immediate`** | takes effect on the next queue operation, i.e. within milliseconds | `speech-service.ts:263` (`maxQueued` read on each enqueue) |
+| **`immediate`** | takes effect on the next queue operation, i.e. within milliseconds | `speech-service.ts:288` (`maxQueued` read on each enqueue) |
 | **`session`** | takes effect on the next `activate()`; the plugin says so aloud when one changes | provider resolution in `main.ts:94-96`, resolved at `:128` |
 
 **One required change to source falls out of this.** `#synthesizeOptions()` is called **inside the
-per-chunk loop** (`packages/plugin/src/speech-service.ts:424`, calling `#synthesizeOptions()` declared at `:386-391`). With a mutable
+per-chunk loop** (`packages/plugin/src/speech-service.ts:449`, calling `#synthesizeOptions()` declared at `:487`). With a mutable
 snapshot behind it, a voice change would land *between chunk three and chunk four of one utterance* —
 a sentence that changes speaker mid-word. `synthesize.*` must be read **once per utterance**, into a
 local, at the top of `#speakOne`. This is a settings-design constraint on M12's implementation and it
@@ -399,7 +399,7 @@ Control ids are 004 section 6's, at `docs/design/004-voice-lab.md:236-400`.
 |---|---|---|---|---|
 | `normalize` | rows 1–27 → **5 wired**: `codeBlocks` `pathStyle` `extensionStyle` `expandNumbers` `orderedLists`; the other ~17 are `wire: null` today | `normalize(text, opts)` — `packages/core/src/normalizer/index.ts:22-52`, called at `speech-service.ts:399` | inbox → worker → snapshot | **utterance** |
 | `chunk` | 32, 33 (`maxUnits`, `isolateFirstSentence`); `countUnits` is a function, **not settable** | `ChunkerOptions` — `packages/core/src/chunker/index.ts:27-34`, constructed at `speech-service.ts:405-409` | same | **utterance** |
-| `synthesize` | 28, 29 wired (`voice`, `rate`); 30, 31 (`pitch`, `volume`) `wire: null` — no field exists; `signal` is runtime, not settable | `SynthesizeOptions` — declared at `packages/core/src/types/index.ts:26-31`, built by `#synthesizeOptions()` at `packages/plugin/src/speech-service.ts:386-391` and handed to the provider in the per-chunk loop at `:424` | same | **utterance** (see 2.3 — must be snapshotted once per utterance) |
+| `synthesize` | 28, 29 wired (`voice`, `rate`); 30, 31 (`pitch`, `volume`) `wire: null` — no field exists; `signal` is runtime, not settable | `SynthesizeOptions` — declared at `packages/core/src/types/index.ts:26-31`, built by `#synthesizeOptions()` at `packages/plugin/src/speech-service.ts:487` and handed to the provider in the per-chunk loop at `:449` | same | **utterance** (see 2.3 — must be snapshotted once per utterance) |
 | `queue` | 36, 37, 38 (`maxQueued`, `overflowPolicy`, `announce.mode`) **plus `queue.perSessionFairness` at `since: 3`** — see **3.2a** | `SpeechService` — `speech-service.ts:55`, read at `:263`; mode is P21's `speak(text, mode)` | same | **immediate** |
 | `announce` | 39, 41, 42 (`sessionLabel`, `switchPhrase`, `statusTemplate`) **plus `announce.reportChannel` at `since: 2`** — new, 4.3a, R7-31. **Row 40 `sessionLabelHashChars` does not exist in this schema** — 008 X-04 / 007 C7 removed hex as a correctness matter, and a schema that carries it invites it back | `SpeechService.announce()` (`speech-service.ts:191`) and huddle labels | same | **immediate** |
 | `session` | 46 (huddle reply cap; **existence** is correctness per B-05, the number is taste) | `HuddleController` (`packages/plugin/src/huddle/`) | same | **immediate** |
@@ -433,7 +433,7 @@ change the constant to 8 **and** make the cap a function of `|F|` (now amended t
 | | |
 |---|---|
 | **The control** | `queue.maxQueued` — `kind: 'int'`, `range { min: 1, max: 20, step: 1 }`, `default: 8`, `effect: 'immediate'`, `wire: 'SpeechServiceDeps.maxQueued'`, `since: 2`, `provisional: false`, `rationale`: *"what the listener has been living with; twenty queued replies is ~3 minutes of unrequested speech" (`009` section 2, C3)*. |
-| **Where the number lives** | **`SETTINGS_SCHEMA` in `packages/core/src/settings/schema.ts`, and nowhere else.** T122 deletes `maxQueued: 8` at `packages/plugin/src/main.ts:152` and `DEFAULT_MAX_QUEUED = 20` at `packages/plugin/src/speech-service.ts:74`, and section 5's fallback-literal lint keeps them deleted. |
+| **Where the number lives** | **`SETTINGS_SCHEMA` in `packages/core/src/settings/schema.ts`, and nowhere else.** T122 deletes `maxQueued: 8` at `packages/plugin/src/main.ts:152` and `DEFAULT_MAX_QUEUED = 20` at `packages/plugin/src/speech-service.ts:89`, and section 5's fallback-literal lint keeps them deleted. |
 | **What other documents do** | **Cite `011` `queue.maxQueued`. Restate no number.** A design document that writes `8` is writing a second source of truth, which is the fault this row exists to close. `009` section 2's C3 row and `004` row 36 are the *history* of the value; the schema is the value. |
 | **What `009`'s C3 instruction now means** | *"`DEFAULT_MAX_QUEUED` must change from 20 to 8"* is superseded in form, not in substance: the constant is **deleted**, and the 8 it would have held is the schema default. Same audible behaviour; one fewer place to disagree. |
 
@@ -724,8 +724,8 @@ the question.
 of these holds, and each is a fact the worker already has:
 
 1. **Huddle is on** — the persisted huddle flag is already read at `activate()`:
-   `void huddle.restore().then(...)` `void huddle.restore()` at `packages/plugin/src/main.ts:247`, over the `storage` pair wired as
-   `store: { get: host.storageGet, set: host.storageSet }` (`packages/plugin/src/main.ts:236`); and `huddle.enabled` is already the first clause pushed by the command registered at
+   `void huddle.restore().then(...)` `void huddle.restore()` at `packages/plugin/src/main.ts:266`, over the `storage` pair wired as
+   `store: { get: host.storageGet, set: host.storageSet }` (`packages/plugin/src/main.ts:266`); and `huddle.enabled` is already the first clause pushed by the command registered at
    `main.ts:268` (`:271`). Huddle on *is* a standing request for audio, and no new state is needed to know it.
 2. **A speak request has landed this session** — any `read-aloud.*` speak command has run since
    `activate()`. The listener has demonstrated the channel.
@@ -766,7 +766,7 @@ not that a callback fired. Control case: a valid file produces **zero** provider
 **One rule: a default is a data field in `SETTINGS_SCHEMA`, and the code that consumes a setting has
 no fallback literal at all.** `parse()` always returns a fully populated `Settings`, so a consumer
 never needs `?? something`. That removes the class of bug now live at `main.ts:152` (`maxQueued: 8`)
-against `speech-service.ts:74` (`DEFAULT_MAX_QUEUED = 20`).
+against `speech-service.ts:89` (`DEFAULT_MAX_QUEUED = 20`).
 
 **Pinned by a lint, not by discipline.** A test greps the consumer modules for `??` and `||`
 fallbacks applied to a settings-derived value and fails on any hit, with an allowlist of named
@@ -851,7 +851,7 @@ from the last known-good settings and when.
 path** on request, and the one-time spoken report in section 4.3 ends with it. A file the listener
 cannot find is a file the listener does not have.
 
-**And it speaks what was actually loaded — R7-32.** `read-aloud.status` (`packages/plugin/src/main.ts:268`,
+**And it speaks what was actually loaded — R7-32.** `read-aloud.status` (`packages/plugin/src/main.ts:298`,
 which already assembles a `parts[]` of spoken clauses at `:270-276`) gains a **settings clause**:
 
 > *"Settings revision 18, written 12 minutes ago by hand, from `<path>`. Three fields are using their
@@ -877,7 +877,7 @@ guard costs one `stat` on one file:
 1. **`fs.watch` stays the primary**, 250 ms debounce, the P20 shape — **with its `'error'` event
    subscribed**, exactly as huddle already does —
    `w.on('error', (err) => { this.#watchFailed(file, err) })`
-   (`packages/plugin/src/huddle/index.ts:319`). An
+   (`packages/plugin/src/huddle/index.ts:330`). An
    unsubscribed `'error'` on an `FSWatcher` is both a silent death and a process-level throw waiting
    to happen; that is a settled lesson on the transcript path and it transfers unchanged. A watch
    that reports its own death is the cheap half of this fix; the poll below is the half that catches
@@ -908,7 +908,7 @@ the same failure as no notice at all).
 **What a hand-edit costs.** The worker watches the inbox (`fs.watch`, 250 ms debounce — the same shape
 huddle already uses for transcripts, PITFALLS **P20**, wired at
 `packages/plugin/src/huddle/index.ts:314` with the debounce at `:340`, and — the precedent worth
-copying — its `'error'` event subscribed at `:319` into `#watchFailed`, because *"a rename-replace
+copying — its `'error'` event subscribed at `:330` into `#watchFailed`, because *"a rename-replace
 write or an inode change silently ends the watch"* was FMA site 7 on the transcript path
 (`huddle/index.ts:315-318`)), **backed by the stat poll above**, so an edit takes effect on the next utterance with no restart and does so even when the
 watch is attached to a dead inode. A syntax error that makes the whole file unparseable falls back to the KV mirror and
@@ -978,7 +978,7 @@ against it.
 |---|---|
 | **T120** | `packages/core/src/settings/` owns `SCHEMA_VERSION`, `SETTINGS_SCHEMA`, `FieldDescriptor`, `parse()`, the migration chain, the JSONC reader/writer and the starter-file generator. The lab imports it (004's answer to Q36 stands). |
 | **T121** | Watch the **inbox**; `settings.get`/`settings.set` are the **mirror** — read **first** at `activate()` (1.2a), never the primary *source of truth*. Adds two adapter methods — `packages/plugin/src/adapter/index.ts:74-75` today exposes `storageGet`/`storageSet` and nothing for settings. Also: settings become a **getter** on `SpeechService`, and `#synthesizeOptions()` moves out of the per-chunk loop (section 2.3). **Adds the stat-poll fallback and the watch-health counter** (section 6, R7-32), and subscribes the watcher's `'error'` event. |
-| **T122** | Delete `maxQueued: 8` at `main.ts:152` and `DEFAULT_MAX_QUEUED` at `speech-service.ts:74`. Add the fallback-literal lint. **This is the whole of R7-06's code half**: after it, `queue.maxQueued`'s value exists in `SETTINGS_SCHEMA` and nowhere else, and `012`/`013` cite rather than restate (3.2a). |
+| **T122** | Delete `maxQueued: 8` at `main.ts:162` and `DEFAULT_MAX_QUEUED` at `speech-service.ts:89`. Add the fallback-literal lint. **This is the whole of R7-06's code half**: after it, `queue.maxQueued`'s value exists in `SETTINGS_SCHEMA` and nowhere else, and `012`/`013` cite rather than restate (3.2a). |
 | **T123** | `parse()` returns `ParseResult`; the report is **spoken** (section 4.3) **through the channel `announce.reportChannel` selects, gated on evidence the audio channel is in use** (4.3a, R7-31), with the log and the notification as supplements. A held report must survive to the first requested utterance. |
 | **T124** | Iterates `SETTINGS_SCHEMA`, not `NormalizeOptions`, in the **four** parts of section 3.3 — compile-time exhaustiveness, schema-versus-type set comparison with a named `EXCLUDED` list, an end-to-end reachability case with its control, and **the counted gap report including the `future` bucket** (3.3 (d), R7-29). |
 | **New, and no task carries it** | **The R7-27 restore path** (1.2a) — mirror read first, starter file generated from mirrored values, `revision` seeded to `mirror.__revision + 1` — with its verify-by-effect and negative control. It is T121-shaped work and blocks M12's implementation; `docs/TASKS.md` is another pass's file to edit, so it is recorded here rather than added there. |

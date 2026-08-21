@@ -141,7 +141,7 @@ machine-local, not a reason to wait.
 
 ### Recommendation
 
-Build M11 now, on `OsSynthProvider`, which `docs/TASKS.md:18` already records as `OS-synth-only`
+Build M11 now, on `OsSynthProvider`, which `docs/TASKS.md:30` already records as `OS-synth-only`
 for v1 (T001c). Gate M11 as written ("change a control, hear the difference in under two seconds",
 `docs/TASKS.md:292`). Add one requirement to the lab spec: **each control is tagged
 engine-independent or engine-provisional**, and exported settings (T112f) carry the provider id and
@@ -161,7 +161,7 @@ with itself.
 
 | # | Stage | `index.ts` | What it does | Before → after (from tests) | Status |
 |---|---|---|---|---|---|
-| 1 | `stripFencedCode` | 107 | Fence contents removed; announced or dropped | `Fix it:\n\`\`\`js\nx()\n\`\`\`\nDone.` → `Fix it: Here, a code block is omitted. Done.` (`normalize.test.ts:203-205`) | **configurable** (`codeBlocks`) — but the wording is not |
+| 1 | `stripFencedCode` | 107 | Fence contents removed; announced or dropped | `Fix it:\n\`\`\`js\nx()\n\`\`\`\nDone.` → `Fix it: Here, a code block is omitted. Done.` (`normalize.test.ts:225-227`) | **configurable** (`codeBlocks`) — but the wording is not |
 | 2 | `stripInlineCode` | 133 | Backticks deleted, contents kept | `Call \`foo()\` now` → `Call foo() now` (`test:30`) | hardcoded — **should be configurable** (identifier speech, T180/Q39) |
 | 3 | `expandMarkdownLinks` | 154 | `[label](url)` → `label` | `See [the docs](https://example.com) now` → `See the docs now` (`test:39`) | hardcoded — defensible |
 | 4 | `stripUrls` | 182 | Bare URL → host phrase | `See https://github.com/YoraiLevi/orca-plugin-tts for details` → `See a link to github dot com for details` (`test:207-208`) | hardcoded — **should be configurable** (path is discarded entirely) |
@@ -207,7 +207,7 @@ Hardcoded values in the speech path a listener might reasonably want to change.
 | H19 | Chunk size | `core/src/chunker/index.ts:53` | `DEFAULT_MAX_UNITS = 200` chars | **unexposed preference, high value** — with the ~970 ms per-chunk gap (`plugin/src/sinks/subprocess-sink.ts:8-10`), chunk size *is* the pacing control |
 | H20 | `isolateFirstSentence` | `core/src/chunker/index.ts:66` | `true`, and never forwarded | **unexposed preference** — `SpeechService` passes only `maxUnits` (`plugin/src/speech-service.ts:112-114`), so this option is unreachable from the plugin |
 | H21 | `ABBREVIATIONS` table | `core/src/chunker/index.ts:46-51` | 30 fixed tokens | defensible as fixed |
-| H22 | Queue overflow limit | `plugin/src/main.ts:41` | `maxQueued: 8` | **unexposed preference** — and it disagrees with `DEFAULT_MAX_QUEUED = 20` (`plugin/src/speech-service.ts:74`); the shipped value is 8 |
+| H22 | Queue overflow limit | `plugin/src/main.ts:41` | `maxQueued: 8` | **unexposed preference** — and it disagrees with `DEFAULT_MAX_QUEUED = 20` (`plugin/src/speech-service.ts:89`); the shipped value is 8 |
 | H23 | Overflow-notice coalescing delay | `plugin/src/main.ts:45` | 500 ms | defensible as fixed |
 | H24 | Voice and rate are never passed | `plugin/src/speech-service.ts:121` | `generate(chunk.text)`, no options | **the single largest gap** — `SynthesizeOptions.voice`/`.rate` exist (`core/src/types/index.ts:26-31`) and `OsSynthProvider` implements both (`providers/src/os-synth/index.ts:196-218`), but no caller can reach them |
 | H25 | Linux ignores `rate` | `providers/src/os-synth/index.ts:161-166` | `-w`, `-v` only | **bug (R1 parity)** — rate is honoured on macOS and Windows, silently dropped on Linux |

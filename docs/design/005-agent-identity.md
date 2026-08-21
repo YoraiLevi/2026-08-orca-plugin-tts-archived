@@ -1013,7 +1013,7 @@ The last row is the one that makes the rest evidence rather than ritual.
 
 The gate is *"with two agents running, you can tell who is speaking without being told."* But huddle
 **locks onto exactly one session and stays there** (`HuddleController#locked`,
-`packages/plugin/src/huddle/index.ts:73`) — and that lock **is the P22 fix**. It is not an accident
+`packages/plugin/src/huddle/index.ts:113`) — and that lock **is the P22 fix**. It is not an accident
 to be removed; it is the remedy for *"another session's replies hijacked the audio."*
 
 So: **if only one session ever speaks, per-agent identity distinguishes nothing, and there is no

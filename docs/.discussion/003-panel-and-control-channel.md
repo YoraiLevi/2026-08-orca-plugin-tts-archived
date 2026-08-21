@@ -45,7 +45,7 @@ Six facts constrain everything that follows. Five are settled; the sixth is new 
 
 **F1 — Exactly three host methods are panel-callable.** `workspace.readContext`,
 `terminal.sendText`, `notifications.show`. The set is derived from the spec table by filtering
-`panel: true`, so it cannot drift (`src/shared/plugins/plugin-host-api.ts:261-265`). All thirteen
+`panel: true`, so it cannot drift (`src/shared/plugins/plugin-host-api.ts:144-148`). <!-- citation-check: ignore — VERIFIED CORRECT at the pinned ORCA commit 87097551f8; the checker's anchor heuristic picks `notifications.show` from elsewhere in the same sentence. Recorded in 009 finding E-01: "Do not 'fix' them." --> All thirteen
 method names are at `plugin-host-api.ts:124-244`; there is no `terminal.create`, no
 `terminal.read`, and no way for a plugin to open a pane.
 
@@ -297,7 +297,7 @@ Rules that make the frame safe rather than merely present:
 ##### 2D.3 — The `enter` flag, stated once, because it is the difference between a buffer and a turn
 
 `terminal.sendText` takes `{terminalId, text, enter}`. `enter` appends `\r` to the PTY payload
-(`orca-runtime.ts:39794-39810`). In a shell or an agent CLI that `\r` is what **submits**. This
+(`orca-runtime.ts:39794-39810`). <!-- citation-check: ignore — VERIFIED CORRECT at the pinned ORCA commit 87097551f8; the anchor heuristic picks `terminalId` from elsewhere in the same sentence. Recorded in 009 finding E-01: "Do not 'fix' them." --> In a shell or an agent CLI that `\r` is what **submits**. This
 document therefore fixes it:
 
 | Send | `enter` | Why |
@@ -384,7 +384,7 @@ Why 250 ms and not something looser:
 |---|---|---|
 | click → panel JS → bridge → capability gate → PTY write | 60 ms | local IPC; the gate is a synchronous table lookup (`plugin-capability-gate.ts:39-45`) |
 | PTY → control-pane reader → unix socket → worker | 40 ms | line read on an already-running process, kept-open socket |
-| worker: bump generation, clear queue, cancel synthesis | 100 ms | `provider.cancel()` + `playback.bargeIn()`, already implemented (`packages/plugin/src/speech-service.ts:99` (`cancelSynthesis` → `provider.cancel()`) and `:115` (`bargeIn()`)) |
+| worker: bump generation, clear queue, cancel synthesis | 100 ms | `provider.cancel()` + `playback.bargeIn()`, already implemented (`packages/plugin/src/speech-service.ts:186` (`cancelSynthesis` → `provider.cancel()`) and `:115` (`bargeIn()`)) |
 | audio device drain | 50 ms | **`[claimed]` — nothing has measured this.** See the amendment below |
 | **total** | **250 ms** | |
 
@@ -998,7 +998,7 @@ Three predicates, all of them now computable, which was not true before Q27 reso
 | Predicate | Source | Meaning to a listener |
 |---|---|---|
 | `running` | `~/.claude/sessions/*.json` + `kill(pid,0)` (F5) | *could* speak to me |
-| `followed` | our lock (`HuddleController#locked`, `huddle/index.ts:68`) | *is* speaking to me |
+| `followed` | our lock (`HuddleController#locked`, `huddle/index.ts:113`) | *is* speaking to me |
 | `spoke-recently` | our own last-utterance clock | *was* speaking to me |
 
 **Recommendation: "in the huddle" means `running` and not muted. "The voice" means `followed`.**
@@ -1048,7 +1048,7 @@ Rules:
 >
 > **Status: IMPLEMENTED while this section was being written.** Commit `393248f` *"gate dedup on a
 > per-file high-water mark, not an evictable id set"* landed part 2 below —
-> `#highWater = new Map<string, number>()` (`packages/plugin/src/huddle/index.ts:97`), persisted
+> `#highWater = new Map<string, number>()` (`packages/plugin/src/huddle/index.ts:138`), persisted
 > under `HUDDLE_HIGH_WATER_KEY` (`:42`, read at `:112`, written at `:296`). The gate itself is
 > `packages/plugin/src/huddle/index.ts:266-268`: *"The high-water mark is the gate. The id set is
 > only a secondary filter for duplicates within…"*. `MAX_REMEMBERED_IDS` is now
@@ -1298,8 +1298,8 @@ does **not** bump the generation, and that is precisely what distinguishes it fr
 
 > **Amended 2026-08-21 (round 3 reconciliation), forced by 007 C3.** This rule previously restated
 > the cap as *"the normal cap still applies while paused: 20 queued"*. The number was wrong and
-> there were three of them: `packages/plugin/src/main.ts:96` ships `maxQueued: 8`,
-> `packages/plugin/src/speech-service.ts:74` declares `DEFAULT_MAX_QUEUED = 20`, and this document
+> there were three of them: `packages/plugin/src/main.ts:162` ships `maxQueued: 8`,
+> `packages/plugin/src/speech-service.ts:89` declares `DEFAULT_MAX_QUEUED = 20`, and this document
 > reasoned against 20. **The one value is 8** — it is what the listener has actually been living
 > with, and 20 replies of backlog is ~3 minutes of unrequested speech, which is the P22 experience
 > with a cap on it rather than a cure. `DEFAULT_MAX_QUEUED` must be changed to 8 so there is one

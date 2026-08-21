@@ -70,7 +70,7 @@ control earcons. It writes no implementation code.
 Two facts from our own source, verified at `1161722`, are the starting position:
 
 - **The lock is one nullable string.** `#locked: string | null` at
-  `packages/plugin/src/huddle/index.ts:77`, set by `switchTo()` (`:165-170`), cleared by `unlock()`
+  `packages/plugin/src/huddle/index.ts:118`, set by `switchTo()` (`:165-170`), cleared by `unlock()`
   (`:189-192`), read by `#ensureWatching()` (`:199`). One watcher (`#watcher`, `:78`), one watched
   file (`#watching`, `:79`).
 - **Everything P22 actually fixed is already per-file.** `#primed` is a `Set<string>` keyed by file
@@ -229,7 +229,7 @@ selection, from data on disk, without playing any audio.**
 - Subagent transcripts are therefore invisible to presence **by construction**, not by a heuristic
   that has to recognise them. Nothing has to detect a fan-out.
 
-`decoders.ts:34` already rejects `isSidechain` records — but that filter only catches sidechain
+`decoders.ts:52` already rejects `isSidechain` records — but that filter only catches sidechain
 records *inside* a followed transcript. P31's subagents each wrote a **separate file** whose records
 are ordinary assistant records. The registry gate is what covers that case; the `isSidechain` filter
 is not, and it should not be expected to.
@@ -257,7 +257,7 @@ Five mechanisms, in the order they engage:
    (`docs/design/011-settings.md` sections 3.2 and 3.2a), which owns its value, its range and its
    `provisional` flag; the earlier text here restated C3's `8` and thereby minted a fourth
    specification of one control (R7-06). Two live defects it named are `011`'s to close under T122
-   and are recorded here only so they are not re-discovered: `speech-service.ts:74` declares
+   and are recorded here only so they are not re-discovered: `speech-service.ts:89` declares
    `DEFAULT_MAX_QUEUED = 20`, and `main.ts:99` passes `8` at the SHA this document pins — **`:99`,
    not `:96` as this line previously read (R7-37**, verified with `git show
    1161722:packages/plugin/src/main.ts`).
@@ -423,7 +423,7 @@ presence look like on day two, and what prunes?*
 | Registry entries | **self-pruning** — the file is removed on clean exit; a named value moved and moved back in Q27's probe (5 → 6 → 5) | the OS |
 | Registry entries after a **crash** | the reaper (4.3), at the next poll | ours |
 | Transcript files — **31 in this worktree already** [measured-here] | never enumerated by presence | section 3.2 |
-| `#highWater` entries | `MAX_TRACKED_FILES = 50` (`packages/plugin/src/huddle/index.ts:49`), oldest-touched evicted (`:282-290`) | already shipped |
+| `#highWater` entries | `MAX_TRACKED_FILES = 50` (`packages/plugin/src/huddle/index.ts:85`), oldest-touched evicted (`:282-290`) | already shipped |
 | `#spoken` ids | `MAX_REMEMBERED_IDS = 300` (`:44`), and **explicitly no longer load-bearing** (`:45-47`) — the gate is `replies.slice(mark)` (`:268`) | already shipped |
 | `F` membership | `session.followMax` (section 11a), and re-resolved against the live registry at restore (R5) | this document |
 | Identity assignments (`005` section 9) | pruned when the `sessionId` leaves the registry **and** its transcript is gone | `005` owns it; this document supplies the liveness input |

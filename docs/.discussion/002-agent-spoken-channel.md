@@ -307,7 +307,7 @@ reached by a route no design closed.
 The comparison is damning because the project already found the answer and declined to copy it.
 buzz caps at 8,096 characters and appends *"... message truncated."* **aloud**
 (`agent_tts_routing.rs:27-40`, cited by 003 §9 adoption 3). Our own clipboard path already does
-both — `DEFAULT_MAX_CHARS = 20_000`, truncation announced (`packages/plugin/src/clipboard.ts:63`).
+both — `DEFAULT_MAX_CHARS = 20_000`, truncation announced (`packages/plugin/src/clipboard.ts:104`).
 The huddle path, which takes **untrusted input from a model**, does neither.
 
 **The mechanism.**

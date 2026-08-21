@@ -376,7 +376,7 @@ settings id in the project** — including the ones M16 and M17 add at `since: 3
       `docs/design/011-settings.md` T122 says **delete** both `maxQueued: 8` and `DEFAULT_MAX_QUEUED`
       so no call site holds a fallback literal; `docs/design/012-huddle-presence.md` says set it to 8
       **and** make it `ceil(8 / |F|)`; `docs/design/013-voice-input.md` assumes a flat 8; and
-      `packages/plugin/src/speech-service.ts:74` still reads `const DEFAULT_MAX_QUEUED = 20`.
+      `packages/plugin/src/speech-service.ts:89` still reads `const DEFAULT_MAX_QUEUED = 20`.
   - [ ] T125a `011`'s schema owns the control. Every other document **cites** `queue.maxQueued`; none
         restates the number. The shipped default moves **20 → 8** (C3: twenty queued replies is ~3
         minutes of unrequested speech).
