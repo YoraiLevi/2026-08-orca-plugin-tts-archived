@@ -77,10 +77,22 @@ describe('SC-15 — what fs.watch does to a watcher when the writer replaces the
       expect(events, `no rename event at all: ${JSON.stringify(events)}`).toContain('rename')
       // But not as an error, so the 'error' subscription cannot see it.
       expect(errors, 'a rename-replace produced an error event — this finding is obsolete').toEqual([])
-      // And the watcher is dead: the append after the replace produced nothing.
+      // And the watcher is dead: the append after the replace produced no CHANGE event.
+      //
+      // `change` is the assertion, not "no events at all". Measured on both platforms
+      // `[measured-here]`, n=1 each, macOS 26.5 and node:24-bookworm under podman:
+      //
+      //     darwin  all: ["change","rename"]                    after rename: []
+      //     linux   all: ["change","change","rename","rename"]  after rename: ["rename"]
+      //
+      // Linux reports the atomic replace TWICE — the unlink and the create both surface as
+      // `rename`. That extra event is the OS narrating the replace, not the watch working: on
+      // BOTH platforms the append afterwards produces nothing. R11-01 holds identically; only
+      // the event count differs. Asserting `toEqual([])` made a true finding fail on Linux,
+      // which is a stricter assertion than the claim it exists to defend.
       const afterRename = events.slice(events.indexOf('rename') + 1)
-      expect(afterRename,
-        'the watch survived the replace — re-check R11-01, it may be fixed or platform-dependent')
+      expect(afterRename.filter((e) => e === 'change'),
+        'the watch survived the replace and delivered a change — re-check R11-01, it may be fixed')
         .toEqual([])
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
