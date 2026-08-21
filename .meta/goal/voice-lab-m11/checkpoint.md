@@ -30,6 +30,42 @@ was preserved by the architect at `20e64cc` after checking it was 56/56 green, a
 deliberately NOT committed because it was red.** Preserving a peer's work across a break is worth a
 byline; it is not worth a broken build, and only running the tests tells you which case you are in.
 
+## ROUTED AND UNOWNED — take these early on resume
+
+`node scripts/mutation-check.mjs` is **34/37**. All three live in `speech-service.ts` / the queue,
+which was outside the reporting agent's file set, so nobody owns them.
+
+**One is a live hole, and it is the important one.**
+
+- **`skip-reported-as-failure` — SURVIVED.** The invariant is *"006 site 32: a control the listener
+  pressed must never be reported as an engine failure"*, and `speech-service.test.ts` no longer
+  notices when it is violated. **That test cannot fail for the reason it exists.** It sits on the
+  P22 helplessness path: the listener presses skip, and is told the engine broke. Fix the test
+  first — prove it red against the mutant — then confirm the behaviour.
+- **`stop-one-sided` — target drifted.** `cancelSynthesis: () => { deps.provider.cancel() }` is no
+  longer in the file.
+- **`bargein-no-cancel` — target drifted.** `this.#deps.cancelSynthesis()` is no longer in the file.
+
+The two drifts are a refactor that moved code without updating the registry. Cheap to repair — but
+until they are, **two named invariants are unguarded** while the script reports them as errors
+rather than passes, which is the difference between a gap that is visible and one that is loud but
+meaningless.
+
+## Two gate decisions answered, with the condition that would reverse them
+
+- **QUOTE-GONE: reported, never gated.** A new one appears when somebody **fixes code** a document
+  quotes verbatim, so gating makes the bug fix break the build — and the person who fixed the bug
+  usually cannot fix the document. **A ratchet a correct action breaks is not a ratchet.** It is a
+  work queue. *Reversal condition:* today 15 of 19 sit in record documents where re-pointing is
+  harmful by construction; if the population became mostly live documents that can be fixed cheaply,
+  a falling ratchet becomes right, because then a correct action clears it instead of breaking it.
+- **Malformed suppression markers: GATED AT ZERO.** A marker the parser cannot read is a false claim
+  of coverage — the suppression never happened while the document reads as though it did, which is
+  worse than a stale citation that is wrong and says so. **Zero is the only moment when setting a
+  threshold is not an argument about a backlog** — the whole lesson of the superseded 34.
+  **Prose stamps (`[live tree]`) are reported, not gated**: failing on them would punish a document
+  for being honest about its own uncertainty.
+
 ## Resume here — the one task waiting on the reset
 
 1. **`uptime` first.** If the load average is not in single digits, do not measure. Say so and wait.
