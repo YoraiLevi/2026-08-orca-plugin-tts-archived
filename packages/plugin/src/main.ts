@@ -8,19 +8,37 @@
  * build at install time and rejects any file escaping the plugin root (PITFALLS P17).
  */
 import { OsSynthProvider, ProviderRegistry } from '@orca-tts/providers'
+import type { PlaybackSink, TtsProvider } from '@orca-tts/core'
 import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi } from './adapter/index.js'
 import { readClipboard, ClipboardUnavailableError } from './clipboard.js'
 import { SpeechService } from './speech-service.js'
 import { SubprocessSink } from './sinks/subprocess-sink.js'
 import { HuddleController, sessionLabel } from './huddle/index.js'
 
-export default function activate(orca: OrcaApi): void {
+/**
+ * Test seam. ORCA calls `activate(orca)` and gets every real default; a test calls
+ * `activate(fakeOrca, { provider, sink, projectsDir })` and can drive a command end to end without
+ * spawning a synthesizer or reading the developer's own `~/.claude`.
+ *
+ * P26's rule, verbatim: for anything a user is meant to reach, test reachability from the
+ * OUTERMOST object a caller constructs to the innermost consumer. Without this seam the outermost
+ * object was untestable, which is exactly how `switchTo` shipped with no caller.
+ */
+export interface ActivateOptions {
+  readonly provider?: TtsProvider
+  readonly sink?: PlaybackSink
+  readonly projectsDir?: string
+  /** Overflow-announcement coalescing window; see SpeechServiceDeps.announceDelayMs. */
+  readonly announceDelayMs?: number
+}
+
+export default function activate(orca: OrcaApi, options: ActivateOptions = {}): void {
   const host = makeHost(orca)
   host.log('read-aloud: activating')
 
   const registry = new ProviderRegistry()
 
-  const sink = new SubprocessSink({ log: host.log })
+  const sink = options.sink ?? new SubprocessSink({ log: host.log })
   let speech: SpeechService | null = null
   let engineError: string | null = null
   /**
@@ -52,7 +70,10 @@ export default function activate(orca: OrcaApi): void {
   // The provider talks to the user directly for detection failures and degraded rungs: on Linux
   // the interesting failure ("espeak-ng is not installed") happens inside prepare(), far from any
   // command the user pressed.
-  registry.register(new OsSynthProvider({ notify: (m) => { announce(m) } }), { preferred: true })
+  registry.register(
+    options.provider ?? new OsSynthProvider({ notify: (m) => { announce(m) } }),
+    { preferred: true }
+  )
 
   // Resolve the engine in the background: activate() must return promptly so command registration
   // is never delayed behind a process spawn.
@@ -73,6 +94,7 @@ export default function activate(orca: OrcaApi): void {
       sink,
       log: host.log,
       maxQueued: 8,
+      ...(options.announceDelayMs === undefined ? {} : { announceDelayMs: options.announceDelayMs }),
       // Supplement only. The spoken sentence naming the count comes from SpeechService itself, so
       // it cannot be lost by a notification channel that is muted, denied, or simply not looked at.
       onDropped: (n) => {
@@ -135,7 +157,8 @@ export default function activate(orca: OrcaApi): void {
     // are about WHOSE WORDS the listener is hearing — provenance, the thing 006 ranks S1 — so both
     // belong in the audio stream, not the notification tray.
     notify: (m: string) => { announce(m) },
-    store: { get: host.storageGet, set: host.storageSet }
+    store: { get: host.storageGet, set: host.storageSet },
+    ...(options.projectsDir === undefined ? {} : { projectsDir: options.projectsDir })
   })
 
   // Survive the idle worker reap: without this, huddle mode silently turns itself off.
@@ -145,11 +168,10 @@ export default function activate(orca: OrcaApi): void {
 
   host.registerCommand('read-aloud.toggle-huddle', () => {
     const on = huddle.toggle()
-    host.notify('Read Aloud', `Huddle mode ${on ? 'ON' : 'OFF'}`)
-    // Say it out loud. This is a text-to-speech plugin talking to a voice-first user: speech is
-    // the one status channel that always works. The panel cannot be updated (no host->panel
-    // channel, orca#15638) and a desktop notification is transient and easy to miss.
-    if (speech !== null) speech.speak(on ? 'Huddle mode on.' : 'Huddle mode off.', 'replace')
+    // 'now', not speak('replace'): the confirmation is heard immediately, and a clipboard read the
+    // listener has queued behind it survives. Toggling OFF still stops speech — HuddleController
+    // does that itself — because that is what OFF means.
+    announce(`Huddle mode ${on ? 'on' : 'off'}.`, 'now')
   })
 
   host.registerCommand('read-aloud.status', async () => {
@@ -162,7 +184,12 @@ export default function activate(orca: OrcaApi): void {
       if (now !== null) parts.push(`Now reading ${now}.`)
       if (s.queued > 0) parts.push(`${s.queued} more waiting.`)
       else if (now === null) parts.push('Nothing is being read.')
-      s.speak(parts.join(' '), 'replace')
+      // C5: this command exists to answer "what is it even reading right now", and it was wired
+      // to 'replace' — which cleared #pending with no onDropped call, so the answer deleted the
+      // subject of the question, silently. It even says "N more waiting" while removing them.
+      // 'now' interrupts the current utterance (the listener just asked, and asked now) and keeps
+      // the queue the answer is describing.
+      s.announce(parts.join(' '), 'now')
     })
   })
 
@@ -175,8 +202,9 @@ export default function activate(orca: OrcaApi): void {
   // Stop following the current session. Huddle stays on but goes quiet until a session is picked.
   host.registerCommand('read-aloud.unfollow', () => {
     huddle.unlock()
-    host.notify('Read Aloud', 'No longer following any session')
-    speech?.speak('Stopped following that session.', 'replace')
+    // Announce, do not replace: replies already queued from that session are still replies the
+    // listener was waiting for. Unfollow stops NEW ones arriving; Stop is the control for silence.
+    announce('Stopped following that session.', 'now')
   })
 
   host.registerCommand('read-aloud.speak-last-reply', async () => {
