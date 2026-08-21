@@ -645,7 +645,31 @@ function under1000(n: number): string {
   return r === 0 ? h : `${h} ${under100(r)}`
 }
 
-/** 0..999999 to words. Larger numbers are left for the engine, which handles them better. */
+/**
+ * 0..999999 to words. At or above a million the numeral is handed to the engine untouched.
+ *
+ * That ceiling is from M2 (`0f9335f`) and predates the thousands-separator work; it is NOT a
+ * consequence of it. What it used to carry was the bare assertion "the engine handles them
+ * better", which nobody had run. It has now been run, on macOS only:
+ *
+ *   `say -o <file>` (never the device — P31), then compare the rendered audio.
+ *   `1234567` and `1,234,567` render to BYTE-IDENTICAL audio, 3.616 s `[measured-here]`, against
+ *   3.707 s for the spelled-out words and 1.852 s for digit-by-digit — so `say` reads it as
+ *   "one million two hundred thirty four thousand five hundred sixty seven", not as seven digits.
+ *   `1000000`, `1,000,000` and the literal string `one million` render to the same checksum
+ *   (`e0dc2573…`) `[measured-here]` — the same utterance, three ways of writing it.
+ *   CONTROL: `one million and one` renders to a different checksum and 1.424 s, so the comparison
+ *   can tell two strings apart and is not passing vacuously.
+ *
+ * Separators make no difference to `say` at all, which is why they are preserved on the way out
+ * rather than stripped: above the ceiling the engine is the better reader either way.
+ *
+ * WINDOWS SAPI AND espeak-ng ARE `[claimed]` — NOT measured, and I do not know. espeak-ng is not
+ * installed on the machine this was written on. If espeak-ng spells a bare `1234567` digit by
+ * digit, this ceiling is a Linux-only defect hiding behind a macOS-only probe, and the same
+ * `-o file` comparison above is what would show it. Run it on the Linux CI leg before trusting
+ * this on Linux.
+ */
 export function numberToWords(n: number): string {
   if (n < 1000) return under1000(n)
   const th = Math.floor(n / 1000)
