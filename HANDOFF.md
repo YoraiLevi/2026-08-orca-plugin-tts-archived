@@ -53,8 +53,8 @@ not refined**, which is the author's own summary after one day of listening.
 | | |
 |---|---|
 | Repo | https://github.com/YoraiLevi/orca-plugin-tts (public) |
-| CI | green on macOS, Linux, Windows |
-| Tests | **337 passing, 18 files** at `745d36c` `[measured-here]`, `pnpm test` |
+| CI | **RED.** `pnpm check:citations --max-stale=34` exits 1 at clean `HEAD` with **91 stale** `[measured-here]`. The 3-OS test matrix is green; the citation ratchet is not, and has not been since the J03 code movement. Found by round 8 (**R8-03**) after this table had claimed green for four days. |
+| Tests | **584 passing, 23 files** at `c57192e` `[measured-here]`, `pnpm test` |
 | Verified by a human | huddle mode spoke live agent replies, 2026-08-21 |
 | Next | **M11 Voice Lab** — and nothing else until it exists |
 
