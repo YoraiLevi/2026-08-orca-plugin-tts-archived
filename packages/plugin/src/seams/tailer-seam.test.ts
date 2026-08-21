@@ -250,3 +250,77 @@ describe('SC-17 — the suite waits on conditions, not on how fast the machine h
     expect([...KNOWN_OFFENDERS], 'seven files still predict how fast this machine is').toEqual([])
   })
 })
+
+/* ================================================================== SC-18
+ * seam: a GATE -> whatever is supposed to run it
+ */
+
+/**
+ * SC-18 — a gate that works perfectly and is never run.
+ *
+ * `021-review-round12.md` R12-02, added at the close of the session on the team lead's report.
+ *
+ * The other eight instances of round 8's class are all *"the rule was followed and the failure
+ * happened anyway"*. **This one is different, and the difference is why it earns its own row: the
+ * check was neither broken nor blind. It was simply never executed.** `pnpm lint` had four real
+ * errors that reproduce locally in full — nobody had run it — and `tsc -b` passed locally while
+ * failing in CI, because the incremental cache never revisited the file. Both surfaced the first
+ * time the hosted CI ran, which was an hour before this was written.
+ *
+ * **It is the same shape C6 was in for this entire project until that run**: a Windows leg that was
+ * `[claimed]` for eleven rounds and turned out to be green the moment anyone looked.
+ *
+ * A gate has TWO failure modes and this document has only ever tracked one:
+ *
+ *   - **it cannot go red** — P32, P36, the mutation registry, and most of section 22;
+ *   - **it can go red and nothing ever asks it** — this row.
+ *
+ * The second is invisible to every instrument built for the first. A mutation check proves a test
+ * CAN fail; it says nothing about whether that test is ever invoked. **Both halves are needed, and
+ * only one existed.**
+ *
+ * WHAT THIS ROW DOES NOT CLAIM. Not every script must run in CI — `test:watch` is a developer
+ * convenience and `voice-lab` is an interactive tool. The contract is narrower: **a script that
+ * asserts something about correctness must be executed by something, and where it is not, the
+ * reason is written down.** An unexecuted gate with a stated reason is a decision; an unexecuted
+ * gate with no reason is this defect.
+ */
+describe('SC-18 — every gate the repo defines is executed by something', () => {
+  const REPO_ROOT = join(HERE, '../../../..')
+  const scriptsOf = (): string[] =>
+    Object.keys((JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as
+      { scripts: Record<string, string> }).scripts)
+
+  /**
+   * Scripts deliberately not run in CI, each with the reason. Restated here (P36) so that adding a
+   * new unexecuted gate is a decision recorded in a diff rather than a silent omission.
+   */
+  const EXEMPT: Record<string, string> = {
+    'test:watch': 'a developer convenience; `test` is the gate',
+    'voice-lab': 'an interactive tool with a browser in the loop; it has no verdict to give',
+    'bench:latency': 'opens the audio device on `--audible` and is a measurement, not an assertion (P31)',
+    'bench:lab-gate': 'drives a real browser; measured deliberately rather than gated',
+    'probe:numbers': 'run by the CI leg directly rather than through the script name'
+  }
+
+  it('CONTROL: the CI file really does name the gates it runs', () => {
+    const ci = readFileSync(join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8')
+    expect(ci, 'the detector cannot see any script invocation at all').toMatch(/pnpm (run )?test\b/)
+  })
+
+  it('every script is either run by CI or exempt with a stated reason', () => {
+    const ci = readFileSync(join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8')
+    const unrun = scriptsOf().filter((s) =>
+      !new RegExp(`pnpm (run )?${s.replace(/:/g, ':')}\\b`).test(ci))
+    const unexplained = unrun.filter((s) => EXEMPT[s] === undefined)
+    expect(unexplained,
+      'these gates are defined, are never executed, and no reason is recorded. ' +
+      'Either wire them into CI or write down why not — see 021 R12-02.').toEqual([])
+  })
+
+  it('no exemption is stale: everything claimed exempt still exists as a script', () => {
+    // An exemption for a script that was deleted is a comment nobody will ever re-read.
+    const scripts = new Set(scriptsOf())
+    expect(Object.keys(EXEMPT).filter((s) => !scripts.has(s)), 'stale exemptions').toEqual([])
+  })
+})

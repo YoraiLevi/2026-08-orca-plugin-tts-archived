@@ -13,7 +13,7 @@ yielding on first look — and recommended the experiment this document reports:
 > reaches 2 of 3 honestly. **Still yielding, and that is the strongest possible evidence for
 > continuing — evidence rather than an argument.**"*
 
-**It yielded.** One item, and it did not come from opening anything. It came from the team lead
+**It yielded twice.** Neither item came from opening anything. It came from the team lead
 noticing that the same suite gave two different answers.
 
 **No timing number is quoted in this document.** The machine is loaded; every duration read today is
@@ -102,12 +102,64 @@ by waiting on a condition.**
 
 ---
 
+## R12-02 — A gate that works perfectly and is never run
+**S5 / process** · `package.json`, `.github/workflows/ci.yml`, clauses 3 and 5
+
+Added at the close of the session, from the team lead's report of the **first hosted CI run**.
+
+**The other eight instances of round 8's class are all *"the rule was followed and the failure
+happened anyway"*. This one is different, and the difference earns it a row: the check was neither
+broken nor blind. It was simply never executed.**
+
+- `pnpm lint` had **four real errors that reproduce locally in full**. Nobody had run it.
+- `tsc -b` **passed locally and failed in CI**, because the incremental build cache never revisited
+  the file — so the local run was not the same question.
+
+Both surfaced the first time the hosted CI ran. **It is the same shape C6 was in for this entire
+project until that run**: a Windows leg recorded `[claimed]` for eleven rounds, which turned out to
+be green the moment anyone looked.
+
+**A gate has two failure modes and this document has only ever tracked one:**
+
+| Failure mode | Tracked by |
+|---|---|
+| it **cannot go red** | P32, P36, `check:mutants`, and most of section 22 |
+| it **can go red and nothing ever asks it** | **nothing, until this row** |
+
+The second is invisible to every instrument built for the first. **A mutation check proves a test
+*can* fail; it says nothing about whether that test is ever invoked.** Both halves are needed and
+only one existed.
+
+**Measured** `[measured-here]`: **12 scripts defined, 7 invoked by CI, 5 never invoked.**
+
+**What the row does not claim.** Not every script must run in CI — `test:watch` is a developer
+convenience and `voice-lab` is an interactive tool with no verdict to give. The contract is
+narrower: **a script that asserts something about correctness must be executed by something, and
+where it is not, the reason is written down.** An unexecuted gate with a stated reason is a
+decision; an unexecuted gate with no reason is this defect. **SC-18** carries the exemption list with
+a reason per entry, plus a row that fails on a *stale* exemption — an exemption for a script that no
+longer exists is a comment nobody will ever re-read.
+
+### And the good news from the same run
+
+**The hosted CI's Voice Lab job is green on all three OSes, including Windows** `[measured-here]`. C6
+is fully met, and the Windows leg moves from `[claimed]` to `[measured-here]`. **That closes `006`
+section 22.5's *"Windows and Linux are reasoned from source"* gap for the probes that job covers** —
+by running them, which is this round's whole subject.
+
+---
+
 ## What this round means for the counter
 
-**Round 12 is not dry. 1 item clears the bar.**
+**Round 12 is not dry. 2 items clear the bar** (R12-01, R12-02).
 
 **Excluded and named:** the four flakes themselves are J28's to fix and are symptoms of R12-01, not
-separate items. SC-14's red is deliberate and was already counted as R10-06.
+separate items. SC-14's red is deliberate and was already counted as R10-06. The four `lint` errors
+and the `tsc -b` failure are symptoms of R12-02, not separate items, and are already fixed
+(`4f54fca`, `8a33e95`).
+
+**SESSION ENDED HERE — 92 % of the usage window.** Round 12 is recorded as **complete**: both items
+are written up, both have instruments, and the ledger row is closed. **Round 13 has not started.**
 
 **Provenance:** reported by the team lead from a count discrepancy between two worktrees; the
 structural reading, the nine-file census, the fix of this author's own two instances, and the
@@ -123,15 +175,15 @@ Round 11 set this up in advance, and the answer is unambiguous:
 | 9 | 7 | the audio path |
 | 10 | 7 | the decoder, the build-time contract |
 | 11 | 2 | the tailer, the adapter |
-| **12** | **1** | **none — there was nothing left to open** |
+| **12** | **2** | **none — there was nothing left to open** |
 
-**A round with no new inventory and no new method still yielded**, and what it yielded is a defect
+**A round with no new inventory and no new method yielded twice**, and what it yielded is a defect
 that invalidates the measuring instrument the whole protocol is calibrated against. That is the
 outcome round 11 named as *"the strongest possible evidence that the process should continue — and
 unlike every previous round, it would be evidence rather than an argument."*
 
-**It is also thin, and this record will not dress it up.** One item is one item. The curve is
-26 → 7 → 7 → 2 → 1 and it is bending hard.
+**It is also thin, and this record will not dress it up.** Two items is two items. The curve is
+26 → 7 → 7 → 2 → 2 and it is bending hard.
 
 **Recommendation for round 13, unchanged from round 11's plan:** run it the same way — no new
 inventory, no new method — but **not until the suite is deterministic.** R12-01 makes a dry verdict

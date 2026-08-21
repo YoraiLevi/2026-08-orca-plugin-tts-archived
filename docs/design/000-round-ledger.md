@@ -52,7 +52,7 @@ The bar makes the counter measure convergence rather than enthusiasm.
 | 9 | **Build**, not review: `006` section 22 — seam contracts, one row per adjacent pair, each seen red | 1 | **7** | **no** | see `018-review-round9.md`. 10 rows, 3 seams asked-and-empty, 6 rows OPEN. Every row proved red; the mutation log is `018` section 4 |
 | 10 | Close section 22.5's own list; extend section 22 to the seams **into ORCA** | 1 | **7** | **no** | see `019-review-round10.md`. Seam 10 closed; the decoder gets rows; a 32,525-record census of the real transcript format, never taken before. **Recommends continuing past 10** — see below |
 | 11 | The last two inventories: the transcript **tailer** and the **adapter/manifest** — the seams whose far side is not our code | 1 | **2** | **no** | see `020-review-round11.md`. **The seam inventory is complete: five for five, every one yielding on its first look.** Thinnest round yet, bar fully met |
-| 12 | **No new inventory, no new method** — round 11's own experiment | 1 | **1** | **no** | see `021-review-round12.md`. **A round with nothing left to open still yielded**, and what it yielded invalidates the instrument the counter is calibrated against |
+| 12 | **No new inventory, no new method** — round 11's own experiment | 1 | **2** | **no** | see `021-review-round12.md`. **A round with nothing left to open still yielded**, and what it yielded invalidates the instrument the counter is calibrated against |
 
 ## Parking lot
 
@@ -323,10 +323,11 @@ Round 11 set this up in advance: *"run rounds 12 and 13 with no new inventory an
 still yielding, and that is the strongest possible evidence for continuing — evidence rather than an
 argument."*
 
-**It yielded. 1 item.**
+**It yielded twice.**
 
 | Item | Clause |
 |---|---|
+| **R12-02** — **a gate that works perfectly and is never run.** The first hosted CI run found four real `lint` errors nobody had executed and a `tsc -b` failure the incremental cache hid locally. A gate has two failure modes — *cannot go red*, tracked by P32/P36/`check:mutants`, and *can go red but nothing ever asks it*, tracked by nothing until now. **12 scripts defined, 7 invoked by CI, 5 never invoked** | 3, 5 |
 | **R12-01** — nine test files wait on a **fixed sleep**, which is a prediction about how fast the machine is. Two clean worktrees minutes apart gave **657/658 and 653/658**, four of five reds being load artefacts. **A suite count means "the machine was quiet", not "the code is correct"** — and the dry-round verdicts in this ledger rest on that suite | 3, 5 |
 
 **Excluded and named:** the four flakes are J28's to fix and are symptoms of R12-01, not items.
@@ -340,7 +341,7 @@ SC-14's deliberate red was already counted as R10-06.
 | 9 | 7 | the audio path |
 | 10 | 7 | the decoder, the build-time contract |
 | 11 | 2 | the tailer, the adapter |
-| **12** | **1** | **none — nothing left to open** |
+| **12** | **2** | **none — nothing left to open** |
 
 **The curve is bending hard and the round is thin, and this ledger will not dress that up.** One item
 is one item. But it is the item round 11 predicted would be decisive, and it is decisive in the
@@ -351,3 +352,32 @@ round that comes back clean on a quiet machine and a round that comes back clean
 really checked **are the same observable** — the exact confusion `006` section 0 ranks worst. Fix the
 instrument, then run round 13. A dry verdict on a deterministic suite would mean something for the
 first time in this protocol.
+
+## Session end — 2026-08-21, 92 % of the usage window
+
+**Recorded as a break, not as a verdict.**
+
+| | |
+|---|---|
+| Rounds complete | **12** — the author's minimum of ten is met twice over |
+| **Dry counter** | **0 of 3.** In twelve rounds it has never started. |
+| Round 12 | **complete**, not interrupted — both items written up, both with instruments, ledger row closed |
+| Round 13 | **not started** |
+
+**The counter is 0 of 3 and that is not rounded in either direction.** Round 12 was thin (2 items)
+and was **not** rounded down to dry; nothing was interrupted mid-flight and so nothing is recorded as
+incomplete. A counter fudged at a break is worse than one left open, because the next agent cannot
+tell which happened.
+
+**Also landed in the final hour, from the first hosted CI run:** the Voice Lab job is **green on all
+three OSes including Windows** `[measured-here]`, so **C6 is fully met** and the Windows leg moves
+from `[claimed]` to measured. That closes `006` section 22.5's *"Windows and Linux are reasoned from
+source"* gap for the probes that job covers.
+
+### The single next step
+
+**Make the suite deterministic (R12-01), then run round 13.** Not the other order. R12-01 makes a dry
+verdict unreadable: a round that comes back clean because the machine was quiet and a round that
+comes back clean because nothing was really checked **are the same observable**, which is the
+confusion `006` section 0 ranks worst. **A dry verdict on a deterministic suite would mean something
+for the first time in this protocol.** J28 owns the flakes; SC-17 is the row.
