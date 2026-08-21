@@ -41,9 +41,10 @@
  *
  * FIDELITY COST, STATED RATHER THAN GLOSSED:
  *   - The audio device is NOT opened (see SILENCE below), so `outputLatency` is the fake output's
- *     figure and not CoreAudio's. Both `baseLatency` and `outputLatency` are recorded per trial and
- *     reported, so the reader can add a real device's latency if they want to. On this rig that
- *     term is single-digit-to-low-tens of milliseconds against a 2,000 ms gate.
+ *     figure and not CoreAudio's. MEASURED, not assumed: the same page and the same probe with
+ *     `--disable-audio-output` removed report `outputLatency` 24.0 ms against 16.0 ms here — so
+ *     this route understates the true first-sample instant by about 8 ms against a 2,000 ms gate,
+ *     and the indicator is one that demonstrably moves. Both latencies are recorded per trial.
  *   - Headless Chrome is not the author's browser. Decode and scheduling are the same Blink/WebAudio
  *     code; window compositing and tab throttling are not exercised.
  *   - The scheduling lead (`scheduleBuffers` starts at `currentTime + 0.02`) IS included, because
@@ -578,7 +579,10 @@ async function main () {
     meta.probeErrorsAfter = await cdp.evaluate('window.__gate.errors')
     meta.contexts = await cdp.evaluate('window.__gate.contexts')
     meta.latency = await cdp.evaluate(
-      '(() => { const s = window.__gate.starts[0]; return s ? { baseLatencyMs: s.baseLatency*1000, outputLatencyMs: s.outputLatency*1000, sampleRate: s.sampleRate } : null })()')
+      // The LAST start, not the first: outputLatency reads 0 until the context has rendered its
+      // first quantum, so reading it at the first start would report a zero that means "too early"
+      // rather than "no device".
+      '(() => { const a = window.__gate.starts; const s = a[a.length - 1]; return s ? { baseLatencyMs: s.baseLatency*1000, outputLatencyMs: s.outputLatency*1000, sampleRate: s.sampleRate } : null })()')
   } finally {
     cdp?.close()
     chrome?.child?.kill('SIGKILL')
@@ -820,7 +824,9 @@ function report (meta) {
     if (meta?.latency) {
       console.log(`  AudioContext: sampleRate ${meta.latency.sampleRate} · baseLatency ` +
         `${meta.latency.baseLatencyMs?.toFixed(1)} ms · outputLatency ${meta.latency.outputLatencyMs?.toFixed(1)} ms ` +
-        '(a FAKE output device: no CoreAudio, no sound — add a real device\'s latency yourself)')
+        '(a FAKE output device. Control case, same page and probe with --disable-audio-output ' +
+        'removed: outputLatency 24.0 ms against 16.0 ms here [measured-here] — so the route costs ' +
+        'about 8 ms of the 2,000 ms gate, and the indicator is one that can move.)')
     }
     if (meta?.probeErrorsAfter?.length) {
       console.log(`  probe errors: ${meta.probeErrorsAfter.length} — ${meta.probeErrorsAfter[0]}`)
