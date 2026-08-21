@@ -1,0 +1,19 @@
+{"type":"attachment","uuid":"x01","attachment":{"kind":"file","path":"/tmp/notes.md","content":"NEVER_SPEAK_attachment body text that a widened decoder would happily read aloud"}}
+{"type":"assistant","uuid":"x02","message":{"role":"assistant","content":[{"type":"thinking","thinking":"NEVER_SPEAK_thinking the user asked about the build"},{"type":"tool_use","id":"t9","name":"Bash","input":{"command":"pnpm test"}},{"type":"text","text":"The build is green."}]}}
+{"type":"user","uuid":"x03","message":{"role":"user","content":[{"type":"text","text":"NEVER_SPEAK_user is the build green?"}]}}
+{"type":"bridge-session","uuid":"x04","sessionId":"s-1","label":"NEVER_SPEAK_bridge_session label"}
+{"type":"mode","uuid":"x05","mode":"NEVER_SPEAK_mode plan"}
+{"type":"permission-mode","uuid":"x06","permissionMode":"NEVER_SPEAK_permission_mode acceptEdits"}
+{"type":"last-prompt","uuid":"x07","lastPrompt":"NEVER_SPEAK_last_prompt the user's own words, echoed back would be the P22 harm"}
+{"type":"atis-latch","uuid":"x08","latch":"NEVER_SPEAK_atis_latch state"}
+{"type":"agent-setting","uuid":"x09","key":"model","value":"NEVER_SPEAK_agent_setting value"}
+{"type":"ai-title","uuid":"x10","title":"NEVER_SPEAK_ai_title a generated session title"}
+{"type":"system","uuid":"x11","subtype":"stop_hook_summary","content":"NEVER_SPEAK_system hook output, several lines of it"}
+{"type":"system","uuid":"x11b","subtype":"compact_boundary"}
+{"type":"pr-link","uuid":"x12","url":"https://example.invalid/pr/1","title":"NEVER_SPEAK_pr_link title"}
+{"type":"frame-link","uuid":"x13","url":"https://example.invalid/frame/1","title":"NEVER_SPEAK_frame_link title"}
+{"type":"file-history-snapshot","uuid":"x14","path":"/tmp/a.ts","content":"NEVER_SPEAK_file_history_snapshot whole file contents"}
+{"type":"queue-operation","uuid":"x15","operation":"enqueue","content":"NEVER_SPEAK_queue_operation queued user input"}
+{"type":"file-history-delta","uuid":"x16","path":"/tmp/a.ts","patch":"NEVER_SPEAK_file_history_delta @@ -1 +1 @@"}
+{"type":"artifact-comment-monitor","uuid":"x17","state":"NEVER_SPEAK_artifact_comment_monitor watching"}
+{"type":"fork-context-ref","uuid":"x18","ref":"NEVER_SPEAK_fork_context_ref parent-uuid"}

@@ -134,6 +134,25 @@ const MUTANTS = [
     test: 'packages/plugin/src/huddle/decoders.test.ts'
   },
   {
+    id: 'attachment-type-accepted',
+    claim: 'R10-03: the TYPE gate, tested against a record built to get past everything else',
+    note: 'the all-record-types fixture alone does NOT kill this — a real-shaped attachment carries no `message`, so the decoder returns null for a different reason. The hand-built disguised record is what defends the gate',
+    file: 'packages/plugin/src/huddle/decoders.ts',
+    from: "  if (rec['type'] !== 'assistant') return null",
+    to: "  if (rec['type'] !== 'assistant' && rec['type'] !== 'attachment') return null",
+    test: 'packages/plugin/src/huddle/decoders.test.ts'
+  },
+  {
+    id: 'thinking-allowlist-only',
+    claim: 'the `type === text` allowlist, alone',
+    equivalent: true,
+    note: "mirror image of thinking-continue-only: the two `continue`s above still drop thinking and tool blocks before they reach the push, so only removing BOTH leaks. Recorded because it was mistaken for a live defect on principle VIII once, and the next person deserves the answer rather than the alarm",
+    file: 'packages/plugin/src/huddle/decoders.ts',
+    from: "    if (type === 'text' && typeof block['text'] === 'string') parts.push(block['text'])",
+    to: "    if (typeof block['text'] === 'string') parts.push(block['text'])",
+    test: 'packages/plugin/src/huddle/decoders.test.ts'
+  },
+  {
     id: 'user-turns-spoken',
     claim: 'the listener never hears their own prompts read back',
     file: 'packages/plugin/src/huddle/decoders.ts',
