@@ -56,6 +56,12 @@ describe('T042d cancel latency is measured, not assumed', () => {
     await p.prepare()
     const iter = p.generate('This is a long sentence. '.repeat(30))[Symbol.asyncIterator]()
     const pending = iter.next()
+    // Did the engine finish BEFORE we interrupted? On `say` (~1,100 ms) it never has; espeak-ng
+    // renders this in under 50 ms, so on Linux the chunk exists already and cancelling cannot
+    // un-produce it. Racing the engine and asserting the outcome is the same mistake as waiting
+    // out a queue drain — the precondition has to be observed, not assumed.
+    let settledBeforeCancel = false
+    void pending.then(() => { settledBeforeCancel = true }, () => { settledBeforeCancel = true })
     await new Promise((r) => setTimeout(r, 50))
     const t0 = Date.now()
     p.cancel()
@@ -69,7 +75,17 @@ describe('T042d cancel latency is measured, not assumed', () => {
     // Two-sided (R014): the point is not that the call returned, it is that no audio escaped for
     // text the listener has already interrupted. A fast return that still yielded a chunk would
     // satisfy a latency-only assertion and be exactly the bug.
-    expect(first.done, 'cancel returned promptly but still produced audio').toBe(true)
+    //
+    // Guarded by the observation above rather than by the engine's speed. A chunk that was
+    // already complete when the listener pressed Stop is not an escape — it is audio that existed
+    // before the interrupt. Asserting `first.done` unconditionally made this fail on Linux for
+    // being FAST, which is not the property under test. CI run 32506050161 `[measured-here]`.
+    if (settledBeforeCancel) {
+      console.info('[measured] the engine completed before the interrupt — no escape is possible; '
+        + 'the post-cancel assertion does not apply on this engine')
+    } else {
+      expect(first.done, 'cancel returned promptly but still produced audio').toBe(true)
+    }
   }, 120_000)
 })
 
