@@ -103,14 +103,23 @@ export function decoderFor(agent: AgentKind): (line: string) => DecodedReply | n
  * The heuristic is strictly weaker than the fact. A compaction that leaves the decodable reply
  * count equal or higher is invisible to it, and huddle then re-reads replies it has already spoken.
  *
- * This does NOT replace the length check, and that is a deliberate answer rather than caution.
- * The two catch different things and neither is a superset:
- *   - the BOUNDARY RECORD catches a compaction that did not shrink the decodable reply count,
- *     which is exactly the case the length check cannot see;
- *   - the LENGTH CHECK catches a rewrite that emits no boundary record at all — `--resume`, a log
- *     rotation, a truncated or replaced file. ORCA writes `compact_boundary` for compaction, not
- *     for those.
- * Removing either one re-opens a hole, and `huddle.test.ts` holds one test per direction.
+ * WHAT THE LENGTH CHECK ACTUALLY DOES, corrected — the first draft of this comment claimed the two
+ * were complementary nets and that was wrong, so it is written down rather than quietly fixed.
+ *
+ * The `replies.length < mark` BRANCH is inert. `scripts/mutation-check.mjs` already records it as
+ * `compaction-no-reanchor`, `equivalent: true`: `#setHighWater(file, replies.length)` runs
+ * unconditionally below it, so the mark re-anchors either way, and `slice(mark)` on a shortened
+ * array is empty regardless. Replacing that whole branch with `if (false)` leaves **508 tests
+ * green** `[measured-here]`.
+ *
+ * So a shrinking rewrite — `--resume`, rotation, truncation — was never guarded by the heuristic
+ * the comment credited; it was guarded by the CLAMP. And a compaction that leaves the reply count
+ * EQUAL OR HIGHER was guarded by nothing at all, because the clamp treats the extra records as
+ * new. That is the hole this closes, and it is wider than 019 R10-02 states: the proxy was not
+ * merely weaker than the fact, it was doing nothing.
+ *
+ * The branch is left in place — it is the log line that tells an operator a rewrite happened, and
+ * deleting known-inert code is a separate decision from adding a missing guard.
  *
  * Deliberately NOT folded into `DecodedReply`: `decodeClaudeLine` returning a third kind is
  * R10-01's fix, it has a constraint of its own (the unknown-block-type allowlist is principle

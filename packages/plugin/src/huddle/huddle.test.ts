@@ -390,9 +390,10 @@ describe('006 TT3 — a half-written final line is re-read, not concluded on', (
  * the stake: *"a lost reply is recoverable, a replayed session is not"* — the "another session's
  * replies hijacked the audio" harm the author reported from real use.
  *
- * The two directions below are the whole finding. The first is the case the length check CANNOT
- * see, and it is what makes reading the record worth doing. The second is the case the record
- * cannot see, and it is why the length check stays.
+ * The first test below is the whole finding: a compaction that leaves the reply count EQUAL OR
+ * HIGHER. Without the fix it speaks `reply 14` and `reply 15` — old turns re-emitted with new
+ * uuids, read aloud a second time, which 006 C9 calls unrecoverable. The other two are controls
+ * that stop it passing for the wrong reason.
  */
 const boundary = (): string => JSON.stringify({ type: 'system', subtype: 'compact_boundary' })
 
@@ -424,9 +425,12 @@ describe('R10-02 a compaction is read from the transcript, not inferred from its
     expect(speech.spoken, 'the rewritten session was read aloud again').toEqual([])
   })
 
-  it('CONTROL: a rewrite with NO boundary record is still caught by the length check', async () => {
-    // `--resume`, a log rotation and a truncation emit no `compact_boundary`. If reading the record
-    // had replaced the length check rather than joining it, this would speak the session again.
+  it('CONTROL: a shrinking rewrite with NO boundary record still speaks nothing', async () => {
+    // `--resume`, rotation and truncation emit no `compact_boundary`. Named a CONTROL and not a
+    // proof of the length check, because the length BRANCH is inert — mutation-check records it as
+    // `compaction-no-reanchor`, equivalent, and replacing it with `if (false)` leaves 508 tests
+    // green. What actually holds this case is the unconditional clamp plus an empty `slice(mark)`.
+    // The value here is that adding the boundary guard did not break the path that already worked.
     const { root, worktree, file } = await scaffold()
     const speech = new FakeSpeech()
     const h = boot(root, new MemoryStore(), speech)

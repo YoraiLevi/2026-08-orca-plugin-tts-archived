@@ -150,10 +150,28 @@ const MUTANTS = [
     test: 'packages/plugin/src/huddle/huddle.test.ts'
   },
   {
+    id: 'compaction-boundary-ignored',
+    claim: 'R10-02: a compaction that does NOT shrink the reply count must not be re-spoken',
+    note: 'the ONLY guard for this case — the shrink branch below is equivalent, see compaction-no-reanchor',
+    file: 'packages/plugin/src/huddle/index.ts',
+    from: '    if (seenBoundaries !== undefined && boundaries > seenBoundaries) {',
+    to: '    if (false) {',
+    test: 'packages/plugin/src/huddle/huddle.test.ts'
+  },
+  {
+    id: 'compaction-boundary-always',
+    claim: 'the boundary count is compared to the PREVIOUS read, not to zero',
+    note: 'clamping on any boundary at all would make a once-compacted transcript permanently mute',
+    file: 'packages/plugin/src/huddle/index.ts',
+    from: '    if (seenBoundaries !== undefined && boundaries > seenBoundaries) {',
+    to: '    if (boundaries > 0) {',
+    test: 'packages/plugin/src/huddle/huddle.test.ts'
+  },
+  {
     id: 'compaction-no-reanchor',
     claim: 'the compaction early-return branch',
     equivalent: true,
-    note: '#setHighWater(file, replies.length) below runs unconditionally, so the mark re-anchors anyway',
+    note: '#setHighWater(file, replies.length) below runs unconditionally, so the mark re-anchors anyway. R10-02: this being inert is WHY compact_boundary had to be read — the shrink proxy guarded nothing, and a compaction that did not shrink the count was unguarded entirely',
     file: 'packages/plugin/src/huddle/index.ts',
     from: '    if (replies.length < mark) {',
     to: '    if (false) {',

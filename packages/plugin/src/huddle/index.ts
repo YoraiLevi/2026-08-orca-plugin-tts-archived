@@ -401,7 +401,7 @@ export class HuddleController {
      */
     const seenBoundaries = this.#compactBoundaries.get(file)
     this.#compactBoundaries.set(file, boundaries)
-    if (false) {
+    if (seenBoundaries !== undefined && boundaries > seenBoundaries) {
       this.#setHighWater(file, replies.length)
       this.#deps.log(`read-aloud: transcript compacted (${boundaries} boundaries), re-anchoring at ${replies.length}`)
       await this.#persistSpoken()
