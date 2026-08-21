@@ -81,6 +81,30 @@ interface PendingUtterance {
   announcement?: true
 }
 
+/**
+ * What a self-test observed, end to end. Every field is a value that MOVED, not a state that was
+ * asserted: bytes the provider actually produced for a phrase synthesized fresh at that moment,
+ * and whether the sink's player exited 0.
+ *
+ * 006 section 19 ranks "that the plugin is mute" as the number one thing this system cannot detect:
+ * "audio reached the device" is asserted nowhere, so "the plugin is broken" and "the plugin is
+ * idle" are the same observable state on all three platforms. This is that instrument. It
+ * synthesizes a FRESH phrase deliberately — a stored WAV would pass while synthesis is dead, which
+ * is the presence-not-effect trap the whole project is written against.
+ */
+export interface SelfTestResult {
+  readonly chunks: number
+  readonly bytes: number
+  /** Null when the sink does not report a byte counter (a fake, or a provider that owns playback). */
+  readonly bytesPlayed: number | null
+  readonly error: string | null
+  /** The sentence spoken to the listener. Reported so a caller can assert it without speaking. */
+  readonly spoken: string
+}
+
+/** A sink that can report what it actually played. Structural, so any sink may opt in. */
+interface ObservableSink { readonly bytesPlayed?: number }
+
 export class SpeechService {
   readonly #deps: SpeechServiceDeps
   readonly #playback: PlaybackQueue
@@ -139,6 +163,47 @@ export class SpeechService {
     this.#pending.splice(at, 0, { text, announcement: true })
     this.#cancelled = false
     void this.#drain()
+  }
+
+  /**
+   * Synthesize a fresh phrase end to end and report what actually happened, aloud.
+   *
+   * The listener-facing half of 006 section 19 rank 1. Every other diagnostic in this system
+   * ("engine ready", "N commands registered", `isPlaying`) reports healthy on a mute plugin; this
+   * one cannot, because it reports numbers that came from this invocation.
+   *
+   * Deliberately `'now'`: the listener asked for it this second, and a self-test that queued behind
+   * a backlog would answer a question they had already given up on.
+   */
+  async selfTest(phrase = 'Read aloud self test. One two three.'): Promise<SelfTestResult> {
+    const before = (this.#deps.sink as ObservableSink).bytesPlayed
+    let chunks = 0
+    let bytes = 0
+    let error: string | null = null
+    try {
+      const spokenText = normalize(phrase, this.#deps.normalizeOptions ?? {})
+      const chunker = new Chunker({})
+      for (const chunk of [...chunker.addText(spokenText), ...chunker.finish()]) {
+        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
+          chunks++
+          bytes += audio.data.length
+          await this.#deps.sink.enqueue(audio)
+        }
+      }
+    } catch (err) {
+      error = String(err)
+    }
+    const after = (this.#deps.sink as ObservableSink).bytesPlayed
+    const bytesPlayed = typeof before === 'number' && typeof after === 'number' ? after - before : null
+    const spoken = error !== null
+      ? `Self test failed. The voice engine reported: ${error}.`
+      : bytes === 0
+        ? 'Self test failed. The voice engine produced no audio at all.'
+        : bytesPlayed === 0
+          ? `Self test: the engine produced ${bytes} bytes, but nothing reached the audio device.`
+          : `Self test passed. ${chunks} chunk${chunks === 1 ? '' : 's'}, ${bytes} bytes of fresh audio.`
+    this.announce(spoken, 'now')
+    return { chunks, bytes, bytesPlayed, error, spoken }
   }
 
   /** Speak `text`. See SpeakMode. Returns immediately; use `isSpeaking` to observe. */

@@ -52,6 +52,10 @@
       {
         "id": "read-aloud.unfollow",
         "title": "Read Aloud: stop following this session"
+      },
+      {
+        "id": "read-aloud.self-test",
+        "title": "Read Aloud: self test (is the voice actually working?)"
       }
     ],
     "events": [

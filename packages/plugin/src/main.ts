@@ -33,7 +33,7 @@ export interface ActivateOptions {
 }
 
 /** How many commands `orca-plugin.json` declares. Pinned by main.test.ts, not by memory. */
-const EXPECTED_COMMANDS = 8
+const EXPECTED_COMMANDS = 9
 
 export default function activate(orca: OrcaApi, options: ActivateOptions = {}): void {
   const host = makeHost(orca)
@@ -41,7 +41,24 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
 
   const registry = new ProviderRegistry()
 
-  const sink = options.sink ?? new SubprocessSink({ log: host.log })
+  /**
+   * 006 site 35/36 and section 19 rank 1. `#play` resolved `true` on `close` regardless of exit
+   * code, so a failing player ended the ladder AND "the plugin is broken" was indistinguishable
+   * from "the plugin is idle". The sink now says which; this routes that into the audio stream,
+   * because a log is not a channel this listener has.
+   *
+   * Urgency 'next', never 'now': playback failing is something that has ALREADY happened, and if
+   * the failure is total the announcement is unheard either way — so there is no case where
+   * interrupting the listener's current sentence buys anything.
+   */
+  const sink = options.sink ?? new SubprocessSink({
+    log: host.log,
+    onFailure: (f) => {
+      announce(f.kind === 'no-player'
+        ? `${f.reason}. Speech is being produced but nothing can play it.`
+        : `Audio playback failed: ${f.reason}.`)
+    }
+  })
   let speech: SpeechService | null = null
   let engineError: string | null = null
   /**
@@ -148,6 +165,24 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
           ? err.message
           : 'could not read the clipboard')
       }
+    })
+  })
+
+  /**
+   * "Is this thing actually working?" — the one question the system could not answer.
+   *
+   * Every diagnostic a listener can reach reports healthy on a mute plugin: `prepare()` said warm,
+   * the registry said `preferred`, the log said "engine ready", `isPlaying` said false because
+   * nothing was playing. 006 section 19 ranks that number one of the things we cannot detect at
+   * all. This synthesizes a phrase FRESH and reports the byte counts that came back — a named
+   * value that moved, not a state that was asserted.
+   */
+  host.registerCommand('read-aloud.self-test', async () => {
+    await withSpeech(async (s) => {
+      const r = await s.selfTest()
+      // Supplement, and the only channel left if the answer is "nothing reached the device".
+      host.notify('Read Aloud', r.spoken)
+      host.log(`read-aloud: self-test chunks=${r.chunks} bytes=${r.bytes} played=${String(r.bytesPlayed)}`)
     })
   })
 

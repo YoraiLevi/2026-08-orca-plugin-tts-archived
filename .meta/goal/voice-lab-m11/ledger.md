@@ -37,3 +37,21 @@ audit trail that explains the whole session after the fact.
   This keeps the queue full while J03 blocks J11, and costs one integration step later.
 - Risk accepted: if J11 changes the shape, the page needs an edit. The shape is
   specified in two committed documents, so the risk is small and named.
+
+### J10 `fixtures` — done
+- did: six fixtures in `fixtures/` per T110a–f — `code-heavy`, `tables`, `paths`,
+  `architecture`, `short`, `hostile`. Plus a coverage test.
+- evidence, **verified by the architect against an independent oracle**, not from the
+  subagent's report: an out-of-band `normalize()` run over every fixture, asserting each
+  produces output that differs from its input.
+  ```
+  architecture.md  3106 -> 3391 CHANGED     code-heavy.md  1824 -> 1568 CHANGED
+  hostile.md       2095 -> 1983 CHANGED     paths.md       1576 -> 1897 CHANGED
+  short.md          529 ->  595 CHANGED     tables.md      1432 -> 1918 CHANGED
+  ```
+  A fixture that passed through unchanged would exercise nothing; none did.
+- suite: 186 -> **213 passing**, 15 files. No test plays audio.
+- audited_before: no (mechanically simple, no shared path). tested_after: yes.
+- note: `code-heavy` and `hostile` SHRINK (code and emoji removed); the other four GROW
+  (paths, tables and units expand). Both directions are expected and are a cheap sanity
+  check for anyone re-running this.
