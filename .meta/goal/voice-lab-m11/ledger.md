@@ -303,3 +303,67 @@ notices. Same species as the stale citations that went green against the wrong s
 Recommendation is **stable string ids** with position derived from the pipeline array; J21 writes it
 up, does not implement it — it is its own Job. J23 was given the same facts without the conclusion,
 so if round 8 reaches it independently the record shows two witnesses, not one echo.
+
+---
+
+## Wave 3 — J21 J22 J23 J24 J25 J26 (in flight at the time of writing)
+
+### Landed and verified by the architect, by effect
+
+- **G-1 closed.** All six fixtures answered 503; three now answer 200 with NDJSON. `spoken` opens
+  `"Yes — the first sentence…"` instead of `"<!"`. Probed against a running lab, not inferred.
+- **`--port` is honoured.** It was silently ignored and then died EADDRINUSE.
+- **The argv class is fixed** (`4ccfa20`). `"First point.\n\n---\n\nSecond point."` now delivers
+  both chunks, `lost: 0`, the `---` chunk synthesizing to 49,960 bytes. Previously chunk 1 was lost.
+- **The million ceiling is closed on both shipped engines** (`da66820`), in a `node:24-bookworm`
+  container with espeak-ng 1.51: `1234567` and `1,234,567` byte-identical, spelled-out and
+  digit-by-digit both distinct, a control that differs so no pass is vacuous — and
+  `espeak-ng -q -x` phonemising it to *"one million, two hundred-and thirty four thousand…"*,
+  which states the answer rather than inferring it from byte counts.
+
+### Corrections to the record, all of them mine
+
+- **My G-1 diagnosis was wrong.** `say -o t.wav "<!"` → exit 0, 4,332 bytes: `"<!"` synthesizes
+  fine. The killer was the comment's **closing** `-->`; `say` parses a leading `--` as an option.
+  Round 8 caught it as R8-04 and I verified it before accepting.
+- **CI was never green.** `HANDOFF.md` claimed it for four days; the citation gate exits 1. My own
+  compaction prompt repeated the claim on that table's authority — a stale summary line seeds copies.
+- **The 91 was 92, and J03 did not cause it.** `42280b6` (`feat(settings)`) inserted
+  `NORMALIZE_OPTION_KEYS` near the top of `normalizer/index.ts` and shifted nine sites below it.
+- **My espeak-probe brief was defective.** I specified two outcomes (absent / disagrees); it needs
+  **four** — absent · words · digits · **inconclusive**. A probe that cannot say "I could not tell"
+  reports *acceptable* when two references converge under noise. Caught by J21, routed before J25
+  shipped it.
+- **I nearly published a fabricated regression.** An 11 s synth looked like the argv fix regressing.
+  Machine load was **51.62**, 18 concurrent `say`/node processes, and the control — a reply with no
+  dashes at all — took **71 s and dropped a chunk**. Killed my own gate run. The number was a
+  property of the environment, which is the lesson J21 had taught two messages earlier.
+
+### Decisions taken by the architect
+
+- **Stage renumber: serialise, not split.** Arrived after J21 had finished; six-minute unbootable
+  window at `560be8d`. My dispatch error, reported unprompted by J21 with SHA and duration.
+- **Rejected** folding comment-stripping into `stripFencedCode` to avoid the renumber — one stage
+  doing two jobs, and the ladder loses the row that *is* the deliverable.
+- **The Lab import: option (a), inline.** A relative specifier can never resolve from the `data:`
+  URL `stageFns()` compiles the normalizer into, proved with a passing control. Option (b) would
+  relax a load-bearing property to save one function.
+- **The citation gate: ratchet on LOST, report DRIFTED.** Authorised, and flagged to the author as
+  a change of meaning. `standing` 85/98 vs `measured` 130/142 stay side by side. Cause bisected:
+  **`4ccfa20` moved the total 85 → 130 in one commit with no documentation changing** — a bug fix
+  silently invalidated a third of the repo's citations. LOST is 1 and churn-invariant; DRIFTED at
+  129 stops pretending to be a gate. Required: a synthetic LOST must turn it red, or the ratchet is
+  decorative in the other direction.
+- **SC-13 stays unmarked, not `it.fails`.** A Lab that cannot boot is not latent.
+
+### Open, and honest about it
+
+- **C3 remains UNMET at p95 3,401 ms.** Re-measurement is deferred until the machine is quiet and
+  is the architect's to schedule. J22 has never reported the old-vs-new comparison.
+- **SC-3 is fixed in the code and still green as `it.fails`.** The row asserts
+  `argvIsSafeForBareExec(chunk.text)` — a property of the *chunk* — while the fix is in the
+  provider's call, so the assertion can never flip. **The defect is closed and the indicator cannot
+  see it.** Routed to J24 as a finding about section 22 itself, not to be silently made green.
+- **The Lab is down and the tree is untestable** — 565/642, 77 failures, `ERR_MODULE_NOT_FOUND` on
+  `speakable.js`. P37 live, hit by a second agent through a different door on the same day.
+- **`006` pin-vs-reconcile is the author's**, and now carries 66 of the 129 DRIFTED.
