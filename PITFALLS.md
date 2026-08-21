@@ -6,6 +6,31 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P31 — A subagent swarm in the watched worktree is the P22 scenario at a scale nothing was tested against
+**Symptom:** the author, sitting at the machine, hears agent replies they never asked for — including
+one agent talking over another — while huddle is following "their" session. Reported live:
+*"I hear beeps... then 'the tests pass'... and then another agent seem to spoke while it was saying
+the test pass so it was hard to understand what they said."*
+**Cause:** every subagent spawned by the Task tool is a **full Claude session that writes its own
+transcript** into the same `~/.claude/projects/<worktree>/` directory the huddle watcher tails. A
+six-agent fan-out inside this project's own worktree put seven live transcripts in one directory,
+all modified within nine minutes. Session selection was designed and tested against one or two
+concurrent sessions; it was never exercised against seven, and the developer of the tool running a
+swarm inside the tool's own worktree is the exact configuration nobody designs for.
+**Instead:** run fan-outs in a separate worktree, or with a HOME whose `projects/` directory the
+watcher does not tail, so agent transcripts never land in the directory the listener is following.
+When that is not possible, unfollow before fanning out.
+**Also:** any benchmark that measures *device-side* latency must play real audio, so it is audible
+to whoever is at the machine. `scripts/bench-latency.mjs` is silent by default for that reason —
+synthesis-side numbers come from `say -o <file>`, which never touches the audio device, and the
+audible measurements are behind an explicit opt-in with a printed warning. **A benchmark whose
+default behaviour interrupts the user is a benchmark that gets deleted.**
+**Consequence for the design:** this is the first *observed* reproduction of P22 since its fix, and
+it arrived through a path none of the fixes cover. The high-water mark, the lock and the per-file
+priming all assume a small, stable set of sessions in a worktree.
+**Verify by effect:** `ls -lt ~/.claude/projects/<worktree>/*.jsonl | head` during a fan-out — count
+the files modified in the last five minutes. More than two means the listener is in this situation.
+
 ## P30 — "Never fail silently" that terminates in a channel the user does not have
 **Symptom:** the project has a real, enforced discipline — every catch notifies, every degradation
 is announced, every drop is reported — and the user still experiences unexplained silence. Nothing
