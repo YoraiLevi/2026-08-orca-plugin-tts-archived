@@ -174,3 +174,48 @@ audit trail that explains the whole session after the fact.
   that were written. Its cheap 60% is a corpus test over `fixtures/` asserting every input token
   appears in the output or in an announcement; it needs no offset map and would have caught the
   deleted check marks of site 50.
+
+### J20 `reconcile7` — RESUMED and done
+- **First task was forensic, not creative.** The killed pass left 1,548 lines and no ledger, so
+  nothing recorded which findings it addressed. Reconstructed by reading the commit diff **and then
+  verifying each amended document's BODY**, not its header amendment table. That check fired:
+  **`013`'s header claimed seven findings resolved and its body carried four** — R7-06, R7-28 and
+  R7-29 were claimed and absent, and gate M17a was still missing R7-30's rows. The pass died inside
+  that document, between writing its plan and doing the work.
+- **did:** `docs/design/016-reconciliation-round7.md`, committed **before** the first amendment and
+  appended to as each finding closed — the direct lesson of the death.
+- **resolved here:** R7-06/R7-28/R7-29 (`013`'s halves) · R7-30's gate rows · R7-23 (`010` swept into
+  R006 vocabulary; `HANDOFF`'s false repo-wide claim corrected) · R7-07 (citations) · R7-12 · R7-09 ·
+  R7-10 · R7-14 · **010-vs-015 settled**.
+- **`010` and `015` are one story.** 015's standing *"where we disagree, 015 wins"* clause is retired
+  — a precedence rule between two live documents makes the reader adjudicate every time. The three
+  real disagreements were rungs 2, 3 and 4, and `010` section 12 is edited in place to 015's
+  conclusions, with both withdrawals left visible. Each document now carries the other's ownership
+  table; a reader asking *"what is M9 and how is it gated"* reads 015 and only 015.
+- **citations: 190 stale → 80 `[measured-here]`**, and **all 80 are in `006` (63), `014` (13) and
+  `008` (4) — the record, which this job may not edit. Zero remain in any document it may.**
+  CI's ratchet is 34, so **CI is still red and cannot go green without R7-08**, which is the author's
+  call because it reverses `009`'s exemption of the record.
+  - The 33→190 jump was **~75 % code movement, not new material**: at the before-reading, 143 of the
+    190 were in documents the killed pass never opened. J03's four `packages/` commits moved every
+    line-pinned citation in the repo at once. The commit message that blamed the new material was
+    honest but wrong about the proportion.
+- **A real defect this job caused and repaired:** its first `citation-check: ignore` markers carried
+  the reason *inside* the comment, which the tool does not parse. They were inert, and `--fix` then
+  rewrote `plugin-host-api.ts:261-265` → `:144-148` — the one citation `009` E-01 says *do not fix*.
+  Reverted, markers repaired, **`PITFALLS` P35** written (34 → 35 entries, verified by `grep -c`).
+  Presence is not effect.
+- **P34 fired again, and this job is the one that did it.** Two of its commits (`172c061`, `74f174b`)
+  used `git add -A` and swept up another agent's uncommitted `packages/` work —
+  `clipboard.ts`, `main.ts`, `speech-service.ts`, `huddle/index.ts` and three test files. **Nothing is
+  lost; it is committed under a docs commit message.** Not reverted, because reverting would destroy
+  work this job did not author. **Whoever owns `packages/` should know their changes are already in
+  history under those two SHAs.** P34 exists and was still walked into: the rule needs a habit, which
+  is `git add <explicit paths>` in a shared tree.
+- **left open, with reasons, in `016` section 3:** R7-04 and R7-05's code halves (`packages/`, owned
+  by another agent, actively committing), R7-05's cache decision and R7-08 (**author's**), and
+  round 7's eleven parking-lot entries (out of scope).
+- suite: **337 passing, 18 files** at `745d36c`. No test plays audio.
+- audited_before: yes — the map in `016` section 1 is the audit. tested_after: yes, by re-running
+  `check:citations` after every change and by grepping `PLAN.md`/`TASKS.md` for each debunked claim.
+

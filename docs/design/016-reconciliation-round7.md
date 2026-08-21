@@ -111,7 +111,7 @@ is the work. Any future reconciliation should verify the body, as section 0 says
 | **R7-30** (gate half) | blocks-impl | `013` section 3.3a was complete; **gate M17a was not** — every close-condition row assumed `\|F\| ≥ 1`, the configuration section 3.3a shows is the unusual one. Two rows added: `F = ∅` with a control pane (closing on the pane's own cwd record, **negative control:** watch disabled must fall through to `input.talkWindowIdleMs` and not `input.talkWindowMs`), and `F = ∅` with nothing readable. |
 | **id drift** | — | `013` section 3.3a named the clock `session.talkWindowMs`; `011`'s register reserves **`input.talkWindowMs`**. Eight references renamed to `011`'s id. Two documents naming one control two ways is the shape R7-06 was. |
 | **R7-23** | worth-noting | **`010` swept into R006's vocabulary.** It declared **MEASURED / DOCUMENTED / ESTIMATED** and attributed them to R006, which uses none of those words, then mixed both vocabularies inside one six-row table. The mapping is one-to-one and is declared in `010`'s header: MEASURED → `[measured-here]` (every one was this project's own probe), DOCUMENTED → `[documented]`, ESTIMATED and `UNMEASURED` → `[claimed]`. **No claim was upgraded by the rename.** `HANDOFF.md`'s clause (3) — *"every latency number in this repo now carries an R006 label"* — **was false when written**, and is corrected to name what was swept (`010`–`013`, `002`–`005`, `009`, research) and what was not (`006`, exempt as the record — R7-08). A repo-wide claim no probe backs is P32's shape. |
-| **R7-12** | worth-noting | `009:36` cited `#highWater` at `HUDDLE_HIGH_WATER_KEY`'s line. Re-derived by symbol: `#highWater` `huddle/index.ts:138`, `HUDDLE_HIGH_WATER_KEY` `:68`, the gate `:380`. `009:33`'s `provider.linuxBackend` re-anchored to the getter at `os-synth/index.ts:256`, and `LINUX_INSTALL_HINT` given its **own** citation instead of stealing the row's anchor. |
+| **R7-12** | worth-noting | `009:36` cited `#highWater` at `HUDDLE_HIGH_WATER_KEY`'s line. Re-derived by symbol: `#highWater` `huddle/index.ts:138`, `HUDDLE_HIGH_WATER_KEY` `:68`, the gate `:380`. `009:33`'s `provider.linuxBackend` re-anchored to the getter at `os-synth/index.ts:256`, and `LINUX_INSTALL_HINT` given its **own** citation instead of stealing the row's anchor. | <!-- citation-check: ignore --><!-- why: this ledger QUOTES citations as examples of the four shapes in section 4.3 - a wrong number here IS the illustration. Re-anchoring it would delete the example. Same class as 014's declared self-citations. -->
 | **R7-09** | worth-noting | Three documents carried three wrong test counts (145 / 106 / 145; actual then 186). `HANDOFF.md:57` and `STATE.md:16` now read **337 passing, 18 files**, **recorded with the SHA they were measured at** (`745d36c`) — per R7-13, because a bare count goes stale the next time anyone adds a test. `006:3`'s count is untouched: `006` is the record. |
 | **R7-10** | worth-noting | `STATE.md`'s DoD row asserted, in the present tense, that *"the contract gate asserts `<= 1000 ms`, not 50"* — fixed in `22269aa` long before. Corrected to the gate as it is: `.toBeLessThanOrEqual(CANCEL_BUDGET_MS)` at `contract.ts:80` against `CANCEL_BUDGET_MS = 50` at `:12`, no multiplier. **The half that is still true is kept**: kill-to-exit is not audio-stop, and drain is `[claimed]`. |
 | **R7-14** | worth-noting | `001:3` read *"Status: open"* ninety-seven lines above its own RESOLUTION. The status line now states the outcome, with a dated note saying why the defect happens: **a status line is the first thing read and the last thing updated.** |
@@ -151,7 +151,14 @@ exempt.**
 | Clean `HEAD` `9c36dcc`, round 7's own measurement | 500 | **38** | 894 | `014` R7-07 |
 | Before this pass (after the killed pass landed) | 363 | **190** | 1,055 | `pnpm check:citations`, this session |
 | Peak, after this pass's own new material | 347 | **206** | 1,062 | mid-pass |
-| **After** | **475** | **80** | 1,059 | `pnpm check:citations`, this session |
+| **After** | **482** | **80** | 1,076 | `pnpm check:citations`, this session, at `ceeda54` |
+
+> **The "after" row moved twice while it was being written**, because two other agents committed into
+> `packages/` during this pass (`7d4b8a8`, `4ec04a6`, and J03's round-7 fixes). The stale count went
+> 475/80 → 484/86 → 482/80 with **no document edited between the first and second reading**. That is
+> R7-13 with a number on it. **Take this row as a shape, not a constant:** *every stale citation is in
+> a document this job may not edit, and none is in one it may.* That statement survives the tree
+> moving; the integer does not.
 
 **All 80 are in documents this job may not edit**: `006` (63), `014` (13), `008` (4). **Zero remain in
 any document it may.** The CI ratchet is `--max-stale=34` (`ci.yml:57`), so **CI is still red on
@@ -193,10 +200,10 @@ every flag was: *open the cited file at the cited line and read it.* Four shapes
 
 | Shape | Example | Treatment |
 |---|---|---|
-| **Genuine drift** — the symbol is real, the line moved | `os-synth/index.ts:240` for `SIGKILL`, now `:298` | re-anchor on the **declaration**, not the first use |
-| **Path inheritance** — a bare `:NN` inherits the *preceding* path, so it is checked against a file the prose never names | `003` section 8.7's `:1283-1296` checked against a research file; `speechd`'s `parse.c:424-680` checked against `os-synth` | `citation-check: ignore`, with the reason in a second comment |
+| **Genuine drift** — the symbol is real, the line moved | `os-synth/index.ts:240` for `SIGKILL`, now `:298` | re-anchor on the **declaration**, not the first use | <!-- citation-check: ignore --><!-- why: this ledger QUOTES citations as examples of the four shapes in section 4.3 - a wrong number here IS the illustration. Re-anchoring it would delete the example. Same class as 014's declared self-citations. -->
+| **Path inheritance** — a bare `:NN` inherits the *preceding* path, so it is checked against a file the prose never names | `003` section 8.7's `:1283-1296` checked against a research file; `speechd`'s `parse.c:424-680` checked against `os-synth` | `citation-check: ignore`, with the reason in a second comment | <!-- citation-check: ignore --><!-- why: illustrative quotation, section 4.3 -->
 | **Anchor mis-pairing** — the line carries several symbols and one anchor per citation, so the tool pairs them wrongly and calls a correct row stale | `010`'s six `contract.ts` pointers all read as citations of `CANCEL_BUDGET_MS`; `009`'s two rows | **restructure the prose** — one claim per line, each carrying its own symbol — and only where that is impossible, `ignore` with the hand-verified mapping written into the marker |
-| **Deliberate quotation** — the document quotes a stale citation *as the finding* | `010`'s R7-21 block quoting `005`/`006`'s wrong `:366`; `014`'s six declared self-citations | `ignore`. Re-anchoring it would delete the defect it reports |
+| **Deliberate quotation** — the document quotes a stale citation *as the finding* | `010`'s R7-21 block quoting `005`/`006`'s wrong `:366`; `014`'s six declared self-citations | `ignore`. Re-anchoring it would delete the defect it reports | <!-- citation-check: ignore --><!-- why: this ledger QUOTES citations as examples of the four shapes in section 4.3 - a wrong number here IS the illustration. Re-anchoring it would delete the example. Same class as 014's declared self-citations. -->
 
 **Two named-in-advance false positives were protected**, and the protection failed the first time —
 see 4.4: `plugin-host-api.ts:261-265` and `orca-runtime.ts:39794-39810`, which `009` E-01 records as
