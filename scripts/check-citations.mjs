@@ -737,11 +737,35 @@ if (REFUSAL !== null) {
   console.error(`\nREFUSED:   ${REFUSAL}`)
 }
 
+/* ---------------------------------------------------------------- drift vs loss
+ *
+ * WHY THE TOTAL IS THE WRONG THING TO RATCHET ON, stated with the number that showed it.
+ *
+ * A stale citation is one of two very different things:
+ *   DRIFTED — the anchor is still in the cited file, somewhere else. The claim is intact and the
+ *             pointer is off. Any edit above the cited line produces this, in bulk.
+ *   LOST    — the anchor is nowhere in the cited file. The symbol was renamed, moved to another
+ *             file, or deleted, and the claim itself is now in question.
+ *
+ * Only the second reflects a DECISION anyone made about the documents. The first tracks code
+ * churn: `4ccfa20`, a one-file bug fix, moved this repo's total from 85 to 130 in a single commit
+ * without a word of documentation changing. A ratchet on the total therefore punishes whoever
+ * fixes a bug in a heavily-cited file and rewards leaving it alone, which is precisely backwards.
+ *
+ * Both numbers are printed. The ratchet is still on the total, deliberately, because lowering it
+ * to the churn-invariant number is a change to what the gate MEANS and that is not a decision to
+ * smuggle into a bug fix — see docs/.research/citation-audit.md for the recommendation.
+ */
+const drifted = stale.filter(({ r }) => r.now && r.now.length > 0).length
+const lost = stale.length - drifted
+
 if (SUMMARY || problems) {
   console.error(
     `\ncitations: ${counts.total} found · ${counts.repo} into this repo · ${counts.orca} into ORCA` +
     ` (${orcaHead ? orcaHead.slice(0, 10) : 'n/a'}) · ${counts.external} external\n` +
-    `verdicts:  ${counts.ok} verified · ${counts.stale} stale · ${counts.unanchored} unanchored`,
+    `verdicts:  ${counts.ok} verified · ${counts.stale} stale · ${counts.unanchored} unanchored\n` +
+    `stale is:  ${drifted} DRIFTED (anchor still in the file, pointer off — moves with code churn)` +
+    ` · ${lost} LOST (anchor not in the file at all — the claim is in question)`,
   )
   if (FIX) {
     console.error(`\n--fix rewrote ${fixedCount} citation(s); ${skippedCount} left for a human.`)
