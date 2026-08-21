@@ -126,8 +126,16 @@ pnpm typecheck
 pnpm lint
 pnpm build       # emits the self-contained artifact to dist/plugin/
 pnpm size-gate   # ORCA caps a plugin at 2000 files / 50 MB
+pnpm check:citations   # every `path:line` in the docs still points at what it claims
 node scripts/dev.mjs   # the reload loop — read docs/dev-loop.md first
 ```
+
+**Every claim about ORCA's plugin API in this repo cites `path/file.ts:123`** (PITFALLS P0), and
+those pointers rot as fast as the code moves. `pnpm check:citations` re-derives each one from the
+symbol the surrounding prose names, and fails when the pointer no longer lands on it. Set
+`ORCA_SRC=/path/to/orca` to include the ~480 citations into ORCA's own tree; without it the script
+says how many it could not check rather than passing them. Method and known blind spots:
+`docs/.research/citation-audit.md`.
 
 **Editing worker code does not hot-reload.** ORCA decides whether to re-fork a worker from the
 manifest, not from your code, so the file watcher fires and the old code keeps running. See

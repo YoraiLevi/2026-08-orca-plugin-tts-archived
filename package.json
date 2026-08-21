@@ -9,7 +9,8 @@
     "test:watch": "vitest",
     "lint": "oxlint packages scripts",
     "build": "node scripts/build.mjs",
-    "size-gate": "node scripts/size-gate.mjs"
+    "size-gate": "node scripts/size-gate.mjs",
+    "check:citations": "node scripts/check-citations.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

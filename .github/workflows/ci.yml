@@ -39,6 +39,23 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+      # PITFALLS P0: a claim about the plugin API is only as good as its `file:line`. Round-3 review
+      # found ~30 citations that had gone stale by 15-150 lines while the code moved underneath them,
+      # which is P0's failure mode with a friendly face -- the reader cannot tell a stale pointer
+      # from a fabricated one. This step is what makes that drift loud. It runs on Linux only:
+      # the check reads text, so three identical runs would tell us nothing three times.
+      # The runner has no ORCA checkout, so the ~480 citations into ORCA's tree cannot be resolved
+      # here; the script says so out loud rather than counting them as passing. To check those too,
+      # run it locally with ORCA_SRC set (see docs/.research/citation-audit.md).
+      #
+      # --max-stale is a RATCHET, not an amnesty. 34 citations are still stale, all of them in
+      # documents that were being written while the code moved underneath them; each one is listed
+      # in docs/.research/citation-audit.md with why it is still open. Lower this number as they are
+      # re-derived. It must never go up: raising it is how a checker becomes decoration.
+      - name: Citations must still point at what the documents say they do
+        if: runner.os == 'Linux'
+        run: pnpm check:citations --max-stale=34
+
       - name: Size gate (ORCA caps at 2000 files / 50 MB)
         run: pnpm size-gate
 
