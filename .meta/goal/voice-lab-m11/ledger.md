@@ -268,3 +268,38 @@ Two further defects fell out of the same probe:
 
 Both briefed to prove each new test can fail (paste RED, revert, green) and to re-measure the gate
 with the same harness before and after.
+
+### Arbitration — the stage renumber (J21 escalated, architect decided)
+
+J21 found that the HTML-comment transform is only correct **after** `stripFencedCode` — that is the
+one position where it cannot eat a `<!--` inside a fence, because stage 1 has already replaced the
+fence body with a placeholder. So it is stage 2, and old stages 2-15 shift to 3-16.
+
+**Stage identity in this repo is a positional integer replicated across five files**, two of which
+are byte-compared at boot by `assertLoadedModuleIsOnDiskSource()`. Blast radius: the normalizer,
+`scripts/voice-lab.mjs` (`STAGES` + `apply[]`), `voice-lab/lib/controls.mjs` and its inlined twin in
+`voice-lab/index.html` (24 numeric `stages: [N]` refs plus `FIXED_BY_DESIGN_STAGES = [3, 10, 14, 15]`),
+and two test files. All but the first are J22's.
+
+**Decided: serialise, do not split.**
+
+- **Rejected** folding the strip into `stripFencedCode` to keep the count at 15. One stage would do
+  two unrelated jobs and the ladder loses the row — and the ladder's visibility *is* the deliverable.
+- **Rejected** J21's stated default (take `voice-lab.mjs` alone now, hand the rest to the peer). A
+  half-renumber leaves `assertLoadedModuleIsOnDiskSource()` and `inline.test.mjs` disagreeing while
+  **J22 is measuring the gate against that running server** — it would corrupt a measurement in a way
+  the measurer could not diagnose.
+- **Ordered:** J21 lands the thousands-separator fix now (no stage, no index, no collision), writes
+  the renumber spec, and holds the insert. When J22 reports, J21 gets the whole tree alone and does
+  the insert plus the full renumber in **one commit**. The tree never sits in a state where the Lab
+  cannot boot.
+- J22 told to report promptly (J21 is blocked on it), to avoid introducing new numeric stage refs,
+  and to make at least one unspeakable-chunk test that is **not** about HTML comments — otherwise
+  their resilience test silently becomes a test of J21's fix.
+
+**The finding underneath, worth more than the fix.** `FIXED_BY_DESIGN_STAGES = [3, 10, 14, 15]`
+silently denotes four *different* transforms after any insert: still in range, still valid, nothing
+notices. Same species as the stale citations that went green against the wrong symbol.
+Recommendation is **stable string ids** with position derived from the pipeline array; J21 writes it
+up, does not implement it — it is its own Job. J23 was given the same facts without the conclusion,
+so if round 8 reaches it independently the record shows two witnesses, not one echo.
