@@ -667,9 +667,23 @@ export function isFuture(f: FieldDescriptor): boolean {
   return f.since > SCHEMA_VERSION
 }
 
-/** The value reaches a typed options object a consumer reads TODAY. */
+/** The value reaches SOME consumer today. Ten fields. */
 export function isWired(f: FieldDescriptor): boolean {
   return f.wire !== null && !isFuture(f)
+}
+
+/** The three typed OPTIONS surfaces a chunk of text passes through on its way to audio. */
+export const OPTION_SURFACE_TYPES: readonly string[] = [
+  'NormalizeOptions', 'ChunkerOptions', 'SynthesizeOptions'
+]
+
+/**
+ * The value reaches a typed OPTIONS object — 011 section 3.2's count of 9 (5 normalize + 2 chunk +
+ * 2 synthesize). This is the narrower of the two, and it is the one T124's reachability assertion
+ * walks, because those three types are the ones with a compile-time key list to walk against.
+ */
+export function isOptionWired(f: FieldDescriptor): boolean {
+  return isWired(f) && OPTION_SURFACE_TYPES.includes(f.wire!.split('.')[0]!)
 }
 
 /**
@@ -686,8 +700,14 @@ export function schemaDefaults(): Settings {
 }
 
 export interface GapReport {
-  /** `wire !== null` and shipping in this schema version. */
+  /** `wire !== null` and shipping in this schema version — some consumer reads it today. */
   readonly wired: number
+  /**
+   * The subset whose wire names one of the three typed options surfaces. 011 section 3.2 counts
+   * THIS one and calls it 9; `wired` is 10 because `announce.reportChannel` reaches
+   * `SettingsReport.channel`, which is a consumer but not an options surface.
+   */
+  readonly optionSurfaceWired: number
   /** `wire === null` and shipping. The lab renders these; nothing consumes them. */
   readonly designedNotWired: number
   /** Entries in `EXCLUDED` — an exclusion must be a reviewable line, never a silent omission. */
@@ -716,6 +736,7 @@ export function gapReport(excludedCount: number): GapReport {
   }
   return {
     wired: all.filter(isWired).length,
+    optionSurfaceWired: all.filter(isOptionWired).length,
     designedNotWired: all.filter((f) => !isFuture(f) && f.wire === null).length,
     excluded: excludedCount,
     future: all.filter(isFuture).length,
@@ -728,7 +749,8 @@ export function gapReport(excludedCount: number): GapReport {
 export function formatGapReport(r: GapReport): string {
   const lines = [
     `settings schema v${SCHEMA_VERSION} — ${r.total} fields shipping, ${r.future} reserved at a later version`,
-    `  wired ................. ${r.wired}   (the value reaches a typed options object today)`,
+    `  wired ................. ${r.wired}   (some consumer reads the value today)`,
+    `    of which options .... ${r.optionSurfaceWired}   (NormalizeOptions / ChunkerOptions / SynthesizeOptions)`,
     `  designed-not-wired .... ${r.designedNotWired}   (rendered and recorded; nothing consumes it yet)`,
     `  excluded .............. ${r.excluded}   (named, reviewable exclusions from the option surfaces)`,
     `  future ................ ${r.future}   (since > ${SCHEMA_VERSION}; no consumer by definition)`,
@@ -774,6 +796,26 @@ export function toChunkerOptions(s: Settings): ChunkerOptions {
   return project(s, 'chunk') as ChunkerOptions
 }
 
-export function toSynthesizeOptions(s: Settings): SynthesizeOptions {
-  return project(s, 'synthesize') as SynthesizeOptions
+/**
+ * `synthesize.voiceIndex` persists an INDEX into the host's runtime voice list (P28: the three
+ * platforms' voice namespaces have zero overlap, so a persisted NAME is meaningless on another
+ * machine), while the consumer's property is `SynthesizeOptions.voice: string`. Resolving one to
+ * the other needs the host's list, which core does not have — so the caller supplies it.
+ *
+ * With no resolver, or an index the list does not reach, `voice` is OMITTED rather than guessed.
+ * A guessed voice name exits zero and silently substitutes the default, which is the failure shape
+ * this whole module exists to refuse.
+ */
+export function toSynthesizeOptions(
+  s: Settings,
+  resolveVoice?: (index: number) => string | undefined
+): SynthesizeOptions {
+  const out = project(s, 'synthesize') as Record<string, unknown>
+  const idx = out['voice']
+  if (typeof idx === 'number') {
+    const name = resolveVoice?.(idx)
+    if (typeof name === 'string' && name.length > 0) out['voice'] = name
+    else delete out['voice']
+  }
+  return out as SynthesizeOptions
 }

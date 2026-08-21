@@ -350,6 +350,27 @@ export interface AudioEvidence {
 export type ReportDestination = 'speak-now' | 'hold-for-first-utterance' | 'on-request-only'
 
 /**
+ * The object `announce.reportChannel` wires into. It is a real type with a real reader
+ * (`reportDestination` below) — a `wire` naming a type that does not exist would be exactly the
+ * comment-dressed-as-a-setting this schema refuses (P26).
+ */
+export interface SettingsReport {
+  readonly channel: unknown
+  readonly sentence: string | null
+  readonly destination: ReportDestination
+}
+
+/** Build the report a caller acts on: what to say, and where it is allowed to go. */
+export function settingsReport(r: ParseResult, settings: Settings, evidence: AudioEvidence): SettingsReport {
+  const channel = settings['announce.reportChannel']
+  return {
+    channel,
+    sentence: settingsReportSentence(r),
+    destination: reportDestination(channel, evidence)
+  }
+}
+
+/**
  * WHERE an unprompted settings report goes. The report is NEVER DROPPED in any configuration —
  * `on-request-only` and a held report both still answer `read-aloud.status`.
  */
