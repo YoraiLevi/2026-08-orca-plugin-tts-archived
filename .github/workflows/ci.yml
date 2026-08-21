@@ -56,6 +56,22 @@ jobs:
         if: runner.os == 'Linux'
         run: pnpm check:citations --max-stale=34
 
+      # The gate that checks the GATES. `pnpm test` answers "did the suite pass?"; this answers the
+      # question the constitution actually asks -- what result would have proved me wrong? It breaks
+      # the implementation on purpose, one named edit at a time, and fails if the test meant to
+      # catch that edit stays green. It exists because a 900 ms cancel -- an 18x regression on the
+      # barge-in budget -- was green in all 180 tests, and because principle VIII's thinking-block
+      # gate could be made to leak reasoning with every one of its own tests still passing
+      # (docs/.research/test-audit.md).
+      #
+      # Linux only, and deliberately: it runs the suite once per mutant, so three identical runs
+      # would cost three times as much to learn the same thing. The two platform-specific mutants
+      # in the registry are the cancel pair, and those go through `OsSynthProvider` on whichever
+      # synthesizer the runner has -- espeak-ng here, `say` on a developer's Mac.
+      - name: Mutation check — every load-bearing test must be able to fail
+        if: runner.os == 'Linux'
+        run: pnpm check:mutants
+
       - name: Size gate (ORCA caps at 2000 files / 50 MB)
         run: pnpm size-gate
 

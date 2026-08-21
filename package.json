@@ -10,6 +10,7 @@
     "lint": "oxlint packages scripts",
     "build": "node scripts/build.mjs",
     "size-gate": "node scripts/size-gate.mjs",
+    "check:mutants": "node scripts/mutation-check.mjs",
     "check:citations": "node scripts/check-citations.mjs",
     "bench:latency": "node scripts/bench-latency.mjs"
   },
