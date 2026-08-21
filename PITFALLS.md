@@ -6,6 +6,32 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P30 — "Never fail silently" that terminates in a channel the user does not have
+**Symptom:** the project has a real, enforced discipline — every catch notifies, every degradation
+is announced, every drop is reported — and the user still experiences unexplained silence. Nothing
+is red. Every code review passes. The FMA counted **55 silent-failure sites in current source and
+found that the number reaching the audio stream was zero.**
+**Cause:** every announcement path ended at `host.notify` -> `notifications.show`, whose
+`{ delivered }` result was discarded (`adapter/index.ts:63`), or at `host.log`, which is itself
+wrapped in `catch {}`. Both are real channels. Neither is a channel a dyslexic, voice-first listener
+uses. The discipline was never violated; it was pointed at the wrong audience — which is invisible
+in a diff, because "we notify the user" and "the user is told" look identical in code.
+**Instead:** name the channel the user actually has, and make every announcement terminate there.
+Here that is spoken audio, so `SpeechService.announce()` is the destination and the desktop
+notification is the supplement. Then decide urgency deliberately — an announcement that interrupts
+is itself a harm, so losses defer to the end of the current utterance and coalesce, and only a thing
+the listener just asked for interrupts. And announcements must never clear the queue: destroying
+what is queued is the fault this class of message exists to report (that was C5 — `read-aloud.status`
+answered "what is it reading" by deleting what it was reading).
+**Verify by effect:** disable the notification path entirely, cause the loss, and assert the
+**spoken sentence naming the count** — not that the callback fired. `speech-service.test.ts`
+"losses and degradations reach the audio stream" constructs the service with no `onDropped` and no
+`log` and asserts on text the provider was actually handed.
+**Worth remembering:** ask of every safety mechanism *who receives this, and do they read it?*
+before asking whether it fires. P18 was a defensive adapter that converted a wrong name into a
+silent success; this is the same shape one level up — a correct mechanism delivering to the wrong
+address. Both look like working code and produce nothing.
+
 ## P29 — `espeak-ng --stdout` emits a WAV that claims 2 GB, and nothing ever fixes it
 **Symptom:** you remove the `mkdtemp` -> synthesize-to-file -> `readFile` -> `rm` round trip by
 switching to `--stdout`, the audio still plays through `aplay`, and later `decodeAudioData` in a
@@ -308,8 +334,8 @@ around an npm audio-output package.
 ## P8 — `sherpa-onnx` cannot load models from non-ASCII Windows paths
 **Symptom:** TTS works everywhere, then fails for a user named `Björn` or any non-Latin username.
 **Cause:** sherpa-onnx 1.12.x cannot open model files under a non-ASCII Windows path. ORCA already
-hit this for STT and wrote a workaround: `src/main/speech/model-cache-path.ts:46-66` relocates the
-cache under an ASCII shared root (`%PROGRAMDATA%` etc.) as `<root>\Orca\speech-models\<sha256-16>`,
+hit this for STT and wrote a workaround: `getSpeechModelCacheDirCandidates`
+(`src/main/speech/model-cache-path.ts:46-66`) relocates the cache under an ASCII shared root (`%PROGRAMDATA%` etc.) as `<root>\Orca\speech-models\<sha256-16>`,
 migrating existing files with `.partial` + atomic rename.
 **Instead:** if we use sherpa-onnx or onnxruntime, **mirror that logic and its regression test**
 (`src/main/speech/model-manager-windows-path.test.ts`). Cross-platform parity is R1; this is the
