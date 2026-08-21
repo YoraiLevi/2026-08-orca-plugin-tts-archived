@@ -6,6 +6,73 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P39 — Streaming made Stop able to land mid-request, and the cache silently stopped existing
+**Symptom:** the fix landed, the 13-chunk fixture got 23× faster, and the WARM path collapsed —
+p50 3,327 ms instead of 39 ms, with **20 of 20** "warm" trials issuing a `POST /speak`. FR-022, the
+one requirement that was comfortably met before the change, was the thing the change broke.
+**Cause:** the page committed its chunk-key list once, after the stream ended. Before streaming,
+playback could not start until the whole envelope had arrived, so by the time a listener could
+press Stop the cache was already complete and no sequence could produce a partial one. Streaming
+introduced a state that had never existed: *audio playing while the request is still open*. The
+harness stops 250 ms after first audio, so every prime aborted and committed nothing — and this is
+not a harness artefact, it is a real listener sequence. **Stop, then Play, is now a cold path.**
+**Instead:** when a fix makes a new interleaving reachable, ask what state was previously
+unreachable and who assumed it could not happen. Here the answer was "a partially-delivered
+utterance". The cure is NOT to commit the partial list — replaying part of an utterance as though it
+were all of it is the silent-wrong-answer shape (P26, P30, P33 are all this shape) — but to make
+completeness **observable**: the page publishes `window.__lab.utterance` with `complete`,
+`delivered` and `aborted`, and the harness waits on it rather than sleeping.
+**Verify by effect:** `node scripts/bench-lab-gate.mjs` and read `cachehit.zero-network`. Zero
+requests across 20 warm trials is the pass; any number above zero means the "cache hit" was a round
+trip. It read **20** immediately after streaming landed and **0** after the fix, with the same
+probe both times.
+**Worth remembering:** the regression was invisible to every unit test — they exercise the server's
+records, and this was a page-side lifecycle assumption. It was caught only because the gate harness
+re-ran the SAME probe before and after and one named value moved the wrong way. That is the entire
+argument for keeping a benchmark that reports things it is not measuring.
+
+## P38 — A `.js` specifier pointing at a `.ts` file is a claim only some of our four resolvers honour
+**Symptom:** `pnpm voice-lab` died with `ERR_MODULE_NOT_FOUND` on `speakable.js` while
+`vitest run packages/core/src/chunker` reported 21 passed. Then `packages/core/src/index.ts` — the
+workspace barrel every consumer of `@orca-tts/core` reaches — was measured and could not load under
+plain node **at all**, with 649 tests green over it. The instrument the author actually uses was
+down; nothing in the suite could see it (019 R10-06, SC-14).
+**Cause:** this repo's TypeScript is loaded by **four** resolvers, and they do not agree on whether
+`'./x.js'` means the file `x.ts`:
+
+| Resolver | Who runs it | `'./x.js'` -> `x.ts`? | `'./x.ts'`? |
+|---|---|---|---|
+| **plain node** `--experimental-strip-types` | `scripts/voice-lab.mjs`, i.e. `pnpm voice-lab` | **no** | yes |
+| vitest / vite | `pnpm test` | yes | yes |
+| esbuild | `scripts/build.mjs`, i.e. the shipped artifact | yes | yes |
+| tsc `moduleResolution: bundler` | `pnpm typecheck` | yes | only with `allowImportingTsExtensions` |
+
+Three of the four do the `.js` -> `.ts` substitution, so the convention looked correct for years.
+The one that does not is **the only one a human runs by hand**, and it is the tuning instrument.
+**`.ts` is the specifier all four honour**, because it is the name the file actually has on disk.
+**What made the wrong answer stick:** *"`.js` is the correct NodeNext convention for the emitted
+`dist`."* Two things in that sentence are false here and both are one command away from being
+checked. `tsconfig.base.json` sets **`moduleResolution: "bundler"`, not NodeNext** — the
+extension requirement that motivates the convention does not apply. And nothing consumes the tsc
+emit: `packages/*/dist/` is **gitignored**, the shipped artifact is an esbuild bundle built from
+`src`, and `tsc -b` is a typecheck whose output nobody loads.
+**The second false belief, named because a commit in this repo states it:** *"`allowImportingTsExtensions`,
+which an emitting build cannot have."* True before TypeScript 5.7, false since. Paired with
+**`rewriteRelativeImportExtensions`** it is legal under emit, and tsc rewrites `./x.ts` to `./x.js`
+in the emitted `.js`. Both flags are on in `tsconfig.base.json`. A version-dependent constraint that
+is not re-checked against the installed version becomes a permanent architectural excuse — this one
+was days from becoming a duplicated-code convention.
+**Instead:** **name the file on disk.** Relative specifiers in `packages/*/src/**` end in `.ts`.
+**Verify by effect, under the resolver that ships, not the one the suite uses.** `pnpm test` going
+green is what proved nothing here; that is the entire finding.
+**Verify by effect:** `pnpm test scripts/seam-stage-identity.test.mjs` — SC-14 imports every module
+the Lab loads in a **fresh plain-node process**. Rename one specifier back to `.js` and the row goes
+red naming the file `[measured-here]`. It carries two controls that must pass first (a clean module
+loads; a missing module is detected) and a coverage floor that goes red if `voice-lab.mjs` gains an
+import the row does not cover. **Four checks, always all four** — the Lab boots under plain node,
+`tsc -b`, `vitest run`, `node scripts/build.mjs` — because each of these resolvers can be green
+while another is broken. Found by round 10 (R10-06), class-fixed by J27, 2026-08-21.
+
 ## P37 — Stage identity is a positional integer, so inserting a stage silently re-points every reference
 **Symptom:** the normalizer needed one new transform, `stripHtmlComments`, and it is only correct at
 position 2 — after `stripFencedCode`, which is the one placement where it cannot reach a `<!--`
