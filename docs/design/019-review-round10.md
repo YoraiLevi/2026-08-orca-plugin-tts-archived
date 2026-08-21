@@ -15,7 +15,7 @@ is outside the repo entirely and cannot be perturbed by a peer. **No duration is
 this document**: the machine was at load 51 with six agents running, so every timing read today is
 noise, and none was taken.
 
-**Round 10 is NOT dry. 5 items clear the ledger bar.** Section 6 says so plainly, says what was
+**Round 10 is NOT dry. 6 items clear the ledger bar.** Section 6 says so plainly, says what was
 excluded, and argues — with the reason — that **the protocol should continue past round 10.**
 
 ---
@@ -181,7 +181,7 @@ before huddle can act on it, which is the same shape as R10-01's fix and should 
 **S2 for the tuning instrument** · `normalizer/index.ts:5`, `scripts/voice-lab.mjs` `stageFns()`, clause 3
 
 **Provenance, stated because it differs from everything else in this round.** R10-01 through R10-04
-came from this round's own probing. **R10-05 did not**: it arrived out of a peer's live work — J26
+came from this round's own probing. **R10-05 and R10-06 did not**: it arrived out of a peer's live work — J26
 landed the import while closing SC-1/SC-2, and SC-7 and SC-8 went red mid-round. It is counted, and
 it is labelled, for the same reason round 9 labelled the J21/P37 items: a count is only trustworthy
 if it says where each item came from. What this round contributes is not the discovery that the Lab
@@ -251,6 +251,38 @@ way by an agent who did not write it, within hours, and the marker's removal is 
 record that the defect closed.** The open-row counts in this document are therefore a snapshot of a
 moving tree; the markers themselves are the authority.
 
+### R10-06 — Vitest and plain node disagree about whether the code loads, and the suite believes vitest
+**S2 for the tuning instrument, blocking** · `chunker/index.ts:19`, `scripts/voice-lab.mjs`, clause 3
+
+**Provenance: reported by the team lead from J26's live work**, like R10-05 — not this round's own
+probing. Verified here by effect before being written down, with controls.
+
+SC-13's sibling, and the sharper of the two. `pnpm voice-lab` is `node scripts/voice-lab.mjs` —
+**plain node**, whose ESM resolver will not resolve a `.js` specifier onto a `.ts` file. **Vitest's
+resolver will.** Measured `[measured-here]`:
+
+| Probe | Result |
+|---|---|
+| `node --experimental-strip-types -e "import('packages/core/src/chunker/index.ts')"` | **`ERR_MODULE_NOT_FOUND`** — `speakable.js` |
+| `node … import('packages/core/src/normalizer/index.ts')` — **control** | **loads.** Same directory, no such specifier |
+| `node … import('packages/core/src/speakable.ts')` — named directly | **loads.** The file is fine; the specifier is not |
+| `vitest run packages/core/src/chunker` | **21 passed** |
+
+**Twenty-one green tests and a Voice Lab that cannot start at all.** The suite is structurally blind
+to a total outage of the tuning instrument, because **it never once loads the code the way the
+product loads it.**
+
+This is section 22's thesis in its purest form: two components, two predicates for *"does this module
+resolve"*, each correct for its own component's job, never compared — and the one that is wrong is
+the one everybody reads for reassurance.
+
+**Resolution.** **SC-14**, added this round: import each module the Lab depends on in a **fresh plain
+node process** and require it to load. It carries **two** controls that must pass first — a clean
+module loads, and a module that does not exist is detected — so a probe that had stopped being able
+to fail could not deliver a verdict. **Deliberately NOT marked `it.fails`**, for SC-13's reason: this
+one means the Lab does not launch. It is **red as committed**, which is the correct state for an
+instrument whose subject is broken, and it turns green by itself when the specifier is fixed.
+
 ---
 
 ## 5. The mutation log
@@ -264,6 +296,7 @@ moving tree; the markers themselves are the authority.
 | **M12** | losses no longer routed to `#noteLoss` | SC-11 | **RED**, two rows — `a reply that could not be read aloud was not reported` |
 | **—** | remove `.fails` from SC-12's open row | SC-12 | **RED** — `a deliberately filtered block and an unknown one are the same observable` |
 | **—** | remove `.fails` from SC-12b's open row | SC-12b | **RED** — `the boundary record decodes to the same null as tool traffic` |
+| **—** | SC-14 needed no mutation either: it is **red in the wild as committed**, and carries two controls that pass — a clean module loads, a missing module is detected | SC-14 | **RED in the wild** |
 | **—** | SC-13 needed no mutation: it **went red on a real violation** mid-round, and carries its own control (a known-bad specifier that must fail to resolve) | SC-13 | **RED in the wild** |
 
 **44 seam tests green** across five files; `tsc -b` clean.
@@ -299,8 +332,9 @@ filed as *latent* rather than live.
 | **R10-03** — the fixture corpus models 2 of the 18 record types the format emits, so it cannot raise the question it would need to answer | 5 |
 | **R10-04** — seam 10 closed, the row round 9 called its weakest; and a control assertion that could not see a report whose words it did not know | 1 |
 | **R10-05** — the normalizer's *"DEPENDENCY-FREE"* header is load-bearing infrastructure for `stageFns()`'s data-URL compile, written as prose with no instrument; violated during this round, and the Voice Lab stopped booting | 3 |
+| **R10-06** — vitest resolves `.js`→`.ts` and plain node does not, so 21 tests are green while `pnpm voice-lab` cannot start. The suite never loads the code the way the product loads it | 3 |
 
-**5 clear the bar. Round 10 is not dry.** Excluded and named in section 6: the M9 equivalent mutant
+**6 clear the bar. Round 10 is not dry.** Excluded and named in section 6: the M9 equivalent mutant
 and the three empty census hypotheses.
 
 ### The yield curve
@@ -309,7 +343,7 @@ and the three empty census hypotheses.
 |---|---|---|
 | 8 | 26 | running the pipeline over real and hostile input, first time ever |
 | 9 | 7 | building seam instruments for the audio path |
-| 10 | **5** | building seam instruments for the first ORCA-facing seam |
+| 10 | **6** | building seam instruments for the first ORCA-facing seam |
 
 **That is a real bend, and it is still not a dry signal.** Two things say the protocol should
 continue past ten, and the author asked to be told plainly:

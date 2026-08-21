@@ -39,6 +39,7 @@ import { dirname, join } from 'node:path'
 import { STAGES, computeStages, stageFns } from './voice-lab.mjs'
 import { CONTROLS } from '../voice-lab/lib/controls.mjs'
 import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { stripTypeScriptTypes } from 'node:module'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -275,4 +276,75 @@ describe('SC-13 — the normalizer source still compiles the way the Voice Lab c
     await expect(load(js + '\nexport const __probe = 1'), 'the Voice Lab cannot boot: ' +
       'the normalizer source no longer compiles as a standalone module (019 R10-05)').resolves.toBeTruthy()
   })
+})
+
+/* ================================================================== SC-14
+ * seam: the modules the Voice Lab imports -> the RESOLVER THAT ACTUALLY SHIPS
+ */
+
+/**
+ * SC-14 — SC-13's sibling. Two resolvers, one of which is the only one that ships.
+ *
+ * SC-13 covers the `data:` URL compile path. This covers the ordinary one: `scripts/voice-lab.mjs`
+ * is run by **plain node** (`pnpm voice-lab` -> `node scripts/voice-lab.mjs`), and plain node's
+ * ESM resolver **will not resolve a `.js` specifier onto a `.ts` file**. Vitest's resolver will.
+ *
+ * So the suite and the product disagree about whether the code loads, and the suite is the one that
+ * is wrong. Measured `[measured-here]`, with a control that passes:
+ *
+ *   node --experimental-strip-types -e "import('packages/core/src/chunker/index.ts')"
+ *      -> ERR_MODULE_NOT_FOUND: Cannot find module '.../packages/core/src/speakable.js'
+ *   node --experimental-strip-types -e "import('packages/core/src/normalizer/index.ts')"
+ *      -> CONTROL: loads (same directory, no such specifier)
+ *   vitest run packages/core/src/chunker
+ *      -> 21 passed
+ *
+ * **21 tests green while `pnpm voice-lab` cannot start at all.** The suite is structurally blind to
+ * a total outage of the tuning instrument, because it never once loads the code the way the product
+ * loads it. That is `006` section 22's thesis in its purest form: two components, two predicates for
+ * "does this module resolve", each correct for its own component, never compared.
+ *
+ * **Deliberately NOT marked `it.fails`, for SC-13's reason.** Section 22's other open rows describe
+ * defects a listener might one day hit. This one means the Voice Lab does not launch. A row that
+ * should block is left able to block, and it turns green by itself the moment the specifier is
+ * fixed -- `speakable.ts` already imports fine under plain node when named directly.
+ */
+describe('SC-14 — every module the Lab loads, loads under the resolver that ships', () => {
+  const REPO = join(HERE, '..')
+
+  /** Import a module in a FRESH plain-node process. Vitest's resolver is deliberately not used. */
+  function loadsUnderPlainNode (relPath) {
+    const r = spawnSync(process.execPath,
+      ['--experimental-strip-types', '-e',
+       `import(${JSON.stringify(join(REPO, relPath))}).then(() => process.exit(0), (e) => { process.stderr.write(String(e.message)); process.exit(1) })`],
+      { cwd: REPO, encoding: 'utf8' })
+    return { ok: r.status === 0, why: (r.stderr || '').split('\n')[0] }
+  }
+
+  /**
+   * The control runs FIRST and must PASS. If plain node could not load any of these files, this
+   * probe would be measuring its own harness and its verdict on the real ones would be worthless.
+   */
+  it('CONTROL: a module with no cross-directory specifier loads under plain node', () => {
+    const r = loadsUnderPlainNode('packages/core/src/normalizer/index.ts')
+    expect(r.ok, `the probe itself is broken, not the module: ${r.why}`).toBe(true)
+  })
+
+  it('CONTROL: the negative case is detectable — a missing module really does fail', () => {
+    const r = loadsUnderPlainNode('packages/core/src/does-not-exist.ts')
+    expect(r.ok, 'the probe reports success for a module that does not exist').toBe(false)
+  })
+
+  for (const mod of [
+    'packages/core/src/normalizer/index.ts',
+    'packages/core/src/chunker/index.ts',
+    'packages/core/src/index.ts'
+  ]) {
+    it(`${mod} loads under plain node, which is how pnpm voice-lab runs`, () => {
+      const r = loadsUnderPlainNode(mod)
+      expect(r.ok, `${mod} does not load under plain node: ${r.why}\n` +
+        'Vitest resolves .js -> .ts; plain node does not, and plain node is what ships. ' +
+        'See 019 R10-06. Name the specifier .ts, or drop the cross-directory import.').toBe(true)
+    })
+  }
 })
