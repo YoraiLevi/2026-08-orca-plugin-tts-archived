@@ -245,5 +245,25 @@ red. Thin there, and the counter can start with evidence behind it: three invent
 empty. Thick there, and this round's bend was the decoder being a small seam rather than the seams
 being clean.
 
+**Does the round-8 argument still hold?** It argued that the counter could not be trusted to go dry
+while *"an entire class of evidence — running the thing — remains largely ungathered."* Rounds 9 and
+10 gathered a great deal of it, and the honest answer is that **the class has been sampled and not
+surveyed.** Of five inventories, three are surveyed — the audio path, the transcript decoder, and
+the normalizer's own build-time contract — and **two have never been opened**: the transcript tailer
+(`006` section 1) and the adapter and manifest (section 8), which are the two seams whose far side
+is code we do not control.
+
+Three facts decide it, and they agree: **every inventory opened so far has yielded on its first
+look**, including ones expected to be clean; **one of round 10's five items was found by accident,
+in a file ten rounds had read**, which is what an under-sampled inventory looks like from the inside;
+and the two unopened ones are the least controllable shape in the project.
+
+**So the argument holds in a weakened, more specific form** — not *"a whole class is ungathered"*,
+which was true at round 8 and is not true now, but *"two of five inventories have never been
+opened."* The endpoint is stated in advance so it cannot be moved later: **open the tailer and the
+adapter by the same rule. Thin there, and the dry counter starts meaning what it says. Thick, and
+this round's bend was the decoder being a small seam rather than the seams being clean.** Two more
+rounds, not an open-ended extension.
+
 **Stated so it is not soft: the recommendation is to continue, and the reason is coverage, not
 enthusiasm.**

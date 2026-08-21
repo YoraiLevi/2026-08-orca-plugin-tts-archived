@@ -8,6 +8,13 @@ section 22's open rows (they were editing `sinks/subprocess-sink.ts`, `main.ts` 
 **Scope:** the brief — close `006` section 22.5's own list where closable, extend section 22 to the
 seams into ORCA, and keep one probe asking a question the brief did not.
 
+**Where every number here was read, because a count taken from this shared tree is noise.** The
+suite count — **45 seam tests green in 5 files** — is pinned in a **detached `git worktree` at
+`9fe2539`**, not in the live tree. The census in section 3 is taken from `~/.claude/projects`, which
+is outside the repo entirely and cannot be perturbed by a peer. **No duration is quoted anywhere in
+this document**: the machine was at load 51 with six agents running, so every timing read today is
+noise, and none was taken.
+
 **Round 10 is NOT dry. 5 items clear the ledger bar.** Section 6 says so plainly, says what was
 excluded, and argues — with the reason — that **the protocol should continue past round 10.**
 
@@ -173,7 +180,12 @@ before huddle can act on it, which is the same shape as R10-01's fix and should 
 ### R10-05 — "DEPENDENCY-FREE" is load-bearing infrastructure written as a prose comment, and it was violated during this round
 **S2 for the tuning instrument** · `normalizer/index.ts:5`, `scripts/voice-lab.mjs` `stageFns()`, clause 3
 
-Found by accident — SC-7 and SC-8 went red mid-round — which is the only reason it was found at all.
+**Provenance, stated because it differs from everything else in this round.** R10-01 through R10-04
+came from this round's own probing. **R10-05 did not**: it arrived out of a peer's live work — J26
+landed the import while closing SC-1/SC-2, and SC-7 and SC-8 went red mid-round. It is counted, and
+it is labelled, for the same reason round 9 labelled the J21/P37 items: a count is only trustworthy
+if it says where each item came from. What this round contributes is not the discovery that the Lab
+broke — anyone running it would have seen that — but the **diagnosis** and the **instrument**.
 
 `packages/core/src/normalizer/index.ts` opens with:
 
@@ -202,8 +214,17 @@ reverted the import and kept `speakable.ts` as its own module, so the tree is gr
 contract between two components, carried in prose, with no instrument — `006` section 22's shape
 exactly, discovered on the last day of the protocol, in a file eleven rounds have read.
 
-**Resolution.** **SC-13**, added this round, compiles the source the way the Lab does and asserts it
-loads, with its own control so the probe cannot pass vacuously. **Deliberately NOT marked
+**Resolution — and it is deliberately TWO assertions in one row, not one.** They catch different
+things and either can hold while the other fails:
+
+| Assertion | Catches | Fails when |
+|---|---|---|
+| **the property**: `normalize()`'s source carries no relative or bare import | the *contract* being lost | an import is added, **even if the Lab happens to survive it** — e.g. a bundler or a future loader that resolves it, leaving the file no longer standalone |
+| **the effect**: the source, compiled the way `stageFns()` compiles it, actually loads | the *Lab* breaking | the compile fails for any reason at all, including one nobody predicted |
+
+The second carries its own control — a known-bad specifier that must fail to resolve — so a probe
+that had stopped being able to detect anything would be caught before its verdict on the real file
+was believed. **SC-13** compiles the source the way the Lab does and asserts it loads. **Deliberately NOT marked
 `it.fails`**, unlike section 22's other open rows: those describe defects a listener might one day
 hit; this one means the tuning instrument does not launch, and a row that should block is left able
 to block. If the import is ever wanted deliberately, the two honest options are to inline the helper
@@ -305,10 +326,48 @@ the decoder alone yielded two open rows and a census that invalidated a test cor
 convergence on the strength of one third of an inventory would be the same error section 22 exists
 to correct: concluding from a component that the space between components is clean.
 
+### Does the round-8 argument still hold?
+
+At the close of round 8 this record argued: *"the counter cannot be trusted to go dry while an
+entire class of evidence — running the thing — remains largely ungathered."* The question put to
+round 10 is whether rounds 9 and 10 gathered enough of that class for a dry round to mean something.
+
+**The honest answer: the class has been sampled, and it has not been surveyed — and the difference
+is countable rather than a matter of taste.**
+
+| Inventory | Seam rows | Status |
+|---|---|---|
+| the audio path — normalize → chunk → provider → sink | SC-1 … SC-10 | **surveyed.** Every adjacent pair asked, three recorded empty, one recorded unclosable. |
+| the ORCA transcript **decoder** | SC-12, SC-12b | **surveyed**, and the format measured rather than reasoned about. |
+| the normalizer's own **build-time** contract | SC-13 | **found by accident**, on the last day, in a file eleven rounds had read. |
+| the transcript **tailer** — `fs.watch`, debounce, truncation, high-water, session switching | **none** | **never opened.** |
+| the **adapter and manifest** — the real ORCA host API | **none** | **never opened.** |
+
+Three facts decide it and they agree:
+
+1. **Every inventory opened so far has yielded on its first look**, including the ones expected to
+   be clean. Two remain and neither has been opened once.
+2. **The one seam found by accident this round was in a file ten rounds had read.** SC-13 surfaced
+   because a peer tripped it, not because anyone looked. **A surveyed inventory does not have
+   accidents left in it** — that is direct evidence the sampling is not yet dense.
+3. **The two unopened ones are the least controllable shape in the project.** The tailer's far side
+   is the filesystem under a writer we do not control; the adapter's is a third party's API. Section
+   22 exists because seams are where predicates disagree, and these are the two where the other side
+   changes without telling us.
+
+**So the argument holds, in a weakened and more specific form.** It is no longer *"an entire class of
+evidence is ungathered"* — that was true at round 8 and is not true now. It is: **two of five
+inventories have never been opened, every inventory opened so far yielded on its first look, and one
+of this round's five items was found by accident rather than by looking.** A dry counter starting
+now would be reporting on a survey that stopped at three fifths — not because the process is
+failing, but because it would be measuring the wrong thing.
+
+**The endpoint, stated in advance so it cannot be moved afterwards:** open the tailer and the
+adapter by the same rule. **Two more rounds, not an open-ended extension.**
+
 **What would make round 11 a genuine dry signal.** Give the tailer and the adapter seam rows by the
-same rule. If that comes back thin, the dry counter can start with evidence behind it: the method
-will have been applied to three inventories — the audio path, the transcript decoder, and the host
-API — and found nothing new in the last of them. **If it comes back thick, the counter was never
+same rule. If that comes back thin, the dry counter can start with evidence behind it: five
+inventories opened, the last two empty. **If it comes back thick, the counter was never
 close, and this round's bend was the decoder being a small seam rather than the seams being clean.**
 
 Recorded so it is not soft: **this round's recommendation is to continue, and the reason is coverage,
