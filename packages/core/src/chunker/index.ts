@@ -33,6 +33,25 @@ export interface ChunkerOptions {
   isolateFirstSentence?: boolean
 }
 
+/**
+ * The runtime key list for `ChunkerOptions` — T124 (011 section 3.3 (a)).
+ *
+ * `countUnits` is deliberately absent: it is an injected FUNCTION, not a value a settings file can
+ * carry. The exclusion is a named constant (`CHUNKER_OPTION_KEYS_EXCLUDED`) rather than a silent
+ * omission, so a reviewer sees the decision instead of the gap.
+ */
+export const CHUNKER_OPTION_KEYS = [
+  'maxUnits', 'countUnits', 'isolateFirstSentence'
+] as const satisfies readonly (keyof ChunkerOptions)[]
+
+/** Keys of `ChunkerOptions` that are deliberately not settable. */
+export const CHUNKER_OPTION_KEYS_EXCLUDED = ['countUnits'] as const
+
+type _MissingChunkerKey =
+  Exclude<keyof ChunkerOptions, (typeof CHUNKER_OPTION_KEYS)[number]> extends never ? true : never
+const _chunkerKeysAreExhaustive: _MissingChunkerKey = true
+void _chunkerKeysAreExhaustive
+
 /** Terminal punctuation that may end a sentence, once closing quotes/brackets are skipped. */
 const SENTENCE_END = new Set(['.', '!', '?'])
 const CLAUSE_END = new Set([',', ';', ':', '—', '–'])

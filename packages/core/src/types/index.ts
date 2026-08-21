@@ -31,6 +31,24 @@ export interface SynthesizeOptions {
 }
 
 /**
+ * The runtime key list for `SynthesizeOptions` — T124 (011 section 3.3 (a)).
+ *
+ * `signal` is deliberately absent: an `AbortSignal` is runtime plumbing, not tuning, and no
+ * settings file can express one. The exclusion is named so it stays reviewable.
+ */
+export const SYNTHESIZE_OPTION_KEYS = [
+  'voice', 'rate', 'signal'
+] as const satisfies readonly (keyof SynthesizeOptions)[]
+
+/** Keys of `SynthesizeOptions` that are deliberately not settable. */
+export const SYNTHESIZE_OPTION_KEYS_EXCLUDED = ['signal'] as const
+
+type _MissingSynthesizeKey =
+  Exclude<keyof SynthesizeOptions, (typeof SYNTHESIZE_OPTION_KEYS)[number]> extends never ? true : never
+const _synthesizeKeysAreExhaustive: _MissingSynthesizeKey = true
+void _synthesizeKeysAreExhaustive
+
+/**
  * A speech engine.
  *
  * Providers emit audio and NEVER own playback (constitution R023): a synthesizer that plays

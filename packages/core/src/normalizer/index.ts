@@ -51,6 +51,24 @@ export interface NormalizeOptions {
   orderedLists?: OrderedListStyle
 }
 
+/**
+ * The runtime key list for `NormalizeOptions` — T124 (011 section 3.3 (a)).
+ *
+ * A TypeScript interface has no runtime representation, so a test that wants to iterate the
+ * option surface needs a real array. The guard below makes that array a COMPILE-TIME obligation:
+ * adding a field to `NormalizeOptions` without adding it here fails `tsc`, and T124 then fails at
+ * runtime if the new key is not reachable from `SETTINGS_SCHEMA`. Both halves are needed — the
+ * compile guard keeps this list honest, and the runtime test keeps the schema honest.
+ */
+export const NORMALIZE_OPTION_KEYS = [
+  'codeBlocks', 'pathStyle', 'extensionStyle', 'expandNumbers', 'orderedLists'
+] as const satisfies readonly (keyof NormalizeOptions)[]
+
+type _MissingNormalizeKey =
+  Exclude<keyof NormalizeOptions, (typeof NORMALIZE_OPTION_KEYS)[number]> extends never ? true : never
+const _normalizeKeysAreExhaustive: _MissingNormalizeKey = true
+void _normalizeKeysAreExhaustive
+
 /** Extensions worth naming aloud. A listener wants "the python file", not "dot p y". */
 const EXTENSION_WORDS: Record<string, string> = {
   ts: 'typescript', tsx: 'typescript', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
