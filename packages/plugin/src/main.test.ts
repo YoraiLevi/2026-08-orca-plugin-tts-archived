@@ -371,3 +371,57 @@ describe('006 sites 45/46 — total engine failure reports a named cause', () =>
       .toContain('prepare-failed')
   })
 })
+
+/**
+ * 006 section 19, rank 1 — "that the plugin is mute", the worst state this system can be in.
+ *
+ * Chosen as the one undetectable item closable with instrumentation rather than architecture.
+ * Every existing diagnostic reports healthy while mute: `prepare()` said warm, the registry said
+ * `preferred`, the log said "engine ready", `isPlaying` said false because nothing was playing.
+ * The self-test reports numbers that came from THIS invocation, so it cannot report healthy on a
+ * dead engine — and it synthesizes fresh rather than replaying a stored WAV, which would pass
+ * while synthesis is dead.
+ */
+describe('006 section 19 rank 1 — the listener can ask whether the voice actually works', () => {
+  class SilentProvider extends RecordingProvider {
+    override async *generate(text: string): AsyncIterable<AudioChunk> {
+      this.synthesized.push(text)   // pretends to work, yields nothing — the mute-plugin state
+    }
+  }
+
+  it('says the engine produced no audio, instead of reporting healthy', async () => {
+    const provider = new SilentProvider()
+    const notifications: string[] = []
+    const orca: OrcaApi = {
+      commands: { register: (id, fn) => { commands.set(id, fn) } },
+      events: { on: () => {} },
+      host: {
+        call: async (action, params) => {
+          if (action === 'notifications.show') notifications.push(String(params?.['body'] ?? ''))
+          return { value: undefined }
+        }
+      },
+      log: () => {}
+    }
+    const commands = new Map<string, (args?: unknown) => unknown>()
+    activate(orca, { provider, sink: new FakeSink(), projectsDir: '/nonexistent' })
+    await settle(10)
+    await commands.get('read-aloud.self-test')?.()
+    await settle(20)
+    // The verdict must reach the AUDIO stream, so assert on what the provider was handed to speak.
+    const spoken = provider.synthesized.join(' ')
+    expect(spoken, 'a mute engine reported nothing at all').toMatch(/self test failed/i)
+    expect(spoken).toMatch(/no audio/i)
+  })
+
+  it('CONTROL: a working engine passes, and the verdict names the byte count', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-selftest-'))
+    const h = await boot(root)
+    await h.run('read-aloud.self-test')
+    await settle(20)
+    const spoken = h.spoken()
+    expect(spoken, 'a working engine must not be reported as broken').toMatch(/self test passed/i)
+    // The number is the point: a verdict with no measurement is the presence check this replaces.
+    expect(spoken, 'the verdict must carry a value that moved').toMatch(/\d|one|two|three|four|five|six|seven|eight|nine/i)
+  })
+})

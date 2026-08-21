@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AudioChunk, PlaybackSink } from '@orca-tts/core'
 
-interface Player { cmd: string; args: (file: string) => string[] }
+export interface Player { readonly cmd: string; readonly args: (file: string) => string[] }
 
 const PLAYERS: Record<string, readonly Player[]> = {
   darwin: [{ cmd: 'afplay', args: (f) => [f] }],
@@ -56,12 +56,20 @@ export interface SubprocessSinkOptions {
    * this into the audio stream. Coalescing and urgency are the host's decision, not the sink's.
    */
   readonly onFailure?: (failure: PlaybackFailure) => void
+  /**
+   * Override the player ladder. Test seam ONLY, and the reason it exists is P31: exercising the
+   * ladder with real audio players would play tones at whoever is sitting at this machine. A test
+   * passes `sh -c 'exit 3'`, which proves exactly the property under test — a non-zero exit is not
+   * success — and opens no audio device.
+   */
+  readonly players?: readonly Player[]
 }
 
 export class SubprocessSink implements PlaybackSink {
   readonly #platform: string
   readonly #log: (m: string) => void
   readonly #onFailure: (failure: PlaybackFailure) => void
+  readonly #players: readonly Player[] | null
   #child: ChildProcess | null = null
   #playing = false
   #stopping = false
@@ -72,6 +80,7 @@ export class SubprocessSink implements PlaybackSink {
     this.#platform = opts.platform ?? process.platform
     this.#log = opts.log ?? (() => {})
     this.#onFailure = opts.onFailure ?? (() => {})
+    this.#players = opts.players ?? null
   }
 
   get isPlaying(): boolean { return this.#playing }
@@ -108,7 +117,7 @@ export class SubprocessSink implements PlaybackSink {
   }
 
   async #play(file: string): Promise<boolean> {
-    const players = PLAYERS[this.#platform] ?? []
+    const players = this.#players ?? PLAYERS[this.#platform] ?? []
     const tried: string[] = []
     let lastReason = ''
     this.#stopping = false
