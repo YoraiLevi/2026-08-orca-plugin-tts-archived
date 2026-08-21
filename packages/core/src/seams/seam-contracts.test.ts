@@ -326,3 +326,72 @@ describe('SC-6 — a number written in this repo survives to the listener as the
     expect(normalize('The delta was -42 ms.', {})).toContain('minus forty two')
   })
 })
+
+/* ================================================================== SC-10
+ * seam: normalize() -> the ENGINE'S OWN number reader
+ *
+ * Added after the round-9 build, on evidence from the team lead: the million ceiling is not a
+ * normalizer decision, it is a SEAM decision, and it is this section's exact shape -- an upstream
+ * component emitting something whose acceptability depends on a downstream it cannot see.
+ *
+ * `expandNumbers` expands 0..999,999 to words and, at or above 1,000,000, hands the raw numeral to
+ * the engine on the belief that "the engine handles them better". Below the ceiling WE decide what
+ * the listener hears. At or above it, THE ENGINE decides -- and which engine that is depends on the
+ * platform, which core cannot know.
+ *
+ * WHAT IS AND IS NOT CHECKABLE FROM HERE, stated so the split is not mistaken for a gap:
+ *
+ *   - **Core half (this file).** That the ceiling is where it is claimed to be, that it is the ONLY
+ *     discontinuity, and that a numeral above it crosses the seam BYTE-FOR-BYTE -- because if the
+ *     normalizer mangles it on the way past, the engine never gets the chance to read it well.
+ *   - **Platform half (not this file).** Whether an engine reads `1234567` as a quantity or spells
+ *     seven digits. That needs the engine, so it belongs in CI on each OS:
+ *     `scripts/ci/number-ceiling-probe.mjs` (J25), which renders to files only (P31) and carries a
+ *     control that must differ so it cannot pass vacuously. Measured on macOS `say`; `[claimed]`
+ *     on espeak-ng and SAPI until that leg runs.
+ */
+describe('SC-10 — the million ceiling is a seam decision, and the numeral must cross it intact', () => {
+  const CEILING = 1_000_000
+
+  it('expands every value below the ceiling, and hands the engine the numeral at or above it', () => {
+    // Restated boundaries, not derived from the constant in the code under test (P36).
+    expect(normalize('It saw 999999 rows.', {})).toContain('nine hundred ninety nine thousand')
+    expect(normalize('It saw 1000000 rows.', {})).toContain('1000000')
+    expect(normalize('It saw 1234567 rows.', {})).toContain('1234567')
+  })
+
+  /**
+   * TOKEN CONSERVATION ACROSS THE SEAM. Above the ceiling the whole argument for handing the
+   * numeral over is that the engine is the better reader -- which is only true if the numeral
+   * arrives as it was written. A digit dropped, a separator left in, or a stray space inserted on
+   * the way past turns "let the engine read it" into "let the engine read something else".
+   */
+  it('passes an above-ceiling numeral to the engine byte for byte', () => {
+    for (const digits of ['1000000', '1234567', '9007199254740991', '1000001']) {
+      const spoken = normalize(`The count was ${digits} exactly.`, {})
+      expect(spoken, digits).toContain(`was ${digits} exactly`)
+    }
+  })
+
+  it('has exactly one discontinuity, so nothing below the ceiling escapes as digits', () => {
+    for (const n of [0, 1, 19, 20, 99, 100, 999, 1000, 12345, 99999, CEILING - 1]) {
+      const spoken = normalize(`n is ${n}.`, {})
+      expect(spoken, `${n} should have become words`).not.toContain(`is ${n}.`)
+    }
+  })
+
+  /**
+   * VIOLATED TODAY (017 R8-22). Two numbers in ONE sentence, one either side of the ceiling, are
+   * read in two different systems in the same breath -- one spelled out by us, one handed over as
+   * digits. The ceiling itself is defensible; the audible inconsistency inside a single sentence is
+   * what a listener actually notices, and nothing announces it.
+   *
+   * Remove `.fails` when the seam either expands both or hands over both.
+   */
+  it.fails('reads two numbers in one sentence in one system [OPEN: R8-22]', () => {
+    const spoken = normalize('We processed 1234567 rows and 999999 more.', {})
+    const spelledOut = /nine hundred ninety nine thousand/.test(spoken)
+    const handedOver = /1234567/.test(spoken)
+    expect(spelledOut && handedOver, `both systems in one sentence: ${JSON.stringify(spoken)}`).toBe(false)
+  })
+})

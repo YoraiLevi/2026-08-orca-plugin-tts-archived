@@ -7,11 +7,11 @@ this round touched either. Citations into them are stamped `[live tree]`.
 **Scope:** round 8's own instruction — *"rounds 9 and 10 do not re-read anything; they build `006`
 section 22 and write the tests that let each row go red."* This is that, executed.
 
-**Deliverables:** `006` section 22 (nine seam rows, three asked-and-empty, two covered elsewhere),
-three new test files, **616 tests green**, and a mutation log in section 4 in which **every row was
+**Deliverables:** `006` section 22 (ten seam rows, three asked-and-empty, two covered elsewhere),
+three new test files, **620 tests green**, and a mutation log in section 4 in which **every row was
 seen red**.
 
-**Round 9 is not dry. 6 items clear the ledger bar** — a quarter of round 8's 24. Section 6 argues
+**Round 9 is not dry. 7 items clear the ledger bar** — just over a quarter of round 8's 26. Section 6 argues
 that the drop is a real signal rather than a slow round, and says what would confirm it.
 
 ---
@@ -29,6 +29,7 @@ that the drop is a real signal rather than a slow round, and says what would con
 | SC-7 | control map → stages — a ladder row names the transform it ran | `scripts/seam-stage-identity.test.mjs` | **closed** |
 | SC-8 | control map → stages — a control moves the stage it claims | same | **partly OPEN** (NM12) |
 | SC-9 | provider → sink — the sink handles every declared format | `packages/plugin/src/seams/sink-format.test.ts` | **OPEN** (R9-05, R9-06) |
+| SC-10 | `normalize()` → the **engine's own number reader** — the million ceiling | `packages/core/src/seams/seam-contracts.test.ts` | **partly OPEN** (R8-22) |
 
 **Three seams were asked and came back empty or unclosable**, and are recorded as such in section
 22.2 rather than left blank: host text → `normalize()` (nothing the host can emit that it cannot
@@ -184,6 +185,35 @@ That is P32's shape landing on the one instrument built to prevent it.
 `onFailure`, and `bytesPlayed` must advance only for a format it actually handled. Both halves are
 pinned by SC-9.
 
+### R9-09 — The million ceiling is a seam decision, not a tuning choice, and its two halves land in two different places
+**S4, structural** · `normalizer/index.ts:768` `[live tree]`, `0f9335f`, R8-22
+
+Added after the section-22 build, on evidence from the team lead — and it is the clearest single
+example of what 22.1 describes, which is why it earned a row rather than a footnote.
+
+`expandNumbers` expands 0..999,999 and hands anything at or above 1,000,000 to the engine untouched,
+on the belief that the engine reads large numbers better. As a **component** decision that is a
+defensible tuning choice and reads as one. As a **seam** decision it is: *below the ceiling we decide
+what the listener hears; at or above it a different component decides — a different one per
+platform, which core cannot see and has never asked.* Nobody had asked, in nine rounds.
+
+**The row splits, and both halves are now real.** The core half is SC-10 in this round's test file:
+the ceiling is where it is claimed, it is the only discontinuity, and — the part that is easy to
+miss — the numeral crosses the seam **byte for byte**. That last clause is not pedantry: the whole
+argument for handing the numeral over is that the engine is the better reader, which is only true if
+the numeral arrives as written. Mutation **M8** drops one digit in transit and SC-10 goes red; today
+nothing else in the repo would.
+
+The platform half needs the engine and therefore belongs on each CI leg —
+`scripts/ci/number-ceiling-probe.mjs` (J25), measured on macOS `say` and `[claimed]` on espeak-ng
+and SAPI until that leg runs. **SC-10 is consequently the better-instrumented of the two
+platform-split rows in section 22**: SC-3's Linux and Windows halves are named and unwritten, while
+SC-10's are written and wired.
+
+**Also OPEN, and the part a listener notices**: two numbers straddling the ceiling in one sentence
+are read in two systems in one breath — *"We processed 1234567 rows and nine hundred ninety nine
+thousand nine hundred ninety nine more."* `[measured-here]`. That is R8-22 with an instrument.
+
 ---
 
 ## 4. The mutation log — every row seen red
@@ -202,6 +232,9 @@ mutations were applied to a `cp` backup and restored by `cp`, never `git checkou
 | **M6** | re-point `path.style` at stage 10 | SC-8 | **RED** — `path.style claims stages [10], but the option first moved stage 9 (speakFilePaths)` |
 | **—** | remove `.fails` from the five open rows | SC-1, SC-2, SC-3, SC-6 | **RED, each naming its own offending input**: `".!!!???"` · `"#!"` · `"--- Heading. "` · `'Call seven now.'` · `'The delta was -forty two milliseconds.'` |
 | **—** | remove `.fails` from SC-9's two rows | SC-9 | **RED** — `pcm-s16le` and `an unplayable format was reported as played` |
+| **M7** | lower the million ceiling to 100,000 | SC-10 | **RED**, two rows — `expected 'It saw 999999 rows.' to contain 'nine hundred ninety nine thousand'` |
+| **M8** | drop the last digit of a numeral handed to the engine | SC-10 | **RED** — `1000000: expected 'The count was 100000 exactly.' to contain 'was 1000000 exactly'` |
+| **—** | remove `.fails` from SC-10's open row | SC-10 | **RED** — `both systems in one sentence: "We processed 1234567 rows and nine hundred ninety nine thousand nine hundred ninety nine more."` |
 
 ---
 
@@ -238,16 +271,17 @@ thing that will still work when stages carry string ids. Not a new item: a corre
 | **R9-04** — stale citations 91 → 130 in one afternoon; the ratchet cannot be walked back by hand | 5 |
 | **R9-05** — the sink collapses every non-`wav` format to `chunk.bin`, silently | 3 |
 | **R9-06** — `bytesPlayed` moves for audio nobody heard, so `selfTest()` can report success while mute | 3 |
+| **R9-09** — the million ceiling is a **seam** decision whose two halves land in two places, and the numeral must cross it byte for byte | 3 |
 
-**6 clear the bar. R9-07 and R9-08 do not**, and are named above so the count can be checked.
+**7 clear the bar. R9-07 and R9-08 do not**, and are named above so the count can be checked.
 
-**Round 9 is not dry.** But 6 against round 8's 24 is a four-fold drop, and the brief asked for this
+**Round 9 is not dry.** But 7 against round 8's 26 is a four-fold drop, and the brief asked for this
 to be read honestly in both directions. The honest reading:
 
 - **Round 8's yield came from a method that had never been applied.** Running the pipeline over real
   and hostile input was new, so it harvested a backlog. A backlog is harvested once.
-- **Round 9's yield came from building instruments**, and four of its six items are things the
-  instruments found *while being built* (R9-02, R9-03, R9-05, R9-06) rather than things the
+- **Round 9's yield came from building instruments**, and five of its seven items are things the
+  instruments found *while being built* (R9-02, R9-03, R9-05, R9-06, R9-09) rather than things the
   instruments caught afterwards. **That is what a converging process looks like from the inside**,
   and it is also what a slowing one looks like. The two are not distinguishable from one round.
 - **What would distinguish them is round 10.** Section 22 now exists, with five rows OPEN and a rule
@@ -256,9 +290,9 @@ to be read honestly in both directions. The honest reading:
   path. If it comes back thick, the seam method still has a backlog and the counter should not be
   trusted yet.
 
-**Do not read the drop as convergence yet.** Two of this round's six items (R9-05, R9-06) are on a
+**Do not read the drop as convergence yet.** Three of this round's seven items (R9-05, R9-06, R9-09) are on a
 seam nobody had looked at, found by one probe in ten minutes, on the first layer below the one the
-brief named. There is no evidence the layer below *that* has been examined either.
+brief named — and R9-09 came from a seam that nine rounds had read as a tuning choice. There is no evidence the layer below *that* has been examined either.
 
 ---
 

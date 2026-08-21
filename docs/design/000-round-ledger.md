@@ -49,7 +49,7 @@ The bar makes the counter measure convergence rather than enthusiasm.
 | 6 | Fold the measurements · audit tests that cannot fail · design M16 + M17 | 3 | **9 unfailable tests, 3 live mutants, 2 designs** | no | M17 declared not buildable to R1 parity, with evidence |
 | 7 | Adversarial review of everything rounds 4–6 produced | 1 | **31** | **no** | see `014-review-round7.md` |
 | 8 | Adversarial review of `PLAN.md`, `TASKS.md`, the constitution's budget table, `006` and `packages/core/src/**` — run, not read | 1 | **26** | **no** | see `017-review-round8.md`. 22 of 26 came from executing the code, 2 from a peer's implementation work re-verified here; **0** from reading a document |
-| 9 | **Build**, not review: `006` section 22 — seam contracts, one row per adjacent pair, each seen red | 1 | **6** | **no** | see `018-review-round9.md`. 9 rows, 3 seams asked-and-empty, 5 rows OPEN. Every row proved red; the mutation log is `018` section 4 |
+| 9 | **Build**, not review: `006` section 22 — seam contracts, one row per adjacent pair, each seen red | 1 | **7** | **no** | see `018-review-round9.md`. 10 rows, 3 seams asked-and-empty, 6 rows OPEN. Every row proved red; the mutation log is `018` section 4 |
 
 ## Parking lot
 
@@ -154,7 +154,7 @@ recorded as empty or unclosable, two covered by tests that already existed, five
 marked `it.fails` so they turn red the moment they are fixed. Every row was **seen red** — the
 mutation log is `018` section 4, and two mutations **survived** and are recorded as survivors.
 
-**6 items clear the bar**, against round 8's 26:
+**7 items clear the bar**, against round 8's 26:
 
 | Item | Clause |
 |---|---|
@@ -164,6 +164,7 @@ mutation log is `018` section 4, and two mutations **survived** and are recorded
 | **R9-04** — stale citations went **91 to 130 in one afternoon** with the ratchet still at 34; the drift rate makes a hand-walked ratchet decoration | 5 |
 | **R9-05** — the sink collapses every non-`wav` format to `chunk.bin`, silently | 3 |
 | **R9-06** — `bytesPlayed` moves for audio nobody heard, so `selfTest()` — the instrument for the FMA's rank-one undetectable — can report success while mute | 3 |
+| **R9-09** — the million ceiling is a **seam** decision, not a tuning choice: below it we decide what the listener hears, at or above it a different engine per platform does. Its two halves land in two places, and the numeral must cross byte for byte | 3 |
 
 Two recorded results do **not** clear the bar and are named so the count can be checked: **R9-07**
 (mutation M1 survived, bounding SC-4's sensitivity — a property of a test written this round) and
@@ -175,7 +176,7 @@ correction to an item, not a new one).
 **But the count fell four-fold, and that is the first thing in this process that looks like
 convergence.** `018` section 6 argues both readings and refuses to pick between them from one round,
 because they are not distinguishable from inside a single round: round 8 harvested a backlog that a
-never-applied method had accumulated, and a backlog is harvested once; round 9's six items are
+never-applied method had accumulated, and a backlog is harvested once; round 9's seven items are
 mostly things its instruments found *while being built*, which is what both a converging and a
 slowing process look like.
 
@@ -190,7 +191,7 @@ output to the next and has been seen red.
 - If it comes back **thick**, the seam method still has a backlog and the counter is not yet
   measuring convergence.
 
-One caution the round-9 record puts on itself, and the ledger keeps: **two of round 9's six items
-were on a seam nobody had looked at, found by one probe in ten minutes, one layer below the one the
-brief named.** There is no evidence the layer below that has been examined either. A thin round 10
+One caution the round-9 record puts on itself, and the ledger keeps: **three of round 9's seven items
+were on seams nobody had looked at** — two found by one probe in ten minutes one layer below the
+layer the brief named, and one (R9-09) on a decision nine rounds had read as a tuning choice. There is no evidence the layer below that has been examined either. A thin round 10
 is necessary for a dry signal; on its own it is not sufficient.
