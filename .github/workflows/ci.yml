@@ -121,9 +121,19 @@ jobs:
       - name: The million-ceiling probe must be able to refuse a verdict
         shell: bash
         run: |
+          # `set +e` around the call is load-bearing. GitHub runs `shell: bash` as
+          # `bash --noprofile --norc -eo pipefail`, and under `set -e` a command that exits
+          # non-zero kills the step immediately — so `"$@"` returning 3, which is the WHOLE POINT
+          # here, aborted the step before `got` was ever compared. CI run 32505473403 exited 3 at
+          # the first probe and never reached the second line.
+          #
+          # It passed locally because a plain `bash script.sh` has no `-e`. Same script, same
+          # probe, different shell flags, opposite verdict — so the local check could not have
+          # caught it. Reproduce the real thing with:
+          #   bash --noprofile --norc -eo pipefail <script>
           expect() {
             want=$1; shift
-            "$@"; got=$?
+            set +e; "$@"; got=$?; set -e
             if [ "$got" -ne "$want" ]; then echo "expected exit $want from: $* -- got $got"; exit 1; fi
             echo "ok: exit $want from $*"
           }
