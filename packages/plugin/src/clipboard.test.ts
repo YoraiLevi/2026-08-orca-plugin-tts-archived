@@ -49,3 +49,39 @@ describe('T060 clipboard', () => {
       'the default cap truncates ordinary text').toBe(false)
   })
 })
+
+/**
+ * 006 site 37 — timeout, not-installed and non-zero-exit arrived at one bare `continue`, and the
+ * only thing that reached the listener was the list of NAMES tried.
+ *
+ * The outcome chosen is DISTINGUISHABLE, not louder. "Tried: wl-paste, xclip, xsel" is a sentence
+ * the listener cannot act on; "xclip is not installed" is the same information, kept, and it names
+ * the one thing they could go and do. No clipboard is read and no audio is played.
+ */
+describe('006 site 37 — each clipboard helper failure keeps its own reason', () => {
+  it('names a missing binary, a non-zero exit and a hang separately', async () => {
+    const err = await readClipboard({
+      platform: 'linux',
+      timeoutMs: 150,
+      helpers: [
+        { cmd: 'orca-tts-no-such-clipboard-helper', args: [] },
+        { cmd: process.execPath, args: ['-e', 'process.exit(3)'] },
+        { cmd: process.execPath, args: ['-e', 'setTimeout(() => {}, 10000)'] }
+      ]
+    }).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ClipboardUnavailableError)
+    const message = (err as ClipboardUnavailableError).message
+    expect(message, 'a missing helper is the actionable case and was the one being hidden')
+      .toContain('orca-tts-no-such-clipboard-helper is not installed')
+    expect(message, 'a helper that ran and failed is not a helper that is absent')
+      .toMatch(/exited with code 3/)
+    expect(message, 'a hang is not an exit').toMatch(/timed out after 150 ms/)
+  })
+
+  it('says so when the platform has no clipboard helper at all', async () => {
+    const err = await readClipboard({ platform: 'plan9' }).catch((e: unknown) => e)
+    expect((err as ClipboardUnavailableError).message)
+      .toContain('no clipboard helper is known for plan9')
+  })
+})

@@ -74,6 +74,14 @@ export interface ClipboardOptions {
   readonly maxChars?: number
   /** Deadline per helper. PowerShell start-up is slow; never unbounded. */
   readonly timeoutMs?: number
+  /**
+   * Override the helper ladder. Test seam ONLY, and it exists for the same reason the sink's
+   * `players` seam does: the failures worth testing (a missing binary, a helper that exits
+   * non-zero, a helper that hangs) cannot be produced deterministically from the real ladder on
+   * three operating systems. `xclip` is present on some CI images and absent on others, so a test
+   * built on the real ladder asserts a different thing per runner — which is not a test.
+   */
+  readonly helpers?: ReadonlyArray<{ cmd: string; args: readonly string[] }>
 }
 
 export interface ClipboardResult {
@@ -100,7 +108,7 @@ export async function readClipboard(opts: ClipboardOptions = {}): Promise<Clipbo
   const platform = opts.platform ?? process.platform
   const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS
   const timeoutMs = opts.timeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS
-  const candidates = CANDIDATES[platform] ?? []
+  const candidates = opts.helpers ?? CANDIDATES[platform] ?? []
   const tried: string[] = []
   const reasons: string[] = []
 

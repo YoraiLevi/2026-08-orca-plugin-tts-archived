@@ -425,3 +425,26 @@ describe('006 section 19 rank 1 — the listener can ask whether the voice actua
     expect(spoken, 'the verdict must carry a value that moved').toMatch(/\d|one|two|three|four|five|six|seven|eight|nine/i)
   })
 })
+
+/**
+ * A control that was pressed must answer in the AUDIO STREAM.
+ *
+ * 006 section 19 rank 4 — "whether a control fired". A plugin keybinding is inert in terminal
+ * focus and a plugin cannot query host keybindings (P19), so a dead chord and a working chord are
+ * the same absence of sound. Three "nothing happened" answers still terminated in
+ * `notifications.show`: an empty clipboard, a clipboard that could not be read, and "no agent
+ * reply yet". For a listener who does not read the tray, pressing the key and pressing nothing
+ * were identical.
+ *
+ * Asserted on WHAT WOULD BE SPOKEN, from a fake provider that records strings (P31).
+ */
+describe('006 rank 4 — a pressed control always answers in the audio stream', () => {
+  it('speaks "no agent reply yet" instead of only notifying', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-noreply-'))
+    const h = await boot(root)
+    await h.run('read-aloud.speak-last-reply')
+    await settle()
+    expect(h.spoken(), 'the listener pressed a key and must hear an answer, not silence')
+      .toMatch(/no agent reply to read yet/i)
+  })
+})
