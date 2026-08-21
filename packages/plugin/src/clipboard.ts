@@ -7,10 +7,25 @@
  */
 import { spawn } from 'node:child_process'
 
+/**
+ * 006 site 37. Every helper failure — a missing binary, a helper that timed out, a helper that
+ * exited non-zero — arrived at one bare `continue`, and the only thing that survived to the
+ * listener was the LIST OF NAMES tried. "Tried: wl-paste, xclip, xsel" tells them nothing they can
+ * act on; "xclip is not installed" tells them exactly what to do next, and it is the same
+ * information, kept instead of thrown away.
+ *
+ * The outcome chosen here is DISTINGUISHABLE, not louder: the sentence is spoken either way, and
+ * this only decides whether it is worth hearing.
+ */
 export class ClipboardUnavailableError extends Error {
-  constructor(platform: string, tried: readonly string[]) {
-    super(`Could not read the clipboard on ${platform}. Tried: ${tried.join(', ')}`)
+  /** Per-helper reason, in ladder order. */
+  readonly reasons: readonly string[]
+  constructor(platform: string, tried: readonly string[], reasons: readonly string[] = []) {
+    super(reasons.length > 0
+      ? `Could not read the clipboard on ${platform}. ${reasons.join('; ')}.`
+      : `Could not read the clipboard on ${platform}. Tried: ${tried.join(', ')}`)
     this.name = 'ClipboardUnavailableError'
+    this.reasons = reasons
   }
 }
 
@@ -34,7 +49,7 @@ function capture(cmd: string, args: readonly string[], timeoutMs: number): Promi
   return new Promise((resolve, reject) => {
     let child
     try { child = spawn(cmd, [...args], { stdio: ['ignore', 'pipe', 'ignore'] }) }
-    catch { reject(new Error(cmd)); return }
+    catch { reject(new Error(`${cmd} could not be started`)); return }
     let out = ''
     const timer = setTimeout(() => {
       if (child.exitCode === null) child.kill('SIGKILL')
@@ -42,8 +57,14 @@ function capture(cmd: string, args: readonly string[], timeoutMs: number): Promi
     }, timeoutMs)
     const settle = (fn: () => void) => { clearTimeout(timer); fn() }
     child.stdout?.on('data', (d: Buffer) => { out += d.toString('utf8') })
-    child.on('error', () => settle(() => reject(new Error(cmd))))
-    child.on('close', (code) => settle(() => code === 0 ? resolve(out) : reject(new Error(cmd))))
+    // Site 37: these three were one indistinguishable `new Error(cmd)`. ENOENT is the actionable
+    // one — the helper is simply not installed — and it was the one being hidden.
+    child.on('error', (err: NodeJS.ErrnoException) => settle(() => reject(new Error(
+      err.code === 'ENOENT' ? `${cmd} is not installed` : `${cmd} could not be started`
+    ))))
+    child.on('close', (code) => settle(() => code === 0
+      ? resolve(out)
+      : reject(new Error(`${cmd} exited with code ${String(code)}`))))
   })
 }
 
@@ -81,12 +102,21 @@ export async function readClipboard(opts: ClipboardOptions = {}): Promise<Clipbo
   const timeoutMs = opts.timeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS
   const candidates = CANDIDATES[platform] ?? []
   const tried: string[] = []
+  const reasons: string[] = []
 
   for (const c of candidates) {
     tried.push(c.cmd)
     try {
       return capText(await capture(c.cmd, c.args, timeoutMs), maxChars)
-    } catch { continue }
+    } catch (err) {
+      // Site 37: `catch { continue }` discarded WHY. The aggregate error named the helpers and
+      // not one fact about any of them.
+      reasons.push(err instanceof Error ? err.message : String(err))
+      continue
+    }
   }
-  throw new ClipboardUnavailableError(platform, tried)
+  if (candidates.length === 0) {
+    reasons.push(`no clipboard helper is known for ${platform}`)
+  }
+  throw new ClipboardUnavailableError(platform, tried, reasons)
 }

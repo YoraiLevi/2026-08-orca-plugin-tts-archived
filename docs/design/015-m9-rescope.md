@@ -2,11 +2,32 @@
 
 **Status:** design amendment. **Written:** 2026-08-21. **Repo at:** `d404f17`.
 
-> **This is an amendment to `docs/design/010-provider-seam-and-resident-service.md`, written as a
-> separate document on purpose.** 010 is under review by another agent as this is written and must
-> not be edited concurrently. When that review lands, 010 absorbs this document — sections 8, 10 and
-> 12 of 010 are the ones that change. Until then, **where 010 and 015 disagree, 015 is the later
-> evidence and wins**, and 010's amendment blocks already say so about their own predecessors.
+> **Written as a separate document on purpose, because `010` was under concurrent review and could
+> not be edited. That condition has ended.**
+>
+> **Reconciled 2026-08-21 (round-7 reconciliation, `docs/design/016-reconciliation-round7.md`).** This
+> document's standing clause — *"where 010 and 015 disagree, 015 is the later evidence and wins"* — is
+> **retired**, because a precedence rule between two live documents is not a resolution; it makes the
+> reader adjudicate, every time. **The three places they actually disagreed were rungs 2, 3 and 4 of
+> the ladder, and `010` section 12 has been edited in place to this document's conclusions**, with the
+> falsified reasoning left visible. There is nothing left to adjudicate.
+>
+> **What each document owns now, so that only one answers each question:**
+>
+> | Question | Read |
+> |---|---|
+> | What is the provider seam, and what does `TtsProvider` v2 look like | **`010`** parts 1 and 4 |
+> | What is the rung ladder, and what does each rung sound like | **`010`** section 12 |
+> | **What is M9's deliverable** | **this document**, section 1 |
+> | How is the device acquired, lost, changed mid-sentence, and cancelled | **this document**, sections 2.1–2.4 |
+> | **How is M9a gated, and what would refute the gate** | **this document**, section 6 |
+> | What does the rescope change in `003`, `004`, `005` | **this document**, sections 7.1–7.4 |
+> | What does R1 cost | **`010`** section 9 for the three sidecars; **this document** section 4 for the rescoped costing |
+>
+> `010` section 12 carries the mirror of this table. Neither document restates the other's half; each
+> cites it. **If a future reader finds a third place where these two disagree, that is a defect in
+> this reconciliation — amend both in one change and record it in `016`, do not add a precedence
+> rule.**
 
 **What this document decides.** M9's deliverable. For the whole life of this project M9 has read
 *"resident service **+ Piper**, because only a neural engine meets the 500 ms budget"*

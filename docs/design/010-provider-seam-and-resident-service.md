@@ -4,8 +4,30 @@
 **Work order:** `docs/design/008-crossreview-round3.md` finding **C-05**, scheduled by
 `docs/design/009-reconciliation.md` section 3 (*"C-05 in particular deserves scheduling"*).
 **Author had no session context.** Every claim about our own code cites `path:line` **verified at
-`32b929a`**, not copied from another document. Every number carries **MEASURED**, **DOCUMENTED** or
-**ESTIMATED** (finding E-05; constitution R006).
+`32b929a`**, not copied from another document. Every number carries an **R006 label** —
+`[measured-here]`, `[documented]` or `[claimed]`.
+
+> **Swept into R006's vocabulary 2026-08-21 — forced by round-7 finding R7-23.** This document was
+> written with its own three words — **MEASURED / DOCUMENTED / ESTIMATED** — attributed to *"finding
+> E-05; constitution R006"*. **Those are not R006's labels**, and section 8's segment table mixed both
+> vocabularies inside six consecutive rows: `ESTIMATED` with no bracket beside `[claimed]`, `[derived]`
+> and `[measured-here]`. `docs/.research/latency-measurements.md:355-357` had already recorded the
+> divergence as *"not R006 vocabulary, but honest"*; what made it a finding is that
+> `HANDOFF.md` then asserted *every* latency number in the repo carried an R006 label, and this table
+> was the counter-example.
+>
+> The sweep is mechanical and loses nothing, because the two vocabularies were one-to-one:
+>
+> | Was | Is | Why it is the same claim |
+> |---|---|---|
+> | **MEASURED** | `[measured-here]` | every one of them was measured by this project's own probe — P10, P11, F2's Swift binary, the 180-voice enumeration — never inherited |
+> | **DOCUMENTED** | `[documented]` | vendor documentation or a distribution manifest, cited in place |
+> | **ESTIMATED** | `[claimed]` | R006 has no "estimate" tier on purpose: an estimate nobody ran is a claim |
+> | **UNMEASURED** | `[claimed]` | same, and it was never a label — it was an admission |
+>
+> **Nothing below changed its evidence.** A number that was `MEASURED` is `[measured-here]` with the
+> same run count beside it; no claim was upgraded by the rename. `HANDOFF.md`'s repo-wide sentence is
+> corrected in the same change to name what was swept and what was not.
 
 **What this document decides.** Two things, and they turn out to be one thing.
 
@@ -31,9 +53,9 @@ implementation code; the TypeScript below is contract, and is expected to be cop
 
 | # | Fact | Label | Source, verified |
 |---|---|---|---|
-| F1 | `say ""` — empty string, zero synthesis — costs **414 ms min / 418 ms median over 5 runs** on macOS | **MEASURED** | `PITFALLS.md` P10 |
-| F2 | `AVSpeechSynthesizer.write(_:toBufferCallback:)` produced **55,050 PCM frames and 9 of 9 word-boundary callbacks, headless, with no process spawn and no audio device** | **MEASURED** (compiled Swift probe) | `docs/.research/q-round1-platform.md` "Unused capabilities" item 1 |
-| F3 | Piper amy-low synthesizes one sentence in **52–65 ms** | **MEASURED** `[measured-here]` | `PITFALLS.md` P11 |
+| F1 | `say ""` — empty string, zero synthesis — costs **414 ms min / 418 ms median over 5 runs** on macOS | **`[measured-here]`** | `PITFALLS.md` P10 |
+| F2 | `AVSpeechSynthesizer.write(_:toBufferCallback:)` produced **55,050 PCM frames and 9 of 9 word-boundary callbacks, headless, with no process spawn and no audio device** | **`[measured-here]`** (compiled Swift probe) | `docs/.research/q-round1-platform.md` "Unused capabilities" item 1 |
+| F3 | Piper amy-low synthesizes one sentence in **52–65 ms** | **`[measured-here]`** `[measured-here]` | `PITFALLS.md` P11 |
 | **F4** | **A real sentence through `OsSynthProvider.generate()` costs p50 1,163 / 1,054 ms**, p95 1,244 / 1,084, min 900, n=9 per run, two runs | **`[measured-here]`** | `docs/.research/latency-measurements.md` 1.3 |
 | **F5** | **The inter-chunk gap is p50 950 / 937 / 897 ms**, n=18 per run, three runs — and **~893 ms of it (99.7 %) is CoreAudio device open/pre-roll/post-roll/teardown**, not the 2.3 ms process spawn | **`[measured-here]`** | `docs/.research/latency-measurements.md` 1.1, PITFALLS **P32** |
 | **F6** | **A WARM resident `AVSpeechSynthesizer.write(_:toBufferCallback:)` reaches its first non-empty, non-silent PCM buffer in p50 17.7 ms (run 1) / 17.1 ms (run 2)**, n=20 each, max observed 21.6 ms; the whole utterance renders in p50 ~38 ms | **`[measured-here]`** | `docs/.research/spike1-resident-synth.md` 1 (**SPIKE-1, run 2026-08-21**) |
@@ -127,10 +149,10 @@ Four properties of that shape are the reason four documents each need to widen i
 | # | Extension | Requested by | Lands with | Platform evidence |
 |---|---|---|---|---|
 | 1 | Per-utterance identity: voice, **rate as wpm**, pitch in semitones | `005` sections 4, 8.2, 8.4 | M15 | rate everywhere; pitch on all three by three different surfaces (`q-round1-platform.md` Q33) |
-| 2 | `pause()` / `resume()`, distinct from `cancel()` | `003` section 8.7 (`:1283-1296`) | M13 | macOS `pauseSpeaking(at: .word)`, Windows `Pause()`/`Resume()`, Linux SSIP `PAUSE`/`RESUME` — **DOCUMENTED**, item 2 |
+| 2 | `pause()` / `resume()`, distinct from `cancel()` | `003` section 8.7 (`:1283-1296`) | M13 | macOS `pauseSpeaking(at: .word)`, Windows `Pause()`/`Resume()`, Linux SSIP `PAUSE`/`RESUME` — **`[documented]`**, item 2 |
 | 3 | Audio-format variance, including synthesized earcon PCM | `004` section 2 (**`004:126-127`** — corrected 2026-08-21, R7-21: `004:102` was wrong at this document's own pinned SHA `32b929a`, where the sentence *"Branch on `chunk.format`, do not assume WAV"* was at `004:91`; it is `004:126-127` at HEAD), `005` section 11.1d (`:623-627`) | M11 | our own three rungs already differ; the earcon is generated PCM at a rate the provider did not choose |
 | 4 | **`spoke-elsewhere` as a first-class outcome** | `008` X-10, resolved in `009` section 1 | **already shipped, unmodelled** | `PITFALLS.md` P25; `os-synth/index.ts:318-323` |
-| 5 | **Word-boundary events** | nobody — found by the platform probe, unscheduled | M13's cursor, and precise resume | **MEASURED on macOS** (F2); Windows `SpeakProgress` and Linux SSIP index marks **DOCUMENTED** |
+| 5 | **Word-boundary events** | nobody — found by the platform probe, unscheduled | M13's cursor, and precise resume | **`[measured-here]` on macOS** (F2); Windows `SpeakProgress` and Linux SSIP index marks **`[documented]`** |
 | 6 | **SSML, or its absence, as a capability** | nobody — found by the platform probe, unscheduled | M15 (it is the only route to pitch on Windows) | available on all three, used on none (`q-round1-platform.md` item 3) |
 
 Extensions 5 and 6 are the reason this document exists rather than a three-line diff. If the seam is
@@ -151,10 +173,10 @@ degradation on this seam is `SpeechService.announce()` — the audio stream — 
 notification is the supplement, exactly as `packages/plugin/src/speech-service.ts:126` already does
 for queue losses.
 
-"A wrong-value lie" is not hypothetical. **MEASURED** on macOS 26.5: `say -v NotAVoiceAtAll` exits
+"A wrong-value lie" is not hypothetical. **`[measured-here]`** on macOS 26.5: `say -v NotAVoiceAtAll` exits
 `0`, writes a full-length WAV, and substitutes the default voice — three different `-v` arguments
 produced byte-identical output, md5 `caba1118…` (`q-round1-platform.md`, macOS silent-fallback
-hazard). **DOCUMENTED** on Windows: `SelectVoice(name)` is a case-sensitive **substring** match, so a
+hazard). **`[documented]`** on Windows: `SelectVoice(name)` is a case-sensitive **substring** match, so a
 short id binds to the wrong voice with no error (Microsoft's own `SelectVoice` page). Our provider
 emits both verbatim (`os-synth/index.ts:353`, `:361`) and reads back neither. Under Rule B, a
 provider that cannot verify what it applied must **declare that it cannot**, not report success.
@@ -192,7 +214,7 @@ export interface AudioChunk {
  * same thing on three operating systems, which no vendor control value does.
  *
  * The caller states `targetWpm`. The provider maps it. `RateSupport.calibration` says whether that
- * map is exact or a seed, and the map is MEASURED PER HOST (005 section 8.3), never derived.
+ * map is exact or a seed, and the map is [measured-here] PER HOST (005 section 8.3), never derived.
  */
 export interface ProsodyRequest {
   /** Opaque to the provider; resolved through `resolveVoice()`, never a persisted name (P28). */
@@ -274,7 +296,7 @@ export interface ProviderCapabilities {
 
   // ── extension 5: events ──
   readonly events: {
-    /** Word-boundary callbacks with source-string offsets. MEASURED available on macOS (F2). */
+    /** Word-boundary callbacks with source-string offsets. [measured-here] on macOS (F2). */
     readonly word: boolean
     readonly sentence: boolean
     /** Timestamps relative to the utterance's own audio, not to wall clock. */
@@ -534,7 +556,7 @@ what the v2 seam above already requires, so it costs nothing extra to allow.
 ### 5.1 Why it is an outcome and not an exception
 
 On a stock Ubuntu 24.04.3 desktop there is no `/usr/bin/espeak-ng` — the image ships the shared
-library and `speech-dispatcher`, not the CLI (**DOCUMENTED**, the official image manifest, P25). The
+library and `speech-dispatcher`, not the CLI (**`[documented]`**, the official image manifest, P25). The
 floor is therefore `spd-say --wait`, which **cannot write a WAV** — verified against upstream
 `brailcom/speechd`: `src/clients/say/options.c` has no file-output option (`-w` is `--wait`), and
 `src/modules/module_utils.c` `module_audio_init` opens only oss/alsa/nas/libao/pulse, so no capture
@@ -626,9 +648,9 @@ a wrong-value lie.
 
 | Capability absent | Provider that lacks it | Degrades to | Spoken, once |
 |---|---|---|---|
-| `prosody.pitchSemitones` | macOS `say` CLI (no `-p` flag; only in-band `[[pbas]]` — **MEASURED**), Windows `Speak` (no `Pitch` property — **DOCUMENTED**) | identity falls back to call-sign + earcon, which are portable by construction | *"Voice pitch is not available on this system, so agents are told apart by name."* |
+| `prosody.pitchSemitones` | macOS `say` CLI (no `-p` flag; only in-band `[[pbas]]` — **`[measured-here]`**), Windows `Speak` (no `Pitch` property — **`[documented]`**) | identity falls back to call-sign + earcon, which are portable by construction | *"Voice pitch is not available on this system, so agents are told apart by name."* |
 | `prosody.rate.calibration = 'exact'` | Windows: `$s.Rate` is `-10..+10` with no documented wpm meaning | the seed formula, **shown as an assumption**, and the Voice Lab offers "recalibrate" | *"Speed on Windows is estimated until you calibrate it."* |
-| `prosody.voiceVerification` | macOS `say` (exits 0 on a bogus voice — **MEASURED**), Windows `SelectVoice` (substring match — **DOCUMENTED**) | the provider reports `'none'`; the identity layer refuses to count voice as a distinguishing axis | *"This system cannot confirm which voice it used, so voices are not used to tell agents apart."* |
+| `prosody.voiceVerification` | macOS `say` (exits 0 on a bogus voice — **`[measured-here]`**), Windows `SelectVoice` (substring match — **`[documented]`**) | the provider reports `'none'`; the identity layer refuses to count voice as a distinguishing axis | *"This system cannot confirm which voice it used, so voices are not used to tell agents apart."* |
 | `transport.pause` | today: every provider — `cancel()` is `SIGKILL` (`os-synth/index.ts:240`) | `PauseUnsupportedError`, refusal earcon, **no cancel** | *"Pause is not available with the system voice. Stop, then read again."* |
 | `events.word` | Windows and Linux until their sidecars land; the `spd-say` rung permanently | the M13 cursor drops to sentence granularity **and says so in the header** | *"Word tracking is not available here."* |
 | `playback: 'client'` | the `spd-say` rung | section 5.2's whole table | already spoken at detection (`os-synth/index.ts:265-268`) — but see the note below |
@@ -684,15 +706,16 @@ are measurements, and that is the honest state of this project's most load-beari
 
 | # | Segment | Cost | Label |
 |---|---|---|---|
-| 1 | normalize (15 stages) + chunk, pure functions, no I/O | < 5 ms | **ESTIMATED** |
-| 2 | `mkdtemp` for the synthesis temp dir (`os-synth/index.ts:326`) | ~1 ms | **ESTIMATED** |
-| 3 | **`spawn('say', …)` — process start, before one phoneme** | **414 ms min / 418 ms median, 5 runs** | **MEASURED** (P10) |
+| 1 | normalize (15 stages) + chunk, pure functions, no I/O | < 5 ms | **`[claimed]`** |
+| 2 | `mkdtemp` for the synthesis temp dir (`os-synth/index.ts:326`) | ~1 ms | **`[claimed]`** |
+| 3 | **`spawn('say', …)` — process start, before one phoneme** | **414 ms min / 418 ms median, 5 runs** | **`[measured-here]`** (P10) |
 | 4 | actual synthesis of a real sentence, on top of segment 3 | **~640–750 ms** — segments 2–5 together measure p50 1,054–1,163 ms (F4) and segment 3 is 414 of it | **`[derived]`** from `[measured-here]` |
-| 5 | `readFile` the WAV back, `rm` the dir (`:336`, `:340`) | ~2 ms | **ESTIMATED** `[claimed]` |
+| 5 | `readFile` the WAV back, `rm` the dir (`:336`, `:340`) | ~2 ms | **`[claimed]`** `[claimed]` |
 | 6 | sink: `mkdtemp` + `writeFile` + **`spawn('afplay', …)`** (`subprocess-sink.ts:52-61`, `:75`) | **~950 ms**, of which the spawn is 2.3 ms and the temp file 0.33 ms — **the rest is the audio device open** (F5) | **`[measured-here]`** |
 
 > **Amended 2026-08-21, forced by findings 1 and 3 of `docs/.research/latency-measurements.md`.**
-> Rows 4 and 6 were `UNMEASURED`; both are now measured, and both are worse than this section
+> Rows 4 and 6 read `UNMEASURED` — which was an admission, not a label, and is `[claimed]` under
+> R006 (see the header sweep, R7-23). Both are now measured, and both are worse than this section
 > assumed. Row 6's label was also the wrong *kind* of cost — a device open, not a spawn.
 
 **Segment 3 alone is 83 % of the 500 ms budget, and it is empty-string spawn — zero synthesis. But
@@ -754,11 +777,11 @@ sequenceDiagram
     rect rgb(250, 235, 235)
     note over U,P: TODAY — two process spawns per chunk
     U->>W: hotkey
-    W->>W: normalize + chunk  (< 5 ms, ESTIMATED)
+    W->>W: normalize + chunk  (< 5 ms, [claimed])
     W->>S: spawn `say -o file.wav`
-    note right of S: 414 ms MEASURED (P10)<br/>spawn alone, empty string
+    note right of S: 414 ms [measured-here] (P10)<br/>spawn alone, empty string
     S-->>W: WAV on disk. whole call p50 1,054-1,163 ms<br/>[measured-here] n=9 x2, so ~640-750 ms is synthesis
-    W->>W: readFile + mkdtemp + writeFile (~3 ms, ESTIMATED)
+    W->>W: readFile + mkdtemp + writeFile (~3 ms, [claimed])
     W->>P: spawn `afplay file.wav`
     note right of P: second spawn - but the spawn is 2.3 ms.<br/>~950 ms inter-chunk gap [measured-here] n=18 x3,<br/>of which ~893 ms is the CoreAudio DEVICE open/teardown.<br/>PITFALLS P32
     P-->>U: first audio — budget already gone
@@ -767,12 +790,12 @@ sequenceDiagram
     rect rgb(235, 245, 235)
     note over U,P: RESIDENT — zero spawns on the hot path
     U->>W: hotkey
-    W->>W: normalize + chunk  (< 5 ms, ESTIMATED)
+    W->>W: normalize + chunk  (< 5 ms, [claimed])
     W->>S: synthesize over an open socket (service already warm)
-    note right of S: no process spawn by construction.<br/>API-call to first PCM buffer:<br/>SPIKE-1, UNMEASURED
+    note right of S: no process spawn by construction.<br/>API-call to first PCM buffer:<br/>SPIKE-1, [claimed] at the time of writing — now [measured-here], F6
     S-->>P: PCM buffers, streamed, device already open
     P-->>U: first audio
-    note over S,P: word-boundary events ride the same stream —<br/>9 of 9 MEASURED on macOS, headless (F2)
+    note over S,P: word-boundary events ride the same stream —<br/>9 of 9 [measured-here] on macOS, headless (F2)
     end
 ```
 
@@ -833,7 +856,7 @@ corrected:
   `write(_:toBufferCallback:)` delivers buffers as they are produced, so first-buffer could still be
   a small fraction of 640–750 ms. **Nobody has measured it.** The estimate is therefore restated
   honestly as **`[claimed]` first-buffer: unknown, plausibly 100–400 ms**, replacing the
-  ESTIMATED 30–120 ms, which rested on the falsified premise.
+  `[claimed]` 30–120 ms, which rested on the falsified premise.
 - **What this does to SPIKE-1.** Its falsifier — *"a median above 350 ms on any platform"* — was
   written as an unlikely outcome. On the measured evidence it is now a **live** outcome, and the
   probe moves from confirmatory to decisive. Run it **before** any resident-synth work is scheduled,
@@ -892,9 +915,9 @@ synthesis through three unrelated APIs. **Costed here rather than hidden**, per 
 
 | Platform | The API | Label | What it takes | Gets us |
 |---|---|---|---|---|
-| **macOS** | `AVSpeechSynthesizer.write(_:toBufferCallback:)`, `pauseSpeaking(at: .word)`, `continueSpeaking()`, `willSpeakRangeOfSpeechString` | **MEASURED** headless | a **compiled Swift/ObjC binary**. There is no way to reach AVFoundation from Node without one, and P9 already concluded *"plan for a bundled Swift audio sidecar"* | PCM, word boundaries, word-granular pause, no spawn — all from one API |
-| **Windows** | `SetOutputToAudioStream(Stream, SpeechAudioFormatInfo)`, `SpeakProgress`, `Pause()`/`Resume()` | **DOCUMENTED** | **no compiled binary required** — a long-lived PowerShell/.NET host process reading commands on stdin. Our current `SetOutputToWaveFile` (`os-synth/index.ts:367`) throws the streaming sink away for a temp file | PCM, word progress, real pause/resume |
-| **Linux** | speech-dispatcher **SSIP** over its socket | **DOCUMENTED** | **no compiled binary required** — a socket client in Node | `PAUSE`/`RESUME` and index marks. **No audio, ever** — see below |
+| **macOS** | `AVSpeechSynthesizer.write(_:toBufferCallback:)`, `pauseSpeaking(at: .word)`, `continueSpeaking()`, `willSpeakRangeOfSpeechString` | **`[measured-here]`** headless | a **compiled Swift/ObjC binary**. There is no way to reach AVFoundation from Node without one, and P9 already concluded *"plan for a bundled Swift audio sidecar"* | PCM, word boundaries, word-granular pause, no spawn — all from one API |
+| **Windows** | `SetOutputToAudioStream(Stream, SpeechAudioFormatInfo)`, `SpeakProgress`, `Pause()`/`Resume()` | **`[documented]`** | **no compiled binary required** — a long-lived PowerShell/.NET host process reading commands on stdin. Our current `SetOutputToWaveFile` (`os-synth/index.ts:367`) throws the streaming sink away for a temp file | PCM, word progress, real pause/resume |
+| **Linux** | speech-dispatcher **SSIP** over its socket | **`[documented]`** | **no compiled binary required** — a socket client in Node | `PAUSE`/`RESUME` and index marks. **No audio, ever** — see below |
 
 **The honest asymmetry.** "Three sidecars" is right about the *implementations* and wrong about the
 *cost*, and the difference is worth the paragraph:
@@ -932,7 +955,7 @@ synthesis through three unrelated APIs. **Costed here rather than hidden**, per 
 |---|---|
 | Arch matrix for the one compiled artifact | darwin-arm64 + darwin-x64. Windows-on-ARM is already a declared parity gap for the neural path (P7, P13) and is **unaffected** here — SAPI is present on every Windows arch, which is a quiet argument for the OS-synth service being the *portable* one |
 | Distribution | P5: a plugin is **never built at install time** — `git clone --depth 1` + a recursive copy, no `npm install`, no compile ever. So the Swift binary either ships in the plugin tree or downloads at runtime |
-| Size | P4: **2,000 files / 50 MB** hard caps. A Swift sidecar is ~1–3 MB **ESTIMATED**, so it fits — unlike a neural voice model, which does not (P4 says so explicitly). This is a real advantage of the OS-synth service over Piper: **no download, no first-run bridge, no model manager** |
+| Size | P4: **2,000 files / 50 MB** hard caps. A Swift sidecar is ~1–3 MB **`[claimed]`**, so it fits — unlike a neural voice model, which does not (P4 says so explicitly). This is a real advantage of the OS-synth service over Piper: **no download, no first-run bridge, no model manager** |
 | CI (R4) | three OSes already run. But `actions/runner-images` has **zero** references to `espeak`, `speech`, `alsa` or `pulseaudio` (P16), so the Linux sidecar cannot be exercised for *audio* headlessly — it can be exercised for *protocol*. Residual **U7** is unrun |
 | Code signing / notarization | macOS only, and it is a real cost nobody has scoped. **Open question, section 12** |
 | Maintenance | three languages: Swift, PowerShell/.NET, TypeScript. Three sets of platform-specific bugs, one shared protocol test suite |
@@ -954,14 +977,14 @@ macOS reaches decent Apple voices; Windows third-party apps are fenced to SAPI 5
 can be used"*, and the maintainer of the 911★ project built to break that fence calls his own work
 *"more like a hack… can stop working at any time"*; Linux out of the box is espeak-ng formant
 synthesis, when the binary is even present. And on this machine **all 180 installed macOS voices are
-`quality == .default`** (compact) — **MEASURED** — with enhanced and premium being optional
+`quality == .default`** (compact) — **`[measured-here]`** — with enhanced and premium being optional
 downloads we cannot perform for the user.
 
 So the shape is:
 
 | | Resident OS-synth | Piper in the resident service |
 |---|---|---|
-| First audio | meets budget by deleting spawn (SPIKE-1) | 52–65 ms/sentence **MEASURED** (F3), also warm |
+| First audio | meets budget by deleting spawn (SPIKE-1) | 52–65 ms/sentence **`[measured-here]`** (F3), also warm |
 | Voice quality | two-tier and platform-dependent (P16) | one good voice, **identical on all three platforms** |
 | Download | **none** | a model, outside the 50 MB plugin tree (P4) |
 | Windows-on-ARM | works (SAPI) | **no sherpa build on npm**; the GitHub release does carry `win-arm64` (P13) |
@@ -1131,6 +1154,34 @@ nothing.
 
 ## 12. Four rungs, each shippable, each honest about where it is
 
+> ### Reconciled with `015-m9-rescope.md` 2026-08-21 — the two documents are now one story
+>
+> `docs/design/015-m9-rescope.md` was written while this document was under review and could not be
+> edited, so it carried a standing precedence clause: *"where 010 and 015 disagree, 015 is the later
+> evidence and wins."* **That clause is retired here**, because a precedence rule between two live
+> documents is not a resolution — it is a reader deciding which one to believe, every time.
+>
+> **The division, stated once.** This document owns **the seam** (`TtsProvider` v2, part 1) and **the
+> rung ladder** below. `015` owns **M9's deliverable, the device mechanics and gate M9a** — sections
+> 2.1–2.4 (acquire, lose, default-device change mid-sentence, two-sided cancel when we own the
+> device), section 6 (gate M9a and its falsifier) and sections 7.1–7.4 (what the rescope changes in
+> `003`, `004`, `005`). None of that is restated here; **a reader asking "what is M9 and how is it
+> gated" reads `015` and only `015`.**
+>
+> **The three places they actually disagreed, and how each is settled — 015's evidence wins on all
+> three, and the ladder below is edited in place rather than annotated:**
+>
+> | Was | `015` says | Settled |
+> |---|---|---|
+> | Rung 2 = *"resident sink, subprocess synth"*, first audio **unchanged** | rung 2 is the **macOS sidecar**: warm synthesizer *and* held device together, first audio immediate | **015.** SPIKE-1 (F6) makes the warm synthesizer free — p50 **17.7 / 17.1 ms**, n=20 ×2 — so splitting it out of rung 2 buys nothing and delays the only rung a listener notices |
+> | Rung 3 = *"resident synth, one platform at a time"* | rung 3 is **Windows and Linux sidecars** — transport parity | **015.** With the synthesizer inside rung 2, what is left for rung 3 is the other two platforms, which is also where R1 actually bites |
+> | Rung 4 is *"the only rung on which the R4.2 gate is currently KNOWN to be met"* | Piper is **M9b**, a quality decision; *"latency does not improve materially on macOS — say so in the release note"* | **015.** That sentence was true before SPIKE-1 ran and false after. F6 puts a resident OS-synth rung inside the gate at 8.5×; leaving the old sentence standing is how the next reader re-derives Piper as a latency fix |
+>
+> **What did not change:** rungs 0 and 1, the ladder's shape, and every measured number in 12.1.
+> Rung 1 is still the seam change with a zero-diff audio signature (finding R7-17: *the seam and its
+> consumers change together*, not a pure refactor).
+
+
 The constraint: no flag day, and every intermediate state is a state a real listener lives in for
 days. So each rung must be shippable, and must **sound** like what it is.
 
@@ -1173,21 +1224,42 @@ entire point of C-05.
 
 **Ships when:** the contract suite's new tests (section 7) are green on all three OSes.
 
-### Rung 2 — resident sink, subprocess synth
+### Rung 2 — the macOS sidecar: warm synthesizer and held device, together
 
-Replace `SubprocessSink` with a sink that holds one output device open. Synthesis still spawns.
+> **Rewritten 2026-08-21, reconciled with `015` section 5 and forced by SPIKE-1 (F6).** This rung read
+> *"resident sink, subprocess synth"*, and said first audio would be **unchanged** because segment 3
+> is still 414 ms. **SPIKE-1 removes the reason for the split**: a warm resident
+> `AVSpeechSynthesizer` reaches its first buffer in **p50 17.7 / 17.1 ms**, n=20 ×2 `[measured-here]`
+> (F6). Holding the device without warming the synthesizer keeps a 414 ms spawn in front of every
+> reply for no reason. The honest label below changed with it.
 
-**Sounds like:** the gap between sentences collapses. First audio is **unchanged** — segment 3 is
-still 414 ms. Per-turn earcons become affordable for the first time, so 005's options D and E stop
-being the slowest rows in their own table.
+One resident macOS process owning **both**: a warm synthesizer and a running output device, streaming
+PCM from the first into the second without closing either between sentences, between chunks, or
+between the earcon and the first word. Windows and Linux stay on rung 1, and **the plugin says which
+rung it is on when asked** (R015).
 
-**Ships when:** SPIKE-2 has measured the before-gap, and the same probe measures the after-gap. Watch
-a named value move; do not ship an after-only reading.
+**Sounds like:** the same voice as today, arriving **immediately**, and **without the ~950 ms silence
+between sentences**. Per-turn earcons become affordable for the first time, so 005's options D and E
+stop being the slowest rows in their own table. This is the rung a listener notices.
 
-**Honest label for this rung:** *"sentences run together properly now; it still takes a moment to
-start."* That is what the listener should be told if they ask.
+**Ships when:** **gate M9a** passes — `015` section 6 owns it, and it is a gap-to-audio ratio with a
+named falsifier, not a spawn count. SPIKE-2 measured the before-gap; the same probe measures the
+after-gap. Watch a named value move; do not ship an after-only reading.
 
-### Rung 3 — resident synth, one platform at a time
+**Honest label for this rung:** *"it starts straight away and the sentences run together — on macOS.
+Windows and Linux still sound like before, and it will tell you which one you are on."*
+
+### Rung 3 — Windows and Linux sidecars: transport parity
+
+> **Retitled 2026-08-21, reconciled with `015` section 5.** This rung read *"resident synth, one
+> platform at a time"*. With the resident synthesizer folded into rung 2 (above), what rung 3 carries
+> is the **other two platforms** — which is where R1 bites, and the ruling below is unchanged because
+> it was always a ruling about *platform parity*, not about the engine.
+
+**Sounds like, when it lands:** Windows gains rung 2's gaplessness; Linux gains pause, resume and a
+word cursor, and still sounds like espeak-ng, because on the `spd-say` floor the daemon still owns the
+audio (section 5). **Only at this rung may any document claim R1 parity for the resident
+architecture** — and even then the *sound* is not at parity, which is what rung 4 is for.
 
 This is where R1 bites, and the answer is not obvious. R1 says features ship on all three or not at
 all. Is "first audio in 120 ms instead of 500" a feature? (The 120 ms is `[claimed]` — it rests on
@@ -1210,18 +1282,34 @@ Concretely:
 resumes at a word boundary; the M13 cursor tracks words. **On a platform that has not:** identical to
 rung 2, and `supports()` says so before anything is requested, rather than after it fails.
 
-### Rung 4 — Piper inside the resident service
+### Rung 4 — M9b: Piper inside the resident service
 
-**Amended 2026-08-21, forced by finding 3 of `docs/.research/latency-measurements.md`.** This rung
-was described as *"gated on quality and on the model manager rather than on latency"*. **That is
-withdrawn.** `OsSynthProvider.generate()` measures p50 1,054–1,163 ms `[measured-here]` for one
-sentence (F4) against Piper's 52–65 ms — so rung 4 is **the only rung on which the R4.2 gate is currently KNOWN to be
-met**, and it is a latency rung first and a quality rung second. An engine swap behind a seam that
-already exists, still gated on the model manager.
+> **This rung has been re-argued twice, and the second reversal is the one that stands. Recorded in
+> full because the falsified reasoning is the useful part (R016).**
+>
+> 1. **Originally:** *"gated on quality and on the model manager rather than on latency."*
+> 2. **Withdrawn 2026-08-21**, forced by finding 3 of `docs/.research/latency-measurements.md`: F4
+>    measures `OsSynthProvider.generate()` at p50 **1,054–1,163 ms** `[measured-here]` for one
+>    sentence against Piper's **52–65 ms**, so this became *"the only rung on which the R4.2 gate is
+>    currently KNOWN to be met"* — a latency rung first.
+> 3. **Withdrawn again 2026-08-21**, reconciled with `015` sections 3 and 5, forced by **SPIKE-1**:
+>    F4 measured the **spawn-per-utterance `say -o file.wav` path**, which returns only when the whole
+>    WAV is written. A **warm resident** synthesizer reaches first audible buffer in **p50 17.7 / 17.1
+>    ms**, n=20 ×2 `[measured-here]` (F6) — **8.5× inside 010 section 8.2's own 150 ms pass
+>    condition**. So rung 2 is a live candidate for the gate on macOS, and **statement 2 is false as
+>    written.**
+>
+> **What stands: Piper is a quality decision, on its own schedule, behind the seam.** `015` section 3
+> makes that argument on voice quality, which is a good argument and a different one. **Latency does
+> not improve materially on macOS at this rung — say so in the release note**, or the next reader
+> re-derives Piper as a latency fix for the third time. Windows and Linux first-buffer are still
+> `[claimed]`; their probes are committed and have never been run, so *for those two platforms
+> statement 2 is neither proven nor refuted.*
 
-**Sounds like:** **first audio inside the budget for the first time**, a better voice, and the same
-voice on all three platforms — which is also the first time R1 is satisfied for *sound* and not only
-for *features*.
+An engine swap behind a seam that already exists, gated on the model manager and on quality.
+
+**Sounds like:** the same immediacy as rung 2, in **one voice on all three platforms** — which is the
+first time R1 is satisfied for *sound* and not only for *features*.
 
 ### 12.1 The rung ladder, and what each one costs
 
@@ -1229,12 +1317,17 @@ for *features*.
 |---|---|---|---|---|---|---|---|
 | 0 — today | spawn | **device open/chunk** | **1,112–2,017 ms** `[measured-here]` (bracket) | **~950 ms** `[measured-here]` (p50 950/937/897, n=18 ×3) | no | no | — |
 | 1 — seam v2 | spawn | spawn/chunk | unchanged | unchanged | refused **by name** | no | yes |
-| 2 — resident sink | spawn | resident **device** | unchanged — still ~1,054–1,163 ms of `say` synthesis `[measured-here]` | collapses **only if the device stays open**, not merely the process (P32) | refused by name | no | yes |
-| 3 — resident synth | resident | resident | **SPIKE-1**, `[claimed]` unknown — the 30–120 ms estimate is withdrawn (8.2) | none | **word-granular** on macOS | yes | per platform, off by default |
-| 4 — Piper | resident | resident | 52–65 ms/sentence `[measured-here]` (P11) — **the only rung the R4.2 gate is currently KNOWN to be meetable on** — narrowed 2026-08-21, R7-15: SPIKE-1 makes a resident OS-synth rung a live candidate on macOS (F6) | none | yes | yes | yes |
+| 2 — macOS sidecar | **resident** | resident **device** | **p50 17.7 / 17.1 ms to first buffer** `[measured-here]` (F6, n=20 ×2) **on macOS**; plus device acquisition, which is `[claimed]` | collapses **only if the device stays open**, not merely the process (P32) | **word-granular** on macOS | yes | yes, macOS only |
+| 3 — Windows + Linux sidecars | resident | resident | `[claimed]` — the probes are committed and **have never been run** | none (Linux: the daemon still owns audio on the `spd-say` floor) | Linux via SSIP index marks | yes | per platform, off by default |
+| 4 — M9b, Piper | resident | resident | 52–65 ms/sentence `[measured-here]` (P11) — **not materially better than rung 2 on macOS**; this rung is quality, and `015` section 3 argues it there | none | yes | yes | yes |
 
-**Rungs 1 and 2 are the honest deliverable of this document.** Rung 3 is gated on a probe nobody has
-run. Rung 4 is a quality decision that this document deliberately declines to make.
+> **Table rows 2–4 rewritten 2026-08-21**, reconciled with `015` section 5. Rows 0 and 1 are
+> unchanged, and no measured number in this table changed — only which rung each one belongs to.
+
+**Rungs 1 and 2 are the honest deliverable of this document.** Rung 2's *synthesis* side is measured
+on macOS (F6) and its *device* side is not — **that unmeasured half is the whole of M9, and `015`
+section 6's gate M9a is the instrument for it.** Rung 3 is gated on two probes nobody has run. Rung 4
+is a quality decision that this document deliberately declines to make.
 
 ---
 

@@ -95,6 +95,14 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
    * spoken.
    */
   const deferredAnnouncements: string[] = []
+  /**
+   * Site 24's residue. If the engine NEVER resolves, this buffer is the only thing holding every
+   * announcement the plugin makes, and it grows for the life of the process — each entry pinning
+   * a string that will never be spoken. Bounded, and the drop is itself reported when the voice
+   * finally arrives, because a silently truncated report of silences is this document's own joke.
+   */
+  const MAX_DEFERRED = 20
+  let deferredDropped = 0
 
   /**
    * The single user-facing channel. Ordered deliberately: the AUDIO STREAM is the destination and
@@ -113,7 +121,8 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     // undelivered notification must NOT speak it a second time.
     host.notify('Read Aloud', message, { alreadySpoken: true })
     if (speech !== null) speech.announce(message, urgency)
-    else deferredAnnouncements.push(message)
+    else if (deferredAnnouncements.length < MAX_DEFERRED) deferredAnnouncements.push(message)
+    else deferredDropped++
   }
 
   // The provider talks to the user directly for detection failures and degraded rungs: on Linux
@@ -167,6 +176,13 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`)
     // Anything that happened while the engine was still resolving now has a voice to be said in.
     for (const m of deferredAnnouncements.splice(0)) speech.announce(m, 'next')
+    if (deferredDropped > 0) {
+      speech.announce(
+        `${deferredDropped} earlier message${deferredDropped === 1 ? '' : 's'} could not be kept ` +
+        'while the voice was starting up.', 'next'
+      )
+      deferredDropped = 0
+    }
     // R015: degrade loudly. Never let a worse engine pass unmentioned.
     if (resolved.status.reason !== undefined) announce(resolved.status.reason)
   }).catch((err: unknown) => {
@@ -190,17 +206,24 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       try {
         const { text, truncated } = await readClipboard()
         if (text.trim().length === 0) {
-          host.notify('Read Aloud', 'the clipboard is empty')
+          // The listener pressed a key and got silence, which is precisely what a DEAD keybinding
+          // gives them (006 section 19 rank 4). A tray notification does not distinguish the two;
+          // a spoken sentence does. 'now', because they are waiting for an answer this second.
+          announce('The clipboard is empty.', 'now')
           return
         }
-        if (truncated) host.notify('Read Aloud', 'clipboard was long; reading the first part')
         s.speak(text)
+        // Queued BEHIND the clipboard content, deliberately: said first it would delay the thing
+        // the listener actually asked for, and said as an interruption it would cut into it. As a
+        // trailing note it costs nothing and still answers "was that all of it?".
+        if (truncated) announce('That clipboard was long, so you heard the first part of it.', 'next')
       } catch (err) {
         // Site 38: every non-ClipboardUnavailableError collapsed into one sentence, so a timeout,
-        // a permission prompt and a crashed helper were the same unactionable message.
-        host.notify('Read Aloud', err instanceof ClipboardUnavailableError
+        // a permission prompt and a crashed helper were the same unactionable message. Site 37 is
+        // the layer under it: each helper's own reason now survives to here.
+        announce(err instanceof ClipboardUnavailableError
           ? err.message
-          : `could not read the clipboard: ${String(err)}`)
+          : `Could not read the clipboard: ${String(err)}`, 'now')
       }
     })
   })
@@ -320,7 +343,9 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   host.registerCommand('read-aloud.speak-last-reply', async () => {
     await withSpeech(async (s) => {
       const text = await huddle.lastReply()
-      if (text === null) { host.notify('Read Aloud', 'no agent reply to read yet'); return }
+      // Same argument as the clipboard hotkey: a control that was pressed must answer in the
+      // audio stream, or it is indistinguishable from a control that is not wired up.
+      if (text === null) { announce('There is no agent reply to read yet.', 'now'); return }
       s.speak(text)
     })
   })

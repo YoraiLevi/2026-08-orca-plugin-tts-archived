@@ -116,6 +116,23 @@ and that was **wrong** — see below.
 > (`[measured-here]` with a run count · `[documented]` with a citation · `[claimed]` when nobody has
 > run it). An unlabelled number in a table beside labelled ones is the failure mode that produced all
 > three.
+>
+> > **Clause (3) was false when it was written, and is corrected here 2026-08-21 — forced by round-7
+> > finding R7-23.** The measurement pass swept the documents it touched; it did not sweep the repo,
+> > and `010` — written in parallel, with its own **MEASURED / DOCUMENTED / ESTIMATED** vocabulary —
+> > mixed both inside one six-row table, which is the exact failure the sentence claimed was gone. A
+> > repo-wide claim that no probe backs is P32's shape: an indicator that cannot go red.
+> >
+> > **What is now true, stated so it can be checked:** `010` was swept into R006's vocabulary in the
+> > round-7 reconciliation (`010`'s header note, and `docs/design/016-reconciliation-round7.md`), and
+> > `011`, `012`, `013` were written in R006's vocabulary from the start. `002`–`005`, `009` and the
+> > research files were swept by the measurement pass. **`006-fma.md` was not swept and is not
+> > claimed** — it is exempted as *the record*, an exemption round 7 disputes in finding **R7-08** and
+> > which is the author's to lift.
+> >
+> > **The instrument, not the sentence, is the answer.** `pnpm check:citations` cannot see a missing
+> > R006 label; nothing in CI can, today. Until something can, this paragraph names which documents
+> > were swept rather than asserting a property of a repo nobody re-reads.
 
 
 - **ORCA's plugin API cannot deliver agent reply text, selection, or audio-in-panel.** Verified,
