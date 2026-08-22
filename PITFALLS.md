@@ -312,6 +312,28 @@ the ONE check standing between that constant and a silent wrong answer. Delete t
 constant becomes unfalsifiable. Found by J21, 2026-08-21, adding the HTML-comment stage; the
 architect's arbitration is in `.meta/goal/voice-lab-m11/ledger.md`.
 
+> **Amended 2026-08-22 (M14a, `213ee55`) — it is SIX files, not five, and the sixth is the one
+> this entry sends you past.** Adding `diagramsToLabels` at stage 3 renumbered 3..16 -> 4..17.
+> The entry names the normalizer, `scripts/voice-lab.mjs` (`STAGES` and `apply[]`),
+> `voice-lab/lib/controls.mjs`, its inlined twin in `voice-lab/index.html`, and two test files.
+> **`voice-lab/lib/controls.mjs` holds TWO positional lists, not one** — `FIXED_BY_DESIGN_STAGES`
+> *and* a `STAGES` name array — and there are **three** test files, the third being
+> `voice-lab/lib/lab.test.mjs`, which compares the page's ladder to the server's. A full-suite run
+> found it after the six named places were already done and green; a targeted run of the named
+> files would not have.
+>
+> **The contrast this entry draws held exactly as written, which is the argument for string ids.**
+> The two NAME lists went red loudly and named themselves. `FIXED_BY_DESIGN_STAGES` — POSITIONS —
+> stayed in range and silently meant something else, and the only thing between it and a wrong
+> answer is still the single `lab.test.mjs` row this entry already names. Two inserts have now
+> paid this cost.
+>
+> One thing the entry does not say. A **new** stage with no control JOINS
+> `FIXED_BY_DESIGN_STAGES`, and "fixed by design" is then a claim about TASTE that may be false.
+> Whether a diagram is spoken as box characters is not taste; the wording of its announcement and
+> its label cap are (D002 Q47). The list is honest today and stops being honest the day that
+> control lands, so the commit that adds it must take stage 3 off the list.
+
 ## P36 — A test that IMPORTS the table it is checking cannot fail
 **Symptom:** `token-conservation.test.ts` asserts that a check mark reaches the listener as the
 word "yes" — 006 site 50, where `stripEmoji` deleted verdict glyphs and "check done" / "cross done"
