@@ -116,6 +116,31 @@ export class HuddleController {
   #spoken = new Set<string>()
   #lastReply: string | null = null
   #locked: string | null = null      // the ONE session we are following
+
+  /**
+   * M16 presence. ADDITIVE to `#locked`, never a replacement for it.
+   *
+   * `#locked` is P22's remedy and it is load-bearing: it survives a re-fork precisely because
+   * losing it made the next `agent.status.changed` re-pick "whatever was touched last", which is
+   * P22 fault 1 (see C4 above). Presence answers a DIFFERENT question — "who else is here" — and
+   * must not answer it by widening what gets spoken.
+   *
+   * So the roster records every session we have SEEN produce a reply, while the lock still decides
+   * whose replies are read. That keeps G5 ("show who is in the room") honest without reopening the
+   * fault the lock closed.
+   */
+  #roster = new Map<string, { label: string; replies: number; lastReplyAt: number }>()
+
+  /**
+   * Sessions whose replies must never reach the audio stream.
+   *
+   * Enforced at the ONE `speech.speak` call site, not at the surface. A mute that only hides a row
+   * is a lie to a listener who cannot see the row — he would still hear the agent he silenced.
+   */
+  #muted = new Set<string>()
+
+  /** The file whose reply was most recently handed to speech — "who is talking". */
+  #talking: string | null = null
   #watcher: FSWatcher | null = null
   #watching: string | null = null
   #stopTimer: NodeJS.Timeout | null = null
@@ -238,6 +263,51 @@ export class HuddleController {
   }
 
   dispose(): void { this.#stopWatching() }
+
+  /**
+   * G5: who is in the room, who is talking, and who is silenced.
+   *
+   * Returns data, not a rendering — the surface (M13) decides how to say it, and a test can assert
+   * against state it set itself rather than against a formatted string.
+   */
+  presence(): { inRoom: Array<{ file: string; label: string; replies: number; muted: boolean; following: boolean }>; talking: string | null } {
+    const inRoom = [...this.#roster.entries()]
+      .sort((a, b) => b[1].lastReplyAt - a[1].lastReplyAt)
+      .map(([file, r]) => ({
+        file, label: r.label, replies: r.replies,
+        muted: this.#muted.has(file),
+        following: this.#locked === file
+      }))
+    // No mute check here, deliberately. `mute()` clears `#talking`, and a muted session can never
+    // reach the speak loop that sets it — so a guard here is unreachable. It was written, a mutant
+    // that removed it SURVIVED, and rather than strengthen a test to cover an impossible state the
+    // dead branch was deleted. An unreachable safety reads to the next agent as a real one (P26).
+    return { inRoom, talking: this.#talking }
+  }
+
+  /**
+   * Silence one session. Returns the announcement, because a control that changes what the listener
+   * hears must say so IN the audio stream — he cannot see a muted row (P30).
+   */
+  mute(file: string): string {
+    this.#muted.add(file)
+    if (this.#talking === file) this.#talking = null
+    return `Muted ${sessionLabel(file)}. Its replies will not be read.`
+  }
+
+  /**
+   * Unmute. Deliberately does NOT replay what was missed: the backlog was marked spoken while
+   * muted, so unmuting resumes rather than catching up. Replaying it would be P22's whole-history
+   * dump arriving by a new route.
+   */
+  unmute(file: string): string {
+    const was = this.#muted.delete(file)
+    return was
+      ? `Unmuted ${sessionLabel(file)}. New replies will be read; what it said while muted is not replayed.`
+      : `${sessionLabel(file)} was not muted.`
+  }
+
+  isMuted(file: string): boolean { return this.#muted.has(file) }
 
   /**
    * Follow a different session, announcing the switch so the listener is never disoriented.
@@ -422,9 +492,32 @@ export class HuddleController {
     const fresh = replies.slice(mark).filter((r) => !this.#spoken.has(r.id))
     this.#setHighWater(file, replies.length)
     if (fresh.length === 0) { await this.#persistSpoken(); return }
+    // Counts are bumped REGARDLESS of mute: a muted agent is still in the room and still working,
+    // and hiding it would make the mute unreviewable — the listener could never find what to
+    // unmute. The room itself comes from the scan in `#findNewest`, not from here.
+    const seen = this.#roster.get(file)
+    this.#roster.set(file, {
+      label: sessionLabel(file),
+      replies: (seen?.replies ?? 0) + fresh.length,
+      lastReplyAt: Date.now()
+    })
+
+    if (this.#muted.has(file)) {
+      // Defence in depth, and honestly labelled as such: `#setHighWater` above has ALREADY moved
+      // the mark past these replies, so unmute cannot dump them by the ordinary path. A mutant
+      // removing this line survives for exactly that reason. It stays because B-01 proved the id
+      // set can be evicted while lines remain on disk, and the mark is what stands between that
+      // and P22's whole-history dump — this makes the muted range explicit rather than implied.
+      for (const r of fresh) this.#spoken.add(r.id)
+      this.#deps.log(`read-aloud: ${fresh.length} repl${fresh.length === 1 ? 'y' : 'ies'} from ${sessionLabel(file)} not spoken (muted)`)
+      await this.#persistSpoken()
+      return
+    }
+
     for (const r of fresh) {
       this.#spoken.add(r.id)
       this.#lastReply = r.text
+      this.#talking = file
       // 'queue', not 'replace': a reply arriving mid-utterance must not cut the previous one off.
       this.#deps.speech.speak(r.text, 'queue', sessionLabel(file), file)
     }
@@ -544,6 +637,21 @@ export class HuddleController {
       return { file: null, reason: skipped > 0 ? 'root-unreadable' : 'no-transcripts' }
     }
     files.sort((a, b) => b.mtime - a.mtime)
+
+    // M16 G5: the ROOM is every transcript the scan can see, not only the one we follow.
+    //
+    // Building the roster from replies instead would make it degenerate by construction: the
+    // watcher follows exactly one session (`#locked`, P22's remedy), so only that session ever
+    // produces a reply, and "who is in the room" would always answer "one". The scan already
+    // enumerates the candidates — it is the only place that knows about the others.
+    for (const f of files) {
+      const seen = this.#roster.get(f.path)
+      this.#roster.set(f.path, {
+        label: sessionLabel(f.path),
+        replies: seen?.replies ?? 0,
+        lastReplyAt: seen?.lastReplyAt ?? f.mtime
+      })
+    }
 
     const [first, second] = files
     if (first !== undefined && second !== undefined && first.mtime - second.mtime < 2000) {
