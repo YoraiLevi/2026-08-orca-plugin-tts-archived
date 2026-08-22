@@ -175,3 +175,23 @@ and G8-mutants. Both were created before the tmux break and still take messages.
 **File ownership while M16 is mine:** `packages/plugin/src/huddle/**` and its tests. M14 holds
 `packages/core/src/normalizer/**`, `scripts/voice-lab*`, `voice-lab/**`. M13's codex worker holds
 the panel/TUI surface. Disjoint.
+
+
+## Usage-meter limitation, found at the 2h checkpoint — 2026-08-22 05:57
+
+The ORCA Usage meter read **6% used** on the 5-hour window. It also read 6% at 03:57, two hours
+and roughly forty commits earlier, and the weekly figure is unchanged at 39%.
+
+**So the meter is STALE, and a monitor that trusts it would be reporting a number nobody
+refreshed.** ORCA has a `Refresh rate limits` button (AX element 62) — the figure updates when
+something asks, not continuously. Reading it without pressing that is reading a cache.
+
+This is the same shape as everything else found today: an indicator that looks live and is not.
+It would have failed in the most expensive direction — reporting plenty of headroom right up to
+the wall.
+
+**Ruling: the wall-clock thresholds are the primary signal**, which is how monitor `bhtn6c2t1`
+was already built — it fires at 2h / 3h30m / 4h15m / 4h35m from a recorded window start. The AX
+meter is corroboration only, and a reading that has not moved is evidence of staleness rather
+than of headroom. Pressing Refresh is a UI interaction with the author's live ORCA and is not
+worth it unattended.
