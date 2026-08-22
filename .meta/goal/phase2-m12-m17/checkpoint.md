@@ -195,3 +195,39 @@ was already built — it fires at 2h / 3h30m / 4h15m / 4h35m from a recorded win
 meter is corroboration only, and a reading that has not moved is evidence of staleness rather
 than of headroom. Pressing Refresh is a UI interaction with the author's live ORCA and is not
 worth it unattended.
+
+
+## State at 07:30, 3h33m into the window — nine of ten gates
+
+| Gate | State |
+|---|---|
+| G1 settings round-trip | **met**, verified 349/349 at `9079f27` |
+| G2 dashboard | **landed**, M13 via ORCA orchestration |
+| G3 diagrams-to-labels | **met**, 405/405, Lab at 17 stages |
+| G4 speak-fence | **PARTIAL — the author's.** Needs the D002 Q5 policy as a setting; the design forbids choosing its default outside the Voice Lab |
+| G5 huddle presence | **met**, mute proved by effect |
+| G6 identity | **met**, checksum oracle with its control |
+| G7 M17 re-scope | **met** — the cap blocked M17c, not M17a; M17c moves to *unscored* |
+| G8 mutants | **met on macOS 37/37**; Linux 36/37 with one documented gap |
+| G9 review protocol | round 13 opened BOTH unopened inventories, 5 items, **counter still 0 of 3** |
+| G10 hosted CI | **macOS fully green; all three Voice Lab legs green.** Ubuntu: the one documented mutant. Windows: a real stall, now instrumented to name itself |
+
+**Suite 784/784** at `ba3fccf`, detached worktree, load 10.86, zero leaked `say`.
+
+### The two things that are honestly not done, and why
+
+1. **G4 needs a decision only the listener can make.** Not effort — the design forbids it.
+2. **`half-written-line-concluded-on` survives on Linux.** The test goes vacuous there; the
+   invariant does not. I attempted a fix (stay truncated across more than one retry interval, so
+   the mutant's exhausted budget becomes a structural difference rather than a race macOS happens
+   to win) and **reverted it**, because it broke the correct implementation on macOS and there is
+   no Linux host here that can run vitest to verify. An honest red beats a green I cannot defend.
+
+### Next, in order
+
+- Read the CI run for the Windows stall — `until` now names its condition instead of timing out
+  anonymously, so the failure should identify the stuck wait.
+- Round 14: the ledger says rounds 13's items were mostly *broken instruments*, so the protocol is
+  now better at finding those than broken code. That is what convergence looks like and is also
+  why the counter has not started.
+- `docs/USABILITY.md` is written and is what the author should open first.
