@@ -13,27 +13,44 @@
 
 ## IN PROGRESS — one task, named, per R041
 
-**`PV-011` — port the Pocket TTS engine into `packages/providers/src/pocket-synth/engine.ts`.**
+**`PV-067` — route `POST /speak` by backend key** (R14-03/R14-10), owned by an agent right now.
+My own next task is **`PV-065`**, the SentencePiece lattice port.
 
-- **Gate:** `node scripts/pocket-e2e.mjs` — synthesize a known sentence, transcribe the result with
-  an INDEPENDENT STT model, assert the transcript equals the input text. Its control transcribes
-  the reference clip and must produce different words.
-- **Spec:** `specs/003-pocket-voices/tasks.md`. Critical path is
-  PV-010 → PV-011 → PV-021 → PV-030 → PV-040.
-- **Why this and not a milestone gate:** the author is blocked on this to review the product;
-  every other open gate is blocked on *him*. He corrected this ordering explicitly on 2026-08-22.
-- **Already proven in a scratch spike** (not yet in-repo): all five ONNX graphs load in Node,
-  synthesis runs at **0.19× realtime** (566 ms for 3.04 s of audio) `[measured-here]`, and the
-  output transcribed as exactly the input sentence with a passing control.
+- **Gate for PV-065:** the two `it.fails` rows in `sentencepiece.test.ts` go GREEN and the
+  11,344-input differential corpus against Python reaches zero disagreements.
+- **Do not guess a third time.** `>` and `>=` have both been measured against that corpus: 17
+  disagreements and 21 respectively, in opposite directions. It is not a comparison operator and it
+  is not float precision (`c + cc === cc + c` in f64 and f32, checked). It is `end_nodes_`
+  insertion order in SentencePiece's lattice.
+
+### Where the feature stands
+
+**Phase 0-2 landed and then round 14 found three criticals in them, all now closed:** the model
+swap destroyed what it promised to preserve (PV-060), `ready` reported yes while no voice had a
+clip (PV-062), and there was **no delivery path for the native runtime at all** (PV-063) — that
+last one made the whole feature decorative for anybody who is not the author, since ORCA never runs
+`npm install` for a plugin.
+
+**The engine works and is proved by an oracle that can fail.** `scripts/pocket-e2e.mjs` transcribes
+its own output with an unrelated STT model and compares against the input text; `--prove` breaks
+the recurrent state fill and shows WER going 0.00 → 0.67.
+
+**921 tests, 43 files, typecheck 0, lint 0** at `aa649af`.
 
 ### Running in parallel — disjoint file sets, per P34
 
-| Agent | Owns | Tasks |
+| Agent | Owns | Task |
 |---|---|---|
-| PV-provider | `packages/providers/src/pocket-synth/index.ts` + its test | PV-020…PV-025 |
-| PV-server | `scripts/voice-lab.mjs` | PV-030…PV-033 |
-| PV-ux | `docs/design/021-pocket-voices-ux.md` | design for PV-040…PV-044 |
-| PV-review | `docs/design/022-review-round14.md` | adversarial round 14 |
+| PV-resampler | `pocket-synth/audio.{ts,test.ts}` | PV-066 (R14-09) |
+| PV-dispatch | `scripts/voice-lab.{mjs,test.mjs}` | PV-067 (R14-03/10) |
+| PV-picker | `voice-lab/index.html`, `scripts/ui-probe.mjs` | PV-040…044 — **the falsifier** |
+| PV-review15 | `docs/design/023-review-round15.md` | adversarial round 15 |
+
+### Waiting on the author, and NOT blocking anything
+
+- **D004's principle-III judgement.** `darwin-x64` gets no neural voices because upstream publishes
+  no binary. Proceeding on the recorded default (R047): ship it, name the gap in the product.
+- C7 taste defaults · D002 Q5 policy · whether an INCONCLUSIVE probe should fail CI.
 
 ## One-paragraph status
 

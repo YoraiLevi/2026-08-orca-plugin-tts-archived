@@ -196,12 +196,53 @@ and hears it. No file, no terminal, no rebuild. **If this is not true, this feat
 
 ---
 
+## Phase 4b: Round 14's criticals — UNPLANNED, and the plan was wrong to omit them
+
+Round 14 found ten defects in Phase 0-3, three critical. They are recorded as tasks rather than as
+commit messages because two of them changed what the phases *mean*: PV-050 turned out to be
+load-bearing for Phase 4 rather than an edge, and the delivery of the runtime was missing from the
+plan entirely.
+
+- [x] **PV-060** R14-06 — the swap deleted the live model before the fallible rename, and no test
+      reached that window (a `throw` there left 20/20 green).
+      **Verified**: stage beside the target, back up by rename, swap, discard last. Re-injecting the
+      old order turns exactly the two preservation cases red. `db5377e`.
+- [x] **PV-061** R14-08 — the upstream CC-BY-4.0 `LICENSE` was fetched best-effort.
+      **Verified**: a failed licence fetch now fails the install, with the previous model intact.
+- [x] **PV-062** R14-02 — `POCKET_VOICES` named twelve clips and `requiredFiles()` listed none, so
+      `modelStatus()` said **ready** over a directory where no voice could load its clip.
+      **Verified** by re-running the review's own mutant (rename Eve's file): two cases go red where
+      20/20 had stayed green. Manifest bumped 1 → 2. `1c2337f`.
+- [x] **PV-063** R14-01 — **no delivery path for the native runtime at all.** `pnpm add` is a
+      developer convenience; ORCA never runs `npm install` for a plugin, so every third-party
+      install fell back forever. D004 argues it; `runtime.ts` implements it.
+      **Verified**: a wrong digest installs nothing; a decoy platform is not extracted; a failed
+      replacement keeps a working runtime; `darwin-x64` is `unsupported`, not an error. `aa649af`.
+- [x] **PV-064** R14-04 — the tokenizer disagrees with upstream on repeated-letter ties.
+      **Confirmed, measured, left OPEN as `it.fails`**: 11,327/11,344 exact, all 17 disagreements
+      are runs of one letter, 180/180 on realistic text. Both proposed causes tested and rejected.
+      `69bdbba`.
+- [ ] **PV-065** R14-04's remedy — port SentencePiece's lattice faithfully (nodes carry their own
+      best predecessor; ties resolve by `end_nodes_` insertion order).
+      **Verify**: the two `it.fails` rows go GREEN, and the 11,344-input differential corpus reaches
+      zero disagreements. **Do not attempt a third guess at a comparison operator** — `>` and `>=`
+      have both been measured and neither is it.
+- [ ] **PV-066** R14-09 — the resampler suite admits pass-band deletion and edge-normalisation
+      removal, and the filter emits a boundary transient.
+      **Verify**: each mutation goes red; each new check has a control.
+- [ ] **PV-067** R14-03 / R14-10 — the backend key reaches no dispatch, and the falsifier could pass
+      from a developer-preseeded cache.
+      **Verify**: `POST /speak` with `pocket:eve` is routed by backend and the bare name reaches the
+      provider; a preseeded cache is distinguishable from an installed one.
+
+---
+
 ## Phase 5: Finish the edges
 
-- [ ] **PV-050** [US1] Pin the twelve reference clips by digest and length (PV-FR-014); they come
+- [x] **PV-050** [US1] Pin the twelve reference clips by digest and length (PV-FR-014); they come
       from `kyutai/tts-voices`, a different repo from the model.
-      **Verify**: the same refusal path as the model — corrupt one and confirm it is refused by
-      name.
+      **Done as PV-062** — and the plan was wrong to file it here. It is not an edge: without it
+      `ready` is a lie and Phase 4 cannot be hearable. R14-02 said so and was right.
 
 - [ ] **PV-051** [US1] Measure the gate with Pocket selected, in a clean detached worktree, load
       average recorded (P41, P43).
