@@ -249,17 +249,19 @@ const MUTANTS = [
     to: '    if (false) {',
     test: 'packages/providers/src/os-synth/os-synth.test.ts',
     only: 'finding 1',
-    // UNREACHABLE on Linux, verified at the source rather than assumed: `#prepare` returns at
-    // `os-synth/index.ts:363` — `if (this.#platform === 'linux') { await
-    // this.#resolveLinuxBackend(); this.#warm = true; return }` — before it ever reaches the
-    // `voices.length === 0` guard this mutant edits. So the mutation cannot change Linux
-    // behaviour and surviving there is correct, not a gap.
+    // `equivalentOn: ['linux']` was here and was WRONG. Removed 2026-08-22 after running the
+    // harness on real Linux for the first time: this mutant is **killed** there `[measured-here]`,
+    // node:24-bookworm with a real pnpm install.
     //
-    // The invariant itself IS still guarded on Linux, by a different mechanism:
-    // `#resolveLinuxBackend()` throws `LinuxSpeechUnavailableError` when no backend exists, so
-    // `#warm = true` is never reached. Measured on 2026-08-21: the Linux CI leg returns 503 with
-    // exactly that error and the apt remedy attached.
-    equivalentOn: ['linux']
+    // The reasoning that put it there read plausibly and was not tested. `#prepare` does return at
+    // `os-synth/index.ts:363` for linux before the `voices.length === 0` guard this mutant edits —
+    // that part is true — and I concluded the mutation therefore could not change Linux behaviour.
+    // It does. Reading the control flow told me what one path does, not what the whole test
+    // exercises, and I annotated a live guard as inert on the strength of it.
+    //
+    // The annotation was worse than the gap it described: it made the harness EXPECT survival, so
+    // a correctly-killed mutant reported as a failure and CI stayed red for the opposite reason
+    // from the one written beside it.
   },
   {
     id: 'player-exit-ignored',
