@@ -81,6 +81,26 @@ jobs:
         if: runner.os == 'Linux'
         run: pnpm check:mutants
 
+      # Two agents wrote a "P42" minutes apart on 2026-08-22 — the second occurrence of P12.
+      # Both had run `grep '^## P'` first, exactly as the file's header instructs, and both were
+      # stale by the time their commit landed: the check is only as fresh as the gap between
+      # reading and writing, and with several agents appending that gap IS the collision window.
+      #
+      # So this does not ask anyone to read more carefully. It makes the WRITE detect the conflict,
+      # which is the only version that cannot itself go stale. One line, every future instance.
+      - name: PITFALLS ids must be unique
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          dupes=$(grep -oE '^## P[0-9]+' PITFALLS.md | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "duplicate PITFALLS ids:"; echo "$dupes"
+            echo "Two entries share a number. Renumber the LATER-WRITTEN one; renumbering an entry"
+            echo "that other commits and messages already cite makes true statements false."
+            exit 1
+          fi
+          echo "PITFALLS ids unique: $(grep -c '^## P[0-9]' PITFALLS.md) entries"
+
       - name: Size gate (ORCA caps at 2000 files / 50 MB)
         run: pnpm size-gate
 
