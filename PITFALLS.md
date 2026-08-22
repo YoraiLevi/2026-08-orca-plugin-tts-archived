@@ -6,6 +6,25 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P43 — Under load, `mutation-check` reports SURVIVED on a mutant that is properly guarded, and the next agent goes and "fixes" a test that was never broken
+**Symptom:** a clean detached worktree at `713ddf2`, load average **45.07**, reported
+`half-written-line-concluded-on` **SURVIVED** — "nothing in huddle.test.ts noticed". The same
+mutant, same worktree, same commit, at load **~15**: **killed, 3 runs of 3** `[measured-here]`.
+The full check then read **37/37** at load 11.58 `[measured-here]`.
+**Cause:** this is **P40's inverse and it is the more dangerous direction.** P40 is a test that
+goes RED for scheduling reasons; you notice, because something failed. Here the guarding test
+goes **GREEN while the code is deliberately broken** — a `setTimeout`-based retry assertion that
+loses its race is simply satisfied — and the harness, which reads `status === 0` as "the mutant
+lived", reports the guard as absent. The failure is silent, it points at the wrong file, and its
+prescribed remedy is *"Fix the TEST"* — so the instrument built to find tests that cannot fail
+will, under load, manufacture that exact accusation against a test that can.
+**What to do instead:** a SURVIVED verdict is a **hypothesis until it is reproduced**. Before
+touching a test, re-run that one mutant by id (`node scripts/mutation-check.mjs <id>`) and record
+the load with the verdict, as P40 already requires of suite counts. **A mutation count is only
+meaningful with a load average attached** — 36/37 at load 45 and 37/37 at load 11 are the same
+tree. Both readings above are from the same detached worktree at the same commit (P41), so the
+worktree discipline does **not** cover this; it is a second, independent variable.
+
 ## P42 — `speak('replace')` cut the announcement that was queued in front of it, and the loss looked like a short sentence
 **Symptom:** the held settings report was spoken as exactly `"Before that. "` and then the reply
 started. The rest of the sentence — the part that named the file, the reason and the path — was
