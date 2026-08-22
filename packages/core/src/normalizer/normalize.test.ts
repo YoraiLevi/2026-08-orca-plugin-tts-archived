@@ -204,7 +204,10 @@ describe('T021h numbers and times', () => {
     { name: 'time on the hour', input: 'at 9:00 today', expect: 'at nine today' },
     { name: 'time with oh-five', input: 'at 9:05 today', expect: 'at nine oh five today' },
     { name: 'decimal left for the engine', input: 'pi is 3.14 ok', expect: 'pi is 3.14 ok' },
-    { name: 'very large number left for the engine', input: 'about 5000000 rows', expect: 'about 5000000 rows' }
+    // WAS 'left for the engine', asserting the 999,999 ceiling. That ceiling was a DEFECT on
+    // Windows — SAPI reads a bare large numeral digit by digit (CI run 32552614490) — so the
+    // expansion now runs to just under a billion and this row asserts the new truth.
+    { name: 'a large number is spoken, not handed over', input: 'about 5000000 rows', expect: 'about five million rows' }
   ])
 })
 
@@ -561,11 +564,15 @@ describe('J21-2 thousands separators are one number', () => {
       input: '1,000 files', expect: 'one thousand files' },
     { name: 'a three-digit leading group',
       input: '123,456 rows', expect: 'one hundred twenty three thousand four hundred fifty six rows' },
-    // Above the expansion ceiling the numeral goes to the engine — WITH its commas, which is how
-    // an engine reads a large number correctly. Joining the digits here would have been a
-    // regression dressed as a fix.
+    // The INTENT of this row survives and its value moved. Above the ceiling the numeral goes to
+    // the engine WITH its commas, and joining the digits would be a regression dressed as a fix.
+    //
+    // Its old justification does not survive: it said commas are "how an engine reads a large
+    // number correctly", and SAPI disproved that — it reads a bare large numeral digit by digit
+    // whether or not the commas are there. So handing over is now a judgement about listenability
+    // above a billion, not a claim about engines. Re-pointed past the new ceiling.
     { name: 'a number past the expansion ceiling keeps its separators',
-      input: 'x 12,345,678 y', expect: 'x 12,345,678 y' },
+      input: 'x 12,345,678,901 y', expect: 'x 12,345,678,901 y' },
     // The guards that were already there must still hold once a run can span commas.
     { name: 'a reference keeps its numerals and its separators',
       input: 'see #1,000 now', expect: 'see #1,000 now' },
@@ -576,4 +583,53 @@ describe('J21-2 thousands separators are one number', () => {
     { name: 'a comma-separated list of numbers is not fused into one',
       input: 'ports 8080,1000 open', expect: 'ports eight thousand eighty,one thousand open' }
   ])
+})
+
+/**
+ * The million ceiling — raised 2026-08-22 after the Windows leg proved it was a defect.
+ *
+ * The old ceiling was 999,999: above it the numeral went to the engine untouched, on the belief
+ * that every engine reads a bare `1234567` as a number. Two of three do. **SAPI does not** — CI
+ * run 32552614490 measured `1234567` at 139,800 B, Δ76,716 from the spelled-out reference, which
+ * is the digit-by-digit end of the axis. `docs/design/013` Q64 named that risk precisely and it
+ * was called retired when espeak-ng came back clean. Two platforms agreeing is not three.
+ */
+describe('numbers above a million are spoken, not handed to the engine', () => {
+  it('expands the value the Windows engine got wrong', () => {
+    // The exact string from the CI measurement, so this row and that run describe one thing.
+    expect(normalize('1234567', {})).toBe(
+      'one million two hundred thirty four thousand five hundred sixty seven')
+  })
+
+  it('separators make no difference, which is why the normalizer keeps them', () => {
+    expect(normalize('1,234,567', {})).toBe(normalize('1234567', {}))
+    expect(normalize('1,000,000', {})).toBe('one million')
+  })
+
+  it('carries through the scales without dropping a group', () => {
+    // A round million must not become "one million zero"; a value with an empty middle group is
+    // where a naive recursion goes wrong.
+    expect(normalize('1000000', {})).toBe('one million')
+    expect(normalize('987654321', {})).toBe(
+      'nine hundred eighty seven million six hundred fifty four thousand three hundred twenty one')
+  })
+
+  it('CONTROL: a billion and above is still handed over, deliberately', () => {
+    // Not an oversight. "nine hundred eighty seven billion, six hundred…" is a worse listening
+    // experience than the digits, and numbers that large in an agent reply are far more often
+    // identifiers than quantities. Without this row, someone would "fix" the ceiling upward.
+    expect(normalize('1000000000', {})).toBe('1000000000')
+  })
+
+  it('CONTROL: a long digit run is an identifier, and its LENGTH is the tell', () => {
+    // Guarded on the string, not the value: 13 digits is an id, a hash fragment or an account
+    // number even when the number it denotes would fit inside the scales above.
+    expect(normalize('1234567890123', {})).toBe('1234567890123')
+  })
+
+  it('CONTROL: the sub-million behaviour is unchanged', () => {
+    expect(normalize('999,999', {})).toBe(
+      'nine hundred ninety nine thousand nine hundred ninety nine')
+    expect(normalize('12,345', {})).toBe('twelve thousand three hundred forty five')
+  })
 })

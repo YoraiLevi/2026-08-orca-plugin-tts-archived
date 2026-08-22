@@ -1063,12 +1063,26 @@ function under1000(n: number): string {
  * the way from the spelled-out reference to the digit-by-digit one on `say`, and **0.057** on
  * espeak-ng, against a dead band of 0.35–0.65 `[measured-here]` (n=3 each, noise floor 0 B).
  */
+/**
+ * Scales, largest first. Recursion handles every group the same way, so `1,234,567` and
+ * `1,234` differ only in how many times round the loop they go.
+ */
+const SCALES: ReadonlyArray<readonly [number, string]> = [
+  [1_000_000_000, 'billion'],
+  [1_000_000, 'million'],
+  [1_000, 'thousand']
+]
+
 export function numberToWords(n: number): string {
   if (n < 1000) return under1000(n)
-  const th = Math.floor(n / 1000)
-  const r = n % 1000
-  const head = `${under1000(th)} thousand`
-  return r === 0 ? head : `${head} ${under1000(r)}`
+  for (const [size, name] of SCALES) {
+    if (n >= size) {
+      const head = `${numberToWords(Math.floor(n / size))} ${name}`
+      const rest = n % size
+      return rest === 0 ? head : `${head} ${numberToWords(rest)}`
+    }
+  }
+  return under1000(n)
 }
 
 function spokenTime(h: number, m: number): string {
@@ -1207,7 +1221,30 @@ function expandNumbers(src: string): string {
     }
 
     const value = Number(digits)
-    if (value >= 1_000_000 || digits.length > 6) { out += raw; i = j; continue }
+    /**
+     * The ceiling was 999,999, and on Windows that was a LIVE DEFECT.
+     *
+     * Above it the numeral went to the engine untouched, on the belief that every engine reads a
+     * bare `1234567` as a number. `say` does and espeak-ng does — `-q -x` phonemises it to "one
+     * million, two hundred-and thirty four thousand…". **SAPI does not.** Measured on the Windows
+     * CI leg, run 32552614490 `[measured-here]`: `1234567` renders 139,800 B, Δ76,716 from the
+     * spelled-out reference and nowhere near it — it is read DIGIT BY DIGIT. The probe's own
+     * controls were green, so that verdict is not vacuous.
+     *
+     * `docs/design/013` Q64 named this exact risk — a platform-specific defect hiding behind a
+     * macOS-only probe — and it was called retired when espeak-ng came back clean. Two platforms
+     * agreeing is not three.
+     *
+     * So the expansion now runs to just under a BILLION. Above that the numeral is still handed
+     * over: "nine hundred eighty seven billion, six hundred…" is a worse listening experience than
+     * the digits, and numbers that large in an agent reply are far more often identifiers than
+     * quantities.
+     *
+     * `digits.length > 12` stays as a separate guard on the STRING rather than the value. A long
+     * run of digits is an id, a hash fragment or an account number, and its length is the tell
+     * even when its value would fit.
+     */
+    if (value >= 1_000_000_000 || digits.length > 12) { out += raw; i = j; continue }
 
     out += numberToWords(value)
     i = j
