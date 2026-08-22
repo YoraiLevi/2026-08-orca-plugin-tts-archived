@@ -23,6 +23,31 @@ M13, M16, M15, M17 are NOT dispatched — they wait on wave 1 landing.
 **M15 depends on M16, not the reverse.** M15's gate needs two agents speaking at once, and
 huddle locks to one session — which *is* the P22 fix. So M16 unblocks M15.
 
+## The 8-hour run — author away 03:57, returns 12:00
+
+**What "done" means for this run, in his words:** the plugin **completed and waiting to be
+tested for usability**, not poked at. He should be able to sit down, use it, and make taste
+decisions — not hunt bugs. A deliverable for that is part of the goal: a short **usability
+script** naming what to exercise and which decisions are his, so the session starts with
+listening rather than triage.
+
+**Window arithmetic.** The 5h window opened 03:57 and ends ~08:57. Wind-down fires 08:12,
+hard stop 08:32 (monitor `bhtn6c2t1`). He returns 12:00, roughly 3h into the second window.
+
+| Slot | Work |
+|---|---|
+| now → 08:12 | wave 1 (M12, M14, G8) lands; wave 2 (M13, M16) dispatched |
+| 08:12 → 08:32 | wind down: agents commit, tree verified, checkpoint refreshed, **push** |
+| 08:32 → ~09:00 | dead window. Nothing dispatched. **Re-arm the usage monitor for the new window** — the old one exits after HARD-STOP |
+| ~09:00 → 11:30 | wave 3: M15 mechanical half, M17 re-scope, review rounds toward three dry |
+| 11:30 → 12:00 | final: hosted CI green on 3 OSes, 37/37 mutants, usability script written, everything pushed |
+
+**Compact at wave boundaries only** — the four checks are in `contract.md`. Do not compact
+mid-wave; the unrecorded in-flight reports are what a resumed session cannot recover.
+
+**Heartbeat `bqpgw4wyb`** fires every 25 min with load, dirty count, unpushed count and HEAD.
+It exists so the run never stalls waiting on something that already finished.
+
 ## Read first on resume
 
 1. This file.
