@@ -249,19 +249,29 @@ const MUTANTS = [
     to: '    if (false) {',
     test: 'packages/providers/src/os-synth/os-synth.test.ts',
     only: 'finding 1',
-    // `equivalentOn: ['linux']` was here and was WRONG. Removed 2026-08-22 after running the
-    // harness on real Linux for the first time: this mutant is **killed** there `[measured-here]`,
-    // node:24-bookworm with a real pnpm install.
+    // KNOWN GAP on Linux WITH A SYNTHESIZER INSTALLED. Left failing; not marked equivalent,
+    // because the invariant is real there and simply unguarded.
     //
-    // The reasoning that put it there read plausibly and was not tested. `#prepare` does return at
-    // `os-synth/index.ts:363` for linux before the `voices.length === 0` guard this mutant edits —
-    // that part is true — and I concluded the mutation therefore could not change Linux behaviour.
-    // It does. Reading the control flow told me what one path does, not what the whole test
-    // exercises, and I annotated a live guard as inert on the strength of it.
+    // The axis is not the platform. Measured in node:24-bookworm `[measured-here]`:
     //
-    // The annotation was worse than the gap it described: it made the harness EXPECT survival, so
-    // a correctly-killed mutant reported as a failure and CI stayed red for the opposite reason
-    // from the one written beside it.
+    //     no espeak-ng installed  -> mutant KILLED   (40/40)
+    //     espeak-ng installed     -> mutant SURVIVES (39/40)   <- and CI installs it
+    //
+    // Mechanism: the guarding test (`006 finding 1`) early-returns on Linux — `if
+    // (process.platform === 'linux') return`, with the comment "the Linux ladder already throws;
+    // covered above". On a Linux with no synthesizer, something else fails under the mutant and
+    // catches it incidentally. With one installed, NOTHING exercises the invariant.
+    //
+    // So "covered above" is the claim to distrust, and this mutant is the only thing saying so.
+    //
+    // What would close it: the test forces failure by emptying PATH, which cannot work on the
+    // Linux ladder. It needs an INJECTED resolver seam — a provider constructed with a backend
+    // resolver that fails — rather than an environment trick. That is a real change to the
+    // provider's constructor surface and is not a wind-down job.
+    //
+    // Two earlier annotations here were wrong and are recorded so the next reader does not repeat
+    // them: `equivalentOn: ['linux']` (the mutated guard is NOT unreachable), and a claim that the
+    // Linux run had verified it (that run had no synthesizer, so it was not CI's Linux).
   },
   {
     id: 'player-exit-ignored',
