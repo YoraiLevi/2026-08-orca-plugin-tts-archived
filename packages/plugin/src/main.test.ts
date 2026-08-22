@@ -640,8 +640,14 @@ describe('G2 terminal dashboard and control channel', () => {
    * Windows could not be measured locally — there is no Windows host here — so this is `[claimed]`
    * as a bound, not `[measured-here]`. If it ever fires, that is a hang and it should be read as
    * one, not raised again.
+   *
+   * 45 s, NOT 30 s, and the gap is the whole point. `until`/`untilValue` carry their own 30 s
+   * backstop that throws NAMING the stuck condition. Setting the test budget to 30 s as well made
+   * vitest's anonymous kill win the race every time, so three CI runs reported "Test timed out in
+   * 30000 ms" and never said which wait was stuck (runs 32550849182, 32552002823). A diagnostic
+   * that loses to the timeout it exists to explain is not a diagnostic.
    */
-  it('names the independently-created session and queue depth, then Stop reaches the plugin by effect', { timeout: 30_000 }, async () => {
+  it('names the independently-created session and queue depth, then Stop reaches the plugin by effect', { timeout: 45_000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-tts-g2-'))
     const worktree = join(root, 'dashboard-worktree')
     const project = worktree.replace(/[/\\:]/g, '-')
