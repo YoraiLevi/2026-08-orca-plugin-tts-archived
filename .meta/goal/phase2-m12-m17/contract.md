@@ -20,8 +20,12 @@ Cap 3-4 concurrent agents. v1 decisions reopenable with evidence.
       against the plugin's read path — two independent paths to one string.
       *OR* ack blocked, naming the field that cannot round-trip.
 
-- [ ] **G2 — M13 dashboard.** While a reply is being read, the surface names the session and
-      the queue depth, and a control reaches the plugin.
+- [x] **G2 — M13 dashboard.** ✅ **MET.** The surface is `orca-tts control`, a terminal TUI: the
+      plugin panel is write-capable through `terminal.sendText` but read-blind, while the TUI can
+      render atomic worker state without a panel poll and push Stop through a local socket. While
+      the test holds reply one in synthesis with replies two and three queued, the rendered surface
+      names the independently-created session and says `QUEUE  2 waiting`; Stop is asserted by the
+      effects `provider.cancelled` and `sink.stops`, never by the socket receipt.
       *Oracle:* drive it end to end and assert the rendered text against state the test set
       independently. `terminal.sendText` is panel-callable — this is NOT blocked upstream.
 

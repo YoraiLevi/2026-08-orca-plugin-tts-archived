@@ -6,6 +6,9 @@ import activate from './main.ts'
 import type { OrcaApi } from './adapter/index.ts'
 import type { AudioChunk, PlaybackSink, ProviderCapabilities, SynthesizeOptions, TtsProvider }
   from '@orca-tts/core'
+import {
+  readDashboardDocument, renderDashboard, sendControl, type DashboardDocument
+} from './control/dashboard.ts'
 
 /**
  * End-to-end reachability, P26's rule verbatim: drive the OUTERMOST object a caller constructs —
@@ -20,6 +23,7 @@ class RecordingProvider implements TtsProvider {
   synthesized: string[] = []
   /** Non-zero gives the queue real depth, so "the queue survived" can actually be observed. */
   delayMs = 0
+  cancelled = 0
   /**
    * A gate the test OPENS, in place of a delay the test HOPES is long enough.
    *
@@ -56,7 +60,7 @@ class RecordingProvider implements TtsProvider {
   }
   get isWarm(): boolean { return this.#warm }
   async prepare(): Promise<void> { this.#warm = true }
-  cancel(): void {}
+  cancel(): void { this.cancelled++ }
   async listVoices(): Promise<readonly string[]> { return ['test'] }
   async *generate(text: string, _opts: SynthesizeOptions = {}): AsyncIterable<AudioChunk> {
     // Recorded BEFORE the gate: "this utterance reached the engine" is what the test waits on,
@@ -70,12 +74,14 @@ class RecordingProvider implements TtsProvider {
 
 class FakeSink implements PlaybackSink {
   isPlaying = false
+  stops = 0
   async enqueue(): Promise<void> {}
-  async stop(): Promise<void> {}
+  async stop(): Promise<void> { this.stops++ }
 }
 
 interface Harness {
   readonly provider: RecordingProvider
+  readonly sink: FakeSink
   readonly commands: Map<string, (args?: unknown) => unknown>
   readonly events: Map<string, (payload: unknown) => void>
   readonly notifications: string[]
@@ -115,6 +121,18 @@ const until = async (
   }
 }
 
+const untilValue = async <T>(read: () => Promise<T | null>, what: string): Promise<T> => {
+  const started = Date.now()
+  for (;;) {
+    const value = await read()
+    if (value !== null) return value
+    if (Date.now() - started > 30_000) {
+      throw new Error(`gave up waiting for: ${what} (30000 ms backstop — this is a HANG, not slowness)`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2))
+  }
+}
+
 /**
  * Huddle is watching the transcript and has marked the backlog as already-spoken.
  *
@@ -136,8 +154,9 @@ const watching = async (h: Harness): Promise<void> =>
  * shape aimed at the one file M12 exists to read. Tests that WANT a settings file pass their own
  * directory.
  */
-async function boot(projectsDir: string, settingsDir?: string): Promise<Harness> {
+async function boot(projectsDir: string, settingsDir?: string, controlDir?: string | false): Promise<Harness> {
   const provider = new RecordingProvider()
+  const sink = new FakeSink()
   const commands = new Map<string, (args?: unknown) => unknown>()
   const events = new Map<string, (payload: unknown) => void>()
   const notifications: string[] = []
@@ -155,12 +174,13 @@ async function boot(projectsDir: string, settingsDir?: string): Promise<Harness>
     log: (m: string) => { logs.push(m) }
   }
   activate(orca, {
-    provider, sink: new FakeSink(), projectsDir, announceDelayMs: 5,
-    settingsDir: settingsDir ?? join(projectsDir, 'no-settings-inbox-here')
+    provider, sink, projectsDir, announceDelayMs: 5,
+    settingsDir: settingsDir ?? join(projectsDir, 'no-settings-inbox-here'),
+    controlDir: controlDir ?? false
   })
   await settle(10)   // let registry.resolve() finish so `speech` exists
   return {
-    provider, commands, events, notifications, logs,
+    provider, sink, commands, events, notifications, logs,
     spoken: () => provider.synthesized.join(' '),
     run: async (id) => {
       const fn = commands.get(id)
@@ -458,7 +478,9 @@ describe('006 sites 45/46 — total engine failure reports a named cause', () =>
       },
       log: () => {}
     }
-    activate(orca, { provider: new BrokenProvider(), sink: new FakeSink(), projectsDir: '/nonexistent' })
+    activate(orca, {
+      provider: new BrokenProvider(), sink: new FakeSink(), projectsDir: '/nonexistent', controlDir: false
+    })
     await settle(10)
     const engineReport = notifications.find((n) => n.includes('no speech engine'))
     expect(engineReport, 'total engine failure was not reported at all').toBeDefined()
@@ -505,7 +527,7 @@ describe('006 section 19 rank 1 — the listener can ask whether the voice actua
       log: () => {}
     }
     const commands = new Map<string, (args?: unknown) => unknown>()
-    activate(orca, { provider, sink: new FakeSink(), projectsDir: '/nonexistent' })
+    activate(orca, { provider, sink: new FakeSink(), projectsDir: '/nonexistent', controlDir: false })
     await settle(10)
     await commands.get('read-aloud.self-test')?.()
     await settle(20)
@@ -592,5 +614,70 @@ describe('006 rank 3 — provenance is wired end to end, not only unit-tested', 
     expect(h.spoken(), 'the queued reply must still reach the listener').toContain('delta reply')
     expect(h.spoken(), 'activate() never wired resolveLabel, so provenance is never re-checked')
       .toMatch(/has since ended/)
+  })
+})
+
+/**
+ * M13 G2 — the terminal TUI is the live surface because ORCA's panel is read-blind, while the
+ * control socket is pushed because polling cannot meet Stop's budget (003 sections 2 and 4).
+ *
+ * One end-to-end oracle covers the gate as one user experience: the worker tails a real transcript,
+ * SpeechService holds a real queue, the state crosses the real atomic file, the real renderer names
+ * it, and Stop crosses the real socket back into the service. Expected label and depth are rebuilt
+ * from values chosen by this test — never read back from the surface under test.
+ */
+describe('G2 terminal dashboard and control channel', () => {
+  it('names the independently-created session and queue depth, then Stop reaches the plugin by effect', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-g2-'))
+    const worktree = join(root, 'dashboard-worktree')
+    const project = worktree.replace(/[/\\:]/g, '-')
+    const sessionName = 'sessionalpha'
+    const file = await writeTranscript(root, project, sessionName, ['primed already'])
+    const controlDir = join(root, 'control')
+    const h = await boot(root, undefined, controlDir)
+
+    await h.run('read-aloud.toggle-huddle')
+    h.agentDone(worktree)
+    await watching(h)
+    await until(() => h.spoken().includes('Huddle mode'), 'the huddle-on announcement to be spoken')
+    h.provider.synthesized.length = 0
+
+    h.provider.hold()
+    await appendReplies(file, sessionName, [
+      'alpha reply is being read', 'bravo reply is queued', 'charlie reply is queued'
+    ])
+    await until(() => h.spoken().includes('alpha reply'), 'the first reply to reach the held provider')
+
+    const document = await untilValue<DashboardDocument>(async () => {
+      const candidate = await readDashboardDocument(controlDir).catch(() => null)
+      return candidate?.status.nowReading !== null && candidate?.status.queueDepth === 2
+        ? candidate
+        : null
+    }, 'the dashboard to publish the held reply and two queued replies')
+
+    // Independent oracle: the expected label is rebuilt from the path and session name the TEST
+    // chose. It does not read any label or queue value back from the dashboard implementation.
+    const expectedProject = project.replace(/^-+/, '').split('-').slice(-3).join(' ')
+    const expectedLabel = `${expectedProject}, session ${sessionName.slice(0, 8)}`
+    const rendered = renderDashboard(document.status)
+    expect(rendered).toContain(`NOW READING  ${expectedLabel}`)
+    expect(rendered).toContain('QUEUE  2 waiting')
+    expect(rendered).toContain(`1. ${expectedLabel}`)
+    expect(rendered).toContain(`2. ${expectedLabel}`)
+
+    const cancelledBefore = h.provider.cancelled
+    const stoppedBefore = h.sink.stops
+    const response = await sendControl(document, 'stop')
+    expect(response).toEqual({ ok: true, code: 'stopped' })
+    expect(h.provider.cancelled, 'Stop was acknowledged but synthesis was not cancelled')
+      .toBeGreaterThan(cancelledBefore)
+    expect(h.sink.stops, 'Stop was acknowledged but buffered playback was not flushed')
+      .toBeGreaterThan(stoppedBefore)
+    await untilValue(async () => {
+      const after = await readDashboardDocument(controlDir).catch(() => null)
+      return after?.status.nowReading === null && after?.status.queueDepth === 0 ? after : null
+    }, 'the effect of Stop to clear the rendered speech state')
+
+    h.provider.release()
   })
 })

@@ -24,7 +24,7 @@ paste the absolute path to **`dist/plugin`** — the built artifact, *not* `pack
 
 `packages/plugin` contains `src/` and a workspace `node_modules` whose symlinks point outside the
 folder; ORCA resolves realpaths and rejects the whole plugin as Invalid if anything escapes the
-plugin root. `dist/plugin` is three files and nothing else.
+plugin root. `dist/plugin` is four self-contained files and nothing else.
 
 ## Use
 
@@ -39,6 +39,20 @@ plugin root. `dist/plugin` is three files and nothing else.
 | Follow this session | `Mod+Shift+P` | lock onto the newest agent transcript here, announced aloud |
 
 Shortcuts are rebindable in the manifest.
+
+### Live dashboard and terminal-safe Stop
+
+Open a terminal in the worktree and run:
+
+```bash
+pnpm control
+```
+
+The fixed terminal dashboard names the session being read and every queued item's session, shows
+the queue depth, and keeps Stop on the same row. Press `s` (or `.`) there to stop: the command is
+pushed to the plugin worker, which cancels synthesis and flushes playback before acknowledging it.
+If no worker consumes the control, the TUI says so explicitly and rings the terminal bell; a dead
+control is never silent.
 
 ### Huddle follows one session at a time
 
@@ -75,15 +89,17 @@ This is ORCA's behaviour, not a bug in this plugin, and it is deliberate on thei
 chords are dispatched only when focus context is `app`, so a plugin cannot steal `Ctrl+C` from your
 shell. The consequence is that a plugin command is unreachable exactly where you spend your time.
 
-There is no workaround available to a plugin: ORCA has no command palette to contribute to, panels
-cannot invoke commands, and no OS-level global shortcut exists for plugins *or* for ORCA itself. A
-keybinding in app focus is the only trigger a plugin gets.
+The terminal dashboard above is the focus-safe route. A plugin panel can call
+`terminal.sendText`, but it cannot read worker state and cannot distinguish a control pane from an
+agent terminal using the opaque terminal ids ORCA exposes. The live surface therefore stays in the
+terminal TUI; a panel must never guess a target and turn Stop into an agent prompt.
 
 Tracked upstream at [stablyai/orca#15642](https://github.com/stablyai/orca/issues/15642), which
 proposes an opt-in flag so a binding can ask for terminal reach.
 
-**If you work mostly in terminals, use huddle mode** (`Mod+Shift+H` once, from the sidebar). It
-needs no trigger afterwards — agent replies are spoken as they arrive.
+**If you work mostly in terminals, use huddle mode** (`Mod+Shift+H` once, from the sidebar) and keep
+`pnpm control` open. Agent replies arrive without another shortcut, and `s` remains reachable in
+terminal focus.
 
 ## Known limitations
 
@@ -103,9 +119,9 @@ change that would remove it.
   holds one player open and removes the gap.
 - **Windows on ARM uses the system voice only** — the neural engine has no build for that platform.
 - **Shortcuts are dead while a terminal has focus** — see above. Upstream: stablyai/orca#15642.
-- **The panel cannot show live state.** ORCA has no worker→panel channel, so the panel shows
-  shortcuts and caveats only, never status. Press `Mod+Shift+U` and the plugin tells you its state
-  out loud. Upstream: stablyai/orca#15638.
+- **The plugin panel cannot show live state.** ORCA has no worker→panel channel, so the panel is
+  read-blind. The terminal dashboard shows the live session and queue without polling; press
+  `Mod+Shift+U` for the same information in audio. Upstream: stablyai/orca#15638.
 - **SSH/remote worktrees are not supported**: the transcript lives on the remote host.
 
 ## Engines

@@ -32,6 +32,41 @@ export type SpeakMode = 'replace' | 'queue'
  */
 export type AnnounceUrgency = 'now' | 'next'
 
+/**
+ * The state M13 publishes to the terminal dashboard.
+ *
+ * `sourceMap` and `cursor` are deliberately present-and-null until a provider can report exact
+ * word boundaries and the normalizer can map them back to source text (003 section 8.4). A
+ * consumer can render the honest unavailable state now and accept those fields later without a
+ * protocol rewrite.
+ */
+export interface SpeechStatusNowReading {
+  readonly sessionId: string | null
+  readonly sessionLabel: string
+  readonly gen: number
+  readonly sourceText: string
+  readonly spokenText: string
+  readonly sourceMap: null
+  readonly cursor: null
+  readonly chunkIndex: number
+  readonly chunkCount: number
+  readonly startedAtEpochMs: number
+  readonly estimatedMs: null
+}
+
+export interface SpeechStatusQueueItem {
+  readonly sessionId: string | null
+  readonly sessionLabel: string
+  readonly textPreview: string
+}
+
+export interface SpeechStatus {
+  readonly generation: number
+  readonly nowReading: SpeechStatusNowReading | null
+  readonly queueDepth: number
+  readonly queue: readonly SpeechStatusQueueItem[]
+}
+
 export interface SpeechServiceDeps {
   readonly provider: TtsProvider
   readonly sink: PlaybackSink
@@ -105,6 +140,8 @@ export interface SpeechServiceDeps {
    * voice is OMITTED rather than guessed.
    */
   readonly resolveVoice?: (index: number) => string | undefined
+  /** Publish every speech transition to M13's terminal dashboard. */
+  readonly onStatus?: (status: SpeechStatus) => void
 }
 
 const DEFAULT_MAX_QUEUED = 20
@@ -200,7 +237,7 @@ export class SpeechService {
   #draining = false
   #cancelled = false
   #skip = false
-  #current: string | null = null
+  #current: SpeechStatusNowReading | null = null
   #droppedPendingAnnounce = 0
   #dropTimer: ReturnType<typeof setTimeout> | null = null
   #losses = new Map<LossKind, number>()
@@ -224,7 +261,21 @@ export class SpeechService {
   get queued(): number { return this.#pending.length }
 
   /** What is being read right now, if the caller labelled it. */
-  get nowReading(): string | null { return this.#current }
+  get nowReading(): string | null { return this.#current?.sessionLabel ?? null }
+
+  /** A fresh value object: consumers never receive the service's mutable queue. */
+  status(): SpeechStatus {
+    return {
+      generation: this.#playback.generation,
+      nowReading: this.#current,
+      queueDepth: this.#pending.length,
+      queue: this.#pending.map((entry) => ({
+        sessionId: entry.sessionId ?? null,
+        sessionLabel: entry.label ?? (entry.announcement === true ? 'Read Aloud' : 'Unlabelled speech'),
+        textPreview: entry.text.trim().replace(/\s+/g, ' ').slice(0, 120)
+      }))
+    }
+  }
 
   /** Abandon the current utterance and move to the next queued one. */
   async skip(): Promise<void> {
@@ -258,6 +309,7 @@ export class SpeechService {
     while (this.#pending[at]?.announcement === true) at++
     this.#pending.splice(at, 0, entry)
     this.#cancelled = false
+    this.#emitStatus()
     this.#observe(this.#drain(), 'read that text')
   }
 
@@ -334,6 +386,7 @@ export class SpeechService {
       this.#noteDropped(dropped)
     }
     this.#cancelled = false
+    this.#emitStatus()
     void this.#drain()
   }
 
@@ -408,11 +461,13 @@ export class SpeechService {
   async stop(): Promise<void> {
     this.#cancelled = true
     this.#pending = []
+    this.#current = null
     if (this.#dropTimer !== null) { clearTimeout(this.#dropTimer); this.#dropTimer = null }
     if (this.#lossTimer !== null) { clearTimeout(this.#lossTimer); this.#lossTimer = null }
     this.#losses.clear()
     this.#reattributed.clear()
     this.#droppedPendingAnnounce = 0
+    this.#emitStatus()
     await this.#playback.bargeIn()
   }
 
@@ -424,13 +479,19 @@ export class SpeechService {
         const next = this.#pending.shift()
         if (next === undefined) break
         const attribution = next.announcement === true ? null : this.#reattribute(next)
-        this.#current = attribution?.label ?? next.label ?? null
         this.#skip = false
         const outcome = await this.#speakOne(
           attribution === null ? next.text : attribution.prefix + next.text,
-          next.snapshot
+          next.snapshot,
+          {
+            sourceText: next.text,
+            sessionId: next.sessionId ?? null,
+            sessionLabel: attribution?.label ?? next.label ??
+              (next.announcement === true ? 'Read Aloud' : 'Unlabelled speech')
+          }
         )
         this.#current = null
+        this.#emitStatus()
         // An announcement that cannot be spoken must never announce that it cannot be spoken: that
         // is an unbounded loop in the one channel the listener has.
         if (next.announcement !== true) {
@@ -441,6 +502,8 @@ export class SpeechService {
       }
     } finally {
       this.#draining = false
+      this.#current = null
+      this.#emitStatus()
     }
   }
 
@@ -518,7 +581,11 @@ export class SpeechService {
    * all arrived at one indistinguishable early return, so the caller could not tell a loss the
    * listener should hear about from a control the listener just pressed.
    */
-  async #speakOne(text: string, snapshot?: SettingsSnapshot): Promise<SpeakOutcome> {
+  async #speakOne(
+    text: string,
+    snapshot: SettingsSnapshot | undefined,
+    identity: { sourceText: string; sessionId: string | null; sessionLabel: string }
+  ): Promise<SpeakOutcome> {
     const spoken = normalize(text, this.#normalizeOptions(snapshot))
     if (spoken.length === 0) {
       this.#deps.log?.('nothing speakable in that text')
@@ -537,9 +604,29 @@ export class SpeechService {
     // called INSIDE the per-chunk loop. With a live snapshot behind it, a voice change would land
     // between chunk three and chunk four of one utterance — a sentence that changes speaker
     // mid-word. Read once, into a local, at the top.
-    const synthOpts = this.#synthesizeOptions(snapshot)
     const generation = this.#playback.begin()
-    for (const chunk of chunks) {
+    const startedAtEpochMs = Date.now()
+    this.#current = {
+      sessionId: identity.sessionId,
+      sessionLabel: identity.sessionLabel,
+      gen: generation,
+      sourceText: identity.sourceText,
+      spokenText: spoken,
+      sourceMap: null,
+      cursor: null,
+      chunkIndex: chunks.length === 0 ? 0 : 1,
+      chunkCount: chunks.length,
+      startedAtEpochMs,
+      estimatedMs: null
+    }
+    this.#emitStatus()
+    const synthOpts = this.#synthesizeOptions(snapshot)
+    for (let index = 0; index < chunks.length; index++) {
+      const chunk = chunks[index]!
+      if (this.#current !== null && this.#current.chunkIndex !== index + 1) {
+        this.#current = { ...this.#current, chunkIndex: index + 1 }
+        this.#emitStatus()
+      }
       if (this.#cancelled) return 'cancelled'
       if (this.#skip) return 'skipped'
       if (generation !== this.#playback.generation) return 'superseded'
@@ -556,5 +643,11 @@ export class SpeechService {
       }
     }
     return 'spoken'
+  }
+
+  /** Status reporting is supplementary; a dashboard failure must never stop speech. */
+  #emitStatus(): void {
+    try { this.#deps.onStatus?.(this.status()) }
+    catch (err) { this.#deps.log?.(`could not publish dashboard status: ${String(err)}`) }
   }
 }

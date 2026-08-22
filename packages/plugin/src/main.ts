@@ -17,6 +17,7 @@ import { SpeechService } from './speech-service.ts'
 import { SubprocessSink } from './sinks/subprocess-sink.ts'
 import { HuddleController, sessionLabel } from './huddle/index.ts'
 import { SettingsRuntime, loadSettings, nativeInboxPath } from './settings/index.ts'
+import { DashboardRuntime, defaultControlDir } from './control/dashboard.ts'
 
 /**
  * Test seam. ORCA calls `activate(orca)` and gets every real default; a test calls
@@ -43,6 +44,11 @@ export interface ActivateOptions {
    * exists to read. Tests pass a temp directory; ORCA passes nothing.
    */
   readonly settingsDir?: string
+  /**
+   * M13 control-state directory. Tests pass a temp directory; `false` explicitly disables the
+   * runtime for tests that are not exercising G2.
+   */
+  readonly controlDir?: string | false
 }
 
 /** How many commands `orca-plugin.json` declares. Pinned by main.test.ts, not by memory. */
@@ -158,6 +164,30 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     else deferredDropped++
   }
 
+  // A caller that injects `settingsDir` is an isolated test harness. Disable the production
+  // per-user control path there unless the test explicitly supplies its own `controlDir`; otherwise
+  // a settings test would write the author's real dashboard file and bind the real socket (R061).
+  const dashboardDisabled = options.controlDir === false ||
+    (options.controlDir === undefined && options.settingsDir !== undefined)
+  const dashboard = dashboardDisabled
+    ? null
+    : new DashboardRuntime(options.controlDir ?? defaultControlDir(), {
+      // The control server awaits the REAL effect. A transport receipt is not success: stop()
+      // returns only after synthesis cancellation and sink flush have both been requested.
+      stop: async () => {
+        if (speech === null) throw new Error('the speech engine is still starting')
+        await speech.stop()
+      },
+      // A received control with no consumer is said in the audio stream, never discarded as an
+      // inert message or left only in a log (P30 and the G2 brief).
+      announceRefusal: (message) => { announce(message, 'now') }
+    }, host.log)
+  if (dashboard !== null) {
+    void dashboard.start().catch((err: unknown) => {
+      announce(`The Read Aloud control pane could not connect: ${String(err)}.`, 'next')
+    })
+  }
+
   // The provider talks to the user directly for detection failures and degraded rungs: on Linux
   // the interesting failure ("espeak-ng is not installed") happens inside prepare(), far from any
   // command the user pressed.
@@ -180,6 +210,7 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
         ? registry.lastFailure ?? 'no speech engine is available on this system'
         : `no speech engine is available on this system (${detail.kind}) — ${detail.reason}`
       engineError = why
+      dashboard?.updateEngine({ state: 'failed', name: 'unavailable', rung: null, reason: why })
       host.log(`read-aloud: ${why}`)
       // The ONE announcement that genuinely cannot be spoken: there is no engine to speak it with.
       // Stated here so the next reader does not mistake it for an oversight. A spoken engine-failure
@@ -197,6 +228,9 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       // session; the listener's file can change at any point inside it.
       settings: () => settings.snapshot,
       resolveVoice: (i) => settings.voiceName(i),
+      ...(dashboard === null ? {} : { onStatus: (status: ReturnType<SpeechService['status']>) => {
+        dashboard.updateSpeech(status)
+      } }),
       ...(options.announceDelayMs === undefined ? {} : { announceDelayMs: options.announceDelayMs }),
       // Supplement only. The spoken sentence naming the count comes from SpeechService itself, so
       // it cannot be lost by a notification channel that is muted, denied, or simply not looked at.
@@ -209,6 +243,13 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       onDropped: (n) => {
         host.notify('Read Aloud', `Skipped ${n} older repl${n === 1 ? 'y' : 'ies'} to keep up`)
       }
+    })
+    dashboard?.updateSpeech(speech.status())
+    dashboard?.updateEngine({
+      state: 'ready',
+      name: resolved.provider.displayName,
+      rung: resolved.status.rung,
+      reason: resolved.status.reason ?? null
     })
     host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`)
     // The host's voice list, asked for ONCE. `synthesize.voiceIndex` is an index into this list
@@ -230,6 +271,7 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     if (resolved.status.reason !== undefined) announce(resolved.status.reason)
   }).catch((err: unknown) => {
     engineError = String(err)
+    dashboard?.updateEngine({ state: 'failed', name: 'unavailable', rung: null, reason: engineError })
     host.log(`read-aloud: engine resolution failed: ${engineError}`)
     host.notify('Read Aloud', `speech engine failed to start: ${engineError}`)
   })

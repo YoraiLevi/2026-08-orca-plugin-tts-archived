@@ -331,6 +331,7 @@ describe('SC-18 — every gate the repo defines is executed by something', () =>
   const EXEMPT: Record<string, string> = {
     'test:watch': 'a developer convenience; `test` is the gate',
     'voice-lab': 'an interactive tool with a browser in the loop; it has no verdict to give',
+    'control': 'the foreground terminal dashboard; G2 exercises its renderer and socket in `test`',
     'bench:latency': 'opens the audio device on `--audible` and is a measurement, not an assertion (P31)',
     'bench:lab-gate': 'drives a real browser; measured deliberately rather than gated',
     'probe:numbers': 'run by the CI leg directly rather than through the script name'

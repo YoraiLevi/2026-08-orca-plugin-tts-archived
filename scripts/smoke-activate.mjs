@@ -24,7 +24,7 @@ activate({
   events: { on: (name) => events.push(name) },
   host: { call: async () => ({}) },
   log: (m) => console.log('  [plugin]', m)
-})
+}, { controlDir: false })
 
 await new Promise((r) => setTimeout(r, 2000))
 

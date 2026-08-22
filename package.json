@@ -2,6 +2,9 @@
   "name": "orca-tts-workspace",
   "private": true,
   "type": "module",
+  "bin": {
+    "orca-tts": "scripts/orca-tts.mjs"
+  },
   "engines": { "node": ">=24" },
   "scripts": {
     "typecheck": "tsc -b",
@@ -15,7 +18,8 @@
     "bench:latency": "node scripts/bench-latency.mjs",
     "probe:numbers": "node scripts/ci/number-ceiling-probe.mjs",
     "bench:lab-gate": "node scripts/bench-lab-gate.mjs",
-    "voice-lab": "node scripts/voice-lab.mjs"
+    "voice-lab": "node scripts/voice-lab.mjs",
+    "control": "node scripts/orca-tts.mjs control"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

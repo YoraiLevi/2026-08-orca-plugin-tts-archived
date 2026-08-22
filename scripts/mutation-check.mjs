@@ -347,6 +347,33 @@ const MUTANTS = [
     test: 'packages/plugin/src/main.test.ts'
   },
   {
+    id: 'dashboard-hides-session',
+    claim: 'M13 G2: while speech is active, the terminal surface names the originating session',
+    file: 'packages/plugin/src/control/dashboard.ts',
+    from: '      : `NOW READING  ${status.nowReading.sessionLabel}`,',
+    to: "      : 'NOW READING  unknown session',",
+    test: 'packages/plugin/src/main.test.ts',
+    only: 'G2 terminal'
+  },
+  {
+    id: 'dashboard-hides-depth',
+    claim: 'M13 G2: the terminal surface renders the independently established queue depth',
+    file: 'packages/plugin/src/control/dashboard.ts',
+    from: '    `QUEUE  ${status.queueDepth} waiting`',
+    to: "    'QUEUE  0 waiting'",
+    test: 'packages/plugin/src/main.test.ts',
+    only: 'G2 terminal'
+  },
+  {
+    id: 'dashboard-stop-ack-only',
+    claim: 'M13 G2: Stop invokes its plugin consumer; acknowledging a message is not the effect',
+    file: 'packages/plugin/src/control/dashboard.ts',
+    from: '      await this.#handlers.stop()',
+    to: '      void this.#handlers.stop',
+    test: 'packages/plugin/src/main.test.ts',
+    only: 'G2 terminal'
+  },
+  {
     id: 'inband-command-reaches-engine',
     claim: "E-06: `[[volm 0.2]]` in an agent reply must not be executed by `say`",
     file: 'packages/providers/src/os-synth/index.ts',

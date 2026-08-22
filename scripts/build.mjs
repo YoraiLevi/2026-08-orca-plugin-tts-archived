@@ -31,7 +31,19 @@ await build({
   legalComments: 'inline'
 })
 
+await build({
+  entryPoints: ['scripts/orca-tts.mjs'],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node24',
+  outfile: `${OUT}/orca-tts.mjs`,
+  external: ['node:*'],
+  banner: { js: '#!/usr/bin/env node' },
+  legalComments: 'inline'
+})
+
 await cp('packages/plugin/orca-plugin.json', `${OUT}/orca-plugin.json`)
 await cp('packages/plugin/panel.html', `${OUT}/panel.html`)
 
-console.log(`build: ${OUT}/ (orca-plugin.json, main.mjs, panel.html)`)
+console.log(`build: ${OUT}/ (orca-plugin.json, main.mjs, panel.html, orca-tts.mjs)`)

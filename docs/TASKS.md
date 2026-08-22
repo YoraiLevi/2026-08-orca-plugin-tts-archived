@@ -393,28 +393,36 @@ spoken text.
 
 ---
 
-## Phase M13 — The panel that shows what is happening (roadmap item 3)
+## Phase M13 — The dashboard and control channel (roadmap item 3)
 
-**Blocked** on [stablyai/orca#15643](https://github.com/stablyai/orca/pull/15643) (`storage.get`
-panel-callable) or [#15638](https://github.com/stablyai/orca/issues/15638) (host→panel push).
+Design of record: `docs/.discussion/003-panel-and-control-channel.md`. **Not blocked upstream.** A
+plugin panel is write-capable through `terminal.sendText` and read-blind because storage remains
+panel-forbidden; the live surface is therefore the foreground terminal TUI. Stop is pushed through
+a socket and never polled (the panel poll floor is ~345 ms `[derived]`).
 
-- [ ] **T130** Worker publishes status to plugin storage on every transition
-  - [ ] T130a now reading: text preview, session label, elapsed
-  - [ ] T130b queue: count and per-item session label
-  - [ ] T130c engine and degradation rung
-  - [ ] T130d last 20 spoken replies, for replay
-- [ ] **T131** Panel polls `storage.get` and renders it
-  - [ ] T131a poll interval respects the panel bridge rate limit (30 per 10 s)
-  - [ ] T131b stale-status detection: say "not connected" rather than showing a frozen lie
-- [ ] **T132** Controls in the panel — stop, skip, unfollow, replay item N
-  - [ ] T132a **blocked**: panels cannot invoke commands. Needs an upstream answer or a storage-flag
-        polled by the worker as a command channel. Decide, do not improvise silently.
-- [ ] **T133** Fall back to the current static panel when `storage.get` is not panel-callable, and
-      say why in the panel itself
-- [ ] **T134** Test: status written by the worker parses in the panel's renderer
+- [x] **T130** Worker publishes an atomic, mode-`0600` status document on every speech transition
+  - [x] T130a now reading: source/spoken text, existing session provenance, start time
+  - [x] T130b queue: independently stored count and per-item session label
+  - [x] T130c engine and degradation rung
+  - [ ] T130d last 20 spoken replies, for replay — deferred: not required by G2; belongs with the
+        replay/presence work rather than being invented inside the dashboard
+- [x] **T131** `orca-tts control` terminal TUI watches atomic state transitions and renders them;
+      it spends zero panel-bridge messages and never interpolates a word cursor
+  - [x] T131a exact session label and queue depth rendered in fixed rows
+  - [x] T131b disconnected state is named; it never displays a frozen value as current
+- [x] **T132** `s` / `.` Stop is pushed over the worker control socket and awaits the plugin effect
+  - [x] T132a Stop converges on `SpeechService.stop()`: synthesis cancel plus sink flush
+  - [ ] T132b panel-button forwarding — deferred to the nonce target-resolution/onboarding work in
+        003 Q43/Q45/Q46/Q60; the panel must not guess among opaque terminal ids
+  - [ ] T132c skip, pause, mute, replay — deferred to their owning milestones; an unimplemented
+        verb received by the worker is refused by name in the audio stream
+- [x] **T133** Static plugin panel says honestly that live state is in the terminal TUI
+- [x] **T134** End-to-end oracle: real transcript watcher → held speech queue → atomic state → real
+      renderer, then real socket → `SpeechService.stop()`; expected label/depth come from values the
+      test chose independently, and Stop is asserted on cancellation and sink-flush counters
 
-**Gate M13:** while a reply is being read, the panel names the session and the queue depth, and a
-click stops it.
+**Gate M13 / G2:** while a reply is being read, the terminal TUI names its session and shows
+`QUEUE  2 waiting`; its Stop control reaches the plugin and clears both synthesis and playback.
 
 ---
 
