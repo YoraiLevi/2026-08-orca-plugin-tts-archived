@@ -737,7 +737,7 @@ describe('examples can be created, edited and removed from the page', () => {
 
 // Restated independently of the manifest (P36): deleting a manifest row must make these tests
 // disagree, not silently make the expected progress stream one row shorter too.
-const POCKET_MODEL_FILES = [
+const POCKET_DOWNLOAD_FILES = [
   'bundle.json',
   'bos_before_voice.npy',
   'tokenizer.model',
@@ -745,15 +745,27 @@ const POCKET_MODEL_FILES = [
   'flow_lm_flow_int8.onnx',
   'mimi_decoder_int8.onnx',
   'mimi_encoder.onnx',
-  'text_conditioner.onnx'
+  'text_conditioner.onnx',
+  'anna.wav',
+  'vera.wav',
+  'fantine.wav',
+  'charles.wav',
+  'paul.wav',
+  'eponine.wav',
+  'azelma.wav',
+  'george.wav',
+  'reference_sample.wav',
+  'jane.wav',
+  'michael.wav',
+  'eve.wav'
 ]
 
 async function readyModelFixture (dir) {
   await mkdir(dir, { recursive: true })
-  for (const file of [...POCKET_MODEL_FILES, 'MODEL_LICENSE.txt']) {
+  for (const file of [...POCKET_DOWNLOAD_FILES, 'MODEL_LICENSE.txt']) {
     await writeFile(join(dir, file), 'fixture')
   }
-  await writeFile(join(dir, '.orca-tts-model-manifest'), '1\n')
+  await writeFile(join(dir, '.orca-tts-model-manifest'), '2\n')
 }
 
 describe('PV-030 — /voices names both backends and their availability', () => {
@@ -825,8 +837,8 @@ describe('PV-032 — /model/download streams progress and a terminal result', ()
     let receivedOptions = null
     const downloadModelImpl = async (options) => {
       receivedOptions = options
-      for (const [fileIndex, file] of POCKET_MODEL_FILES.entries()) {
-        options.onProgress({ file, received: fileIndex + 1, total: fileIndex + 1, fileIndex, fileCount: POCKET_MODEL_FILES.length })
+      for (const [fileIndex, file] of POCKET_DOWNLOAD_FILES.entries()) {
+        options.onProgress({ file, received: fileIndex + 1, total: fileIndex + 1, fileIndex, fileCount: POCKET_DOWNLOAD_FILES.length })
       }
       await readyModelFixture(options.dir)
       return options.dir
@@ -842,7 +854,7 @@ describe('PV-032 — /model/download streams progress and a terminal result', ()
       for await (const record of readLines(res)) records.push(record)
 
       expect(records.filter((record) => record.kind === 'progress').map((record) => record.file))
-        .toEqual(POCKET_MODEL_FILES)
+        .toEqual(POCKET_DOWNLOAD_FILES)
       expect(records.at(-1)).toMatchObject({ kind: 'complete', ok: true, backend: 'pocket' })
       expect(receivedOptions.dir).toBe(dir)
       expect(receivedOptions.fetchImpl).toBe(noNetwork)
@@ -857,7 +869,10 @@ describe('PV-032 — /model/download streams progress and a terminal result', ()
   it('ends an induced failure with a record naming the file and cause', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-failure-'))
     const downloadModelImpl = async (options) => {
-      options.onProgress({ file: 'bundle.json', received: 24381, total: 24381, fileIndex: 0, fileCount: 8 })
+      options.onProgress({
+        file: 'bundle.json', received: 24381, total: 24381,
+        fileIndex: 0, fileCount: POCKET_DOWNLOAD_FILES.length
+      })
       throw new Error('downloading flow_lm_main_int8.onnx: HTTP 503 Service Unavailable')
     }
     const { base, close } = await listen(createLabServer({ modelDirectory: dir, downloadModelImpl }))
@@ -887,8 +902,8 @@ describe('PV-033 — a second model download is refused by name', () => {
       calls++
       gate.enter()
       await gate.openPromise
-      for (const [fileIndex, file] of POCKET_MODEL_FILES.entries()) {
-        options.onProgress({ file, received: 1, total: 1, fileIndex, fileCount: POCKET_MODEL_FILES.length })
+      for (const [fileIndex, file] of POCKET_DOWNLOAD_FILES.entries()) {
+        options.onProgress({ file, received: 1, total: 1, fileIndex, fileCount: POCKET_DOWNLOAD_FILES.length })
       }
       await readyModelFixture(options.dir)
       return options.dir

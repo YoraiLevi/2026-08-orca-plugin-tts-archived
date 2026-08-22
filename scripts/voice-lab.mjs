@@ -52,13 +52,19 @@ const { normalize } = await import(pathToFileURL(NORMALIZER_SRC).href)
 const { Chunker } = await import(pathToFileURL(CHUNKER_SRC).href)
 const { OsSynthProvider, LINUX_WAV_BACKENDS, LINUX_INSTALL_HINT } =
   await import(pathToFileURL(PROVIDER_SRC).href)
+const pocketModels = await import(pathToFileURL(POCKET_MODELS_SRC).href)
 const {
   modelStatus, modelDir: defaultModelDir, downloadModel,
   MODEL_TOTAL_BYTES, MODEL_ARTIFACTS
-} = await import(pathToFileURL(POCKET_MODELS_SRC).href)
+} = pocketModels
 const {
   POCKET_VOICES, parseVoiceKey, OS_BACKEND, POCKET_BACKEND
 } = await import(pathToFileURL(POCKET_VOICES_SRC).href)
+// PV-050 can extend the already-landed model manager with pinned reference clips. Keep this
+// surface honest in both revisions: the downloader's optional expanded manifest, when present,
+// is what the progress count and advertised byte total describe.
+const DOWNLOAD_ARTIFACTS = [...MODEL_ARTIFACTS, ...(pocketModels.VOICE_ARTIFACTS ?? [])]
+const DOWNLOAD_TOTAL_BYTES = pocketModels.INSTALL_TOTAL_BYTES ?? MODEL_TOTAL_BYTES
 
 /* ================================================================= the source-not-dist guard
  *
@@ -824,9 +830,10 @@ function voiceEntries (osVoices, pocketStatus) {
 function downloadFailureFile (err, completedFiles) {
   if (typeof err?.file === 'string' && err.file.length > 0) return err.file
   const message = err instanceof Error ? err.message : String(err)
-  const named = MODEL_ARTIFACTS.find((artifact) => message.includes(artifact.file))
+  const named = DOWNLOAD_ARTIFACTS.find((artifact) => message.includes(artifact.file))
   if (named !== undefined) return named.file
-  return MODEL_ARTIFACTS[completedFiles]?.file ?? 'model'
+  if (/\bLICENSE\b/.test(message)) return 'LICENSE'
+  return DOWNLOAD_ARTIFACTS[completedFiles]?.file ?? 'model'
 }
 
 async function streamModelDownload (
@@ -839,7 +846,7 @@ async function streamModelDownload (
   })
   await writeRecord(res, {
     kind: 'start', backend: POCKET_BACKEND,
-    fileCount: MODEL_ARTIFACTS.length, totalBytes: MODEL_TOTAL_BYTES
+    fileCount: DOWNLOAD_ARTIFACTS.length, totalBytes: DOWNLOAD_TOTAL_BYTES
   })
 
   // `downloadModel` calls onProgress synchronously after each complete file. Serialize those tiny
@@ -876,7 +883,7 @@ async function streamModelDownload (
 
     await writeRecord(res, {
       kind: 'complete', ok: true, backend: POCKET_BACKEND, dir,
-      fileCount: MODEL_ARTIFACTS.length, totalBytes: MODEL_TOTAL_BYTES
+      fileCount: DOWNLOAD_ARTIFACTS.length, totalBytes: DOWNLOAD_TOTAL_BYTES
     })
   } catch (err) {
     // An HTTP status cannot change after `start`; the failure therefore MUST be a terminal record.
