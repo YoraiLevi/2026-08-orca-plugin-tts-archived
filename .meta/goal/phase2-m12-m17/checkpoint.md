@@ -63,3 +63,37 @@ that cannot fail and a check that cannot pass are the same mistake facing opposi
 average**, in a detached worktree (P40) · every number labelled · no audio without explicit
 opt-in (P31) · checkpoint before dispatch · **hosted CI on three OSes is the oracle; local
 green was wrong seven times in two hours on 2026-08-21.**
+
+## Self-control primitives — investigated 2026-08-22, all shell-accessible
+
+The 5h limit and self-compaction are handled without the author, using ORCA's own tools.
+`orca` resolves to `/opt/homebrew/bin/orca`, app v1.4.187, runtime ready.
+
+| Primitive | What it gives |
+|---|---|
+| `orca terminal read --terminal <h> --json` | **my own live screen.** `result.terminal.tail` is a line list; the status row reads e.g. `Misting… permission2 on · 2 monitors · ← 1 agent` |
+| `orca terminal send` | **types into a live terminal, including my own** — this is how earlier compactions were self-assigned. `/compact` can be self-issued rather than waited for |
+| `orca terminal wait --for tui-idle --timeout-ms N` | block until an agent terminal is idle, instead of polling |
+| `orca terminal list --json` | all 56 terminals with `preview` — one poll scans every worker |
+| ORCA Usage meter, via cua AX | the real percentages: `6% used / now` (5h), `39% used / 2d 15h` (weekly) |
+
+**The limit is detectable in plain text, with its reset time.** A terminal that hit it reads:
+`⎿ You've hit your session limit · resets 2:20pm (Asia/Jerusalem)`
+
+**Why this matters:** `orca terminal read` is a SHELL command, so a `Monitor` can poll it. That
+closes the gap where monitors ran bash but the usage meter was only reachable through an MCP
+call, which a monitor cannot make.
+
+### Monitors armed
+
+1. **usage thresholds** (`bhtn6c2t1`) — wakes at 2h, 3h30m, 4h15m wind-down, 4h35m hard stop,
+   measured from the window start recorded in the scratchpad. At each wake, read the real AX
+   meter rather than trusting the clock: the clock is the alarm, the meter is the evidence.
+2. **CI verdicts** (`bybta80yd`) — every hosted run as it completes. Local green was wrong seven
+   times in two hours on 2026-08-21; the hosted run is the oracle.
+3. **limit signal** (`b5jy39ady`) — greps every terminal's preview for a limit/reset message.
+
+### The residual gap, stated plainly
+
+All monitors die if the Claude process itself exits. Everything is pushed to GitHub
+continuously, so nothing is lost — but that single case needs one message from the author.
