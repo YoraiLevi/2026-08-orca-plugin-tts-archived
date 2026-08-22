@@ -6,6 +6,7 @@
  * a test run must not make a sound at the author's machine.
  */
 import { describe, it, expect } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -325,6 +326,70 @@ describe('R14-03 — /speak dispatches a backend-qualified voice key', () => {
         played: 'elsewhere', backend: 'spd-say', providerBackend: 'os', voice: null
       })
     } finally { await close() }
+  })
+})
+
+describe('R15-03 — default wiring, not two fakes restating dispatch', () => {
+  // 3a4db83 asserted routing against injected `routedProvider` fakes. Those rows stay green if
+  // `createLabServer()`'s default constructors never run, which is exactly how R15-03 survived
+  // a claimed fix: the suite restated the desired dispatch instead of watching the product's.
+  // This block posts the reviewer's payload to a server constructed with NO provider injection,
+  // under plain node (the resolver `pnpm voice-lab` uses), and asserts the PROVIDER THAT RAN.
+
+  it('POST pocket:eve never hands the qualified key to the OS provider', () => {
+    const report = runDefaultSpeakProbe({
+      pocketPrepare: 'ok',
+      payload: { text: 'This must use Pocket.', options: { voice: 'pocket:eve' } }
+    })
+    expect(report.status, JSON.stringify(report)).toBe(200)
+    expect(report.osCalls, 'OS provider ran for a Pocket-qualified voice').toEqual([])
+    expect(report.pocketCalls).toHaveLength(1)
+    expect(report.pocketCalls[0].id).toBe('pocket')
+    expect(report.pocketCalls[0].voice).toBe('eve')
+    expect(report.pocketCalls[0].voice).not.toContain(':')
+    const head = Array.isArray(report.body) ? report.body[0] : report.body
+    expect(head).toMatchObject({ backend: 'pocket', voice: 'eve' })
+    expect(head.degradation).toBeUndefined()
+  })
+
+  it('names the OS fallback when Pocket cannot prepare, and does not hand it pocket:eve', () => {
+    const report = runDefaultSpeakProbe({
+      pocketPrepare: 'throw',
+      prepareError: 'onnxruntime-node has no binary for this machine',
+      payload: {
+        text: 'This must use Pocket.',
+        options: { voice: 'pocket:eve' },
+        stream: false
+      }
+    })
+    expect(report.status).toBe(200)
+    expect(report.pocketCalls).toEqual([])
+    expect(report.osCalls).toHaveLength(1)
+    expect(report.osCalls[0].voice, 'OS must not receive the Pocket-qualified key').toBeNull()
+    expect(report.body).toMatchObject({
+      backend: 'os',
+      degradation: {
+        code: 'backend_unavailable', requestedBackend: 'pocket', servedBackend: 'os'
+      }
+    })
+    expect(report.body.degradation.reason).toMatch(/onnxruntime-node has no binary/)
+  })
+
+  it('names a Pocket voice that does not exist, without guessing another', () => {
+    const report = runDefaultSpeakProbe({
+      payload: {
+        text: 'Null resolver probe.',
+        options: { voice: 'pocket:nobody' },
+        stream: false
+      }
+    })
+    expect(report.pocketCalls).toEqual([])
+    expect(report.osCalls).toHaveLength(1)
+    expect(report.osCalls[0].voice).toBeNull()
+    expect(report.body.degradation).toMatchObject({
+      code: 'voice_unavailable', requestedBackend: 'pocket', requestedVoice: 'nobody',
+      servedBackend: 'os'
+    })
   })
 })
 
@@ -737,6 +802,85 @@ async function listen (server) {
   return {
     base: `http://127.0.0.1:${server.address().port}`,
     close: () => new Promise((ok) => server.close(ok))
+  }
+}
+
+/**
+ * Production-shaped /speak probe: plain node, default `createLabServer()` constructors, no
+ * injected providers. Prototype spies record which class ran; they never call `say` or ONNX.
+ */
+function runDefaultSpeakProbe (scenario) {
+  const script = `
+import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+
+const REPO = ${JSON.stringify(REPO_ROOT)}
+const scenario = ${JSON.stringify(scenario)}
+const { createLabServer } = await import(pathToFileURL(join(REPO, 'scripts/voice-lab.mjs')).href)
+const { OsSynthProvider } = await import(pathToFileURL(join(REPO, 'packages/providers/src/os-synth/index.ts')).href)
+const { PocketSynthProvider } = await import(pathToFileURL(join(REPO, 'packages/providers/src/pocket-synth/index.ts')).href)
+
+const osCalls = []
+const pocketCalls = []
+const fakeWav = { data: new Uint8Array([82, 73, 70, 70]), format: 'wav', sampleRate: 22_050, channels: 1 }
+
+OsSynthProvider.prototype.prepare = async () => {}
+OsSynthProvider.prototype.generate = async function * (text, opts = {}) {
+  osCalls.push({ id: this.id, text, voice: opts.voice ?? null })
+  yield fakeWav
+}
+if (scenario.pocketPrepare === 'ok') {
+  PocketSynthProvider.prototype.prepare = async () => {}
+} else if (scenario.pocketPrepare === 'throw') {
+  PocketSynthProvider.prototype.prepare = async () => {
+    throw new Error(scenario.prepareError)
+  }
+}
+PocketSynthProvider.prototype.generate = async function * (text, opts = {}) {
+  pocketCalls.push({ id: this.id, text, voice: opts.voice ?? null })
+  yield fakeWav
+}
+
+const dir = await mkdtemp(join(tmpdir(), 'vl-r15-03-'))
+const server = createLabServer({ modelDirectory: dir })
+await new Promise((ok) => server.listen(0, '127.0.0.1', ok))
+try {
+  const base = 'http://127.0.0.1:' + server.address().port
+  const res = await fetch(base + '/speak', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(scenario.payload)
+  })
+  const ctype = res.headers.get('content-type') || ''
+  const raw = await res.text()
+  const body = ctype.includes('ndjson')
+    ? raw.split('\\n').filter(Boolean).map((l) => JSON.parse(l))
+    : JSON.parse(raw)
+  process.stdout.write(JSON.stringify({
+    status: res.status, ctype, body, osCalls, pocketCalls
+  }) + '\\n')
+} finally {
+  await new Promise((ok) => server.close(ok))
+  await rm(dir, { recursive: true, force: true })
+}
+`
+  const r = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    cwd: REPO_ROOT,
+    env: { ...process.env, NODE_NO_WARNINGS: '1' },
+    timeout: 30_000
+  })
+  if (r.status !== 0) {
+    throw new Error(`default-wiring probe exited ${r.status}: ${(r.stderr || r.stdout || '').trim()}`)
+  }
+  const lines = r.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+  const last = lines.at(-1)
+  try {
+    return JSON.parse(last)
+  } catch {
+    throw new Error(`default-wiring probe stdout was not JSON:\n${r.stdout}`)
   }
 }
 

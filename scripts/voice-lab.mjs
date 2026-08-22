@@ -1133,6 +1133,8 @@ export function createLabServer ({
   const inbox = settingsPath ?? settingsPathFor()
   const pocketDir = modelDirectory ?? defaultModelDir()
   const prov = provider ?? new OsSynthProvider()
+  // Default constructors are load-bearing. Tests that inject both providers cannot see a
+  // regression that only happens when these run — that is how R15-03 survived 3a4db83.
   const pocketProv = pocketProvider ?? new PocketSynthProvider({ dir: pocketDir })
   const verifyInstall = verifyModelInstallImpl ?? ((dir) => verifyModelInstall(dir, {
     artifacts: verificationArtifacts,
