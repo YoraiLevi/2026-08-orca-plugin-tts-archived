@@ -24,14 +24,23 @@
 /** U+2581 LOWER ONE EIGHTH BLOCK — SentencePiece's space marker. */
 const SPACE = '▁'
 
-/** SentencePiece piece types, from `sentencepiece_model.proto`. */
-const enum PieceType {
-  NORMAL = 1,
-  UNKNOWN = 2,
-  CONTROL = 3,
-  USER_DEFINED = 4,
-  BYTE = 6,
-}
+/**
+ * SentencePiece piece types, from `sentencepiece_model.proto`.
+ *
+ * A plain frozen object, NOT a `const enum`. Node's strip-only type stripping rejects `const enum`
+ * outright — it is the one TypeScript construct that is not erasable — and this file is loaded
+ * from plain node by `scripts/pocket-e2e.mjs` and by the Voice Lab server. PITFALLS **P37** is the
+ * same species: vitest resolves and compiles things the resolver that actually SHIPS does not, so
+ * a suite can be green over a tree that cannot boot. Caught here by running the oracle under plain
+ * node, which is exactly why it runs there.
+ */
+const PieceType = {
+  NORMAL: 1,
+  UNKNOWN: 2,
+  CONTROL: 3,
+  USER_DEFINED: 4,
+  BYTE: 6,
+} as const
 
 export interface Piece {
   readonly piece: string
