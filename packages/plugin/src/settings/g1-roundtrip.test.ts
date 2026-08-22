@@ -207,7 +207,8 @@ interface Harness {
   readonly provider: RecordingProvider
   readonly logs: string[]
   readonly notifications: string[]
-  readonly settingsSets: Record<string, unknown>[]
+  /** Every `settings.set` call the plugin made, as ORCA delivers them: one key per call. */
+  readonly settingsSets: { key: string; value: unknown }[]
   readonly commands: Map<string, (args?: unknown) => unknown>
 }
 
@@ -240,7 +241,7 @@ async function boot(opts: HarnessOptions = {}): Promise<Harness> {
   const commands = new Map<string, (args?: unknown) => unknown>()
   const logs: string[] = []
   const notifications: string[] = []
-  const settingsSets: Record<string, unknown>[] = []
+  const settingsSets: { key: string; value: unknown }[] = []
   const mirror = opts.mirror ?? null
   const orca: OrcaApi = {
     commands: { register: (id, fn) => { commands.set(id, fn) } },
@@ -252,8 +253,22 @@ async function boot(opts: HarnessOptions = {}): Promise<Harness> {
         // The mirror answers with NOTHING by default, so the only source of tuning in these tests
         // is the file on disk. A mirror holding the same values would let every equality below
         // pass without the file being read at all.
+        // ORCA's real shapes, read from src/shared/plugins/plugin-host-api.ts:88-91 — NOT our
+        // guess. `settings.get` answers `{ settings: {...} }`; `settings.set` takes ONE
+        // `{ key, value }` per call and answers `{ ok: true }`. A fake that accepted a whole
+        // record would verify this plugin against its own assumption, which is the P36 shape
+        // pointed at a host API (and the assumption was in fact wrong).
         if (action === 'settings.get') return mirror === null ? null : { settings: mirror }
-        if (action === 'settings.set') settingsSets.push(params as Record<string, unknown>)
+        if (action === 'settings.set') {
+          const key = params?.['key']
+          const value = params?.['value']
+          if (typeof key !== 'string' || key.length === 0 || key.length > 256) {
+            throw new Error(`settings.set rejected: bad key ${JSON.stringify(key)}`)
+          }
+          if (!('value' in (params ?? {}))) throw new Error('settings.set rejected: no value')
+          settingsSets.push({ key, value })
+          return { ok: true }
+        }
         return {}
       }
     },
@@ -556,13 +571,25 @@ describe('G1 — degradation: an unusable settings file never silences the plugi
     expect(h.settingsSets, 'a refused file must never be mirrored back over last-known-good').toEqual([])
   })
 
-  it('CONTROL: a GOOD file IS mirrored, so the row above is about the refusal and not about mirroring being dead', async () => {
+  // 40 s so that `until()`'s own 30 s HANG backstop is what fires, not vitest's 5 s default. P40's
+  // distinction: this is a hang-detector with margin, not a budget inflated until a race stops
+  // losing — the mirror write lands in milliseconds when it works at all. Measured with the bulk
+  // `settings.set` shape in place, the 5 s default produced a bare "Test timed out" and threw away
+  // the one sentence that names the cause.
+  it('CONTROL: a GOOD file IS mirrored, so the row above is about the refusal and not about mirroring being dead', { timeout: 40_000 }, async () => {
     const h = await boot({ jsonc: labJsonc(valuesWith({}), 9) })
-    await until(() => h.settingsSets.length > 0, 'the mirror write')
-    const written = (h.settingsSets[0]!['settings'] ?? {}) as Record<string, unknown>
+    await until(() => h.settingsSets.some((w) => w.key === '__revision'), 'the mirror write')
+    const written = Object.fromEntries(h.settingsSets.map((w) => [w.key, w.value]))
     expect(written['__revision'],
       'the mirror must carry the revision (011 1.2, R7-27), or a starter file rebuilt from it restarts below the listener\'s own file')
       .toBe(9)
     expect(written['normalize.pathStyle']).toBe('spoken')
+    // One key per call is ORCA's schema (plugin-host-api.ts:90), so a mirror of the whole schema
+    // is many calls, not one. Asserting the COUNT is what makes this test notice a regression back
+    // to the bulk shape I originally guessed — a single `{ settings: … }` call would satisfy the
+    // two assertions above if the fake were lenient, and satisfy nothing in the real host.
+    expect(h.settingsSets.length,
+      'the mirror should be one call per field plus the envelope keys, not one bulk call')
+      .toBeGreaterThan(40)
   })
 })

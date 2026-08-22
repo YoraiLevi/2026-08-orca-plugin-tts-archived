@@ -96,13 +96,28 @@ export interface Host {
    * ORCA's `settings:own` KV — our **mirror**, never the source of truth (011 section 1.2). It is
    * deleted on uninstall and unreachable from the Voice Lab, which is exactly why the inbox exists.
    *
-   * **The parameter shape here is NOT verified against ORCA's source**, and P0/P18 say to state
-   * that rather than let a defensive wrapper hide it: this tree has no ORCA checkout at this
-   * commit, and the only evidence available is that thirteen host methods exist and that
-   * `settings.get`/`.set` are `panel: false` and return "plugin's own settings"
-   * (`docs/.research/orca-plugin-api.md` "Thirteen methods"). So the mirror WRITE is verified BY
-   * EFFECT instead of by belief: `settingsSet` reads back what it wrote and reports a mismatch,
-   * which is the only way a wrong param name becomes visible rather than silent.
+   * **Shapes READ from ORCA's source, not guessed** — `src/shared/plugins/plugin-host-api.ts:88-91`
+   * at the checkout in `~/source/orca`:
+   *
+   *     const settingsGetParams  = z.object({}).strict().optional()
+   *     const settingsGetResult  = z.object({ settings: z.record(z.string(), pluginJsonValueSchema) })
+   *     const settingsSetParams  = z.object({ key: storageKeySchema, value: pluginJsonValueSchema })
+   *     const settingsSetResult  = z.object({ ok: z.literal(true) })
+   *
+   * **`settings.set` takes ONE KEY AT A TIME.** The first version of this file guessed
+   * `{ settings: <whole record> }` and would have been rejected by that schema on every call, so
+   * the mirror would never have been written at all — silently, because the rejection surfaces as
+   * a failed call and nothing downstream depends on the mirror until the day the inbox is gone.
+   * 011 section 1.2's "one key per field" was right and the guess was wrong; this is P0's rule
+   * paying out (do not trust a plugin-API claim with no `file:line`).
+   *
+   * Keys must be 1-256 chars and not `__proto__` / `prototype` / `constructor`
+   * (`plugin-host-api.ts:60-65`); our dotted ids and the three `__`-prefixed envelope keys all
+   * pass. The store caps a plugin at 1,024 keys (`plugin-storage-store.ts:83`); the schema is 47.
+   *
+   * The read-back verification stays, and is now load-bearing for a different reason: the store
+   * returns `{ ok: false, error }` rather than throwing when it hits a cap
+   * (`plugin-storage-store.ts:84`, `:89`), so an `await` that does not reject proves nothing.
    */
   settingsGet(): Promise<Readonly<Record<string, unknown>> | null>
   settingsSet(values: Record<string, unknown>): Promise<boolean>
@@ -201,7 +216,20 @@ export function makeHost(
     /** Returns whether the write was OBSERVED to land, not whether the call returned. */
     async settingsSet(values: Record<string, unknown>): Promise<boolean> {
       try {
-        await orca.host.call('settings.set', { settings: values })
+        // ONE KEY PER CALL — that is the host's schema, not a style choice. Sequential rather than
+        // concurrent: the store serializes to one JSON file and re-reads it per write
+        // (`plugin-storage-store.ts:82`), so a burst races itself for no gain.
+        for (const [key, value] of Object.entries(values)) {
+          const r = await orca.host.call('settings.set', { key, value })
+          // `{ ok: false, error }` is a SUCCESSFUL call reporting a refused write — a cap hit, a
+          // revoked capability. Only reading the rejection cannot see it (site 18's shape again).
+          const ok = (r as { ok?: unknown } | undefined)?.ok
+          if (ok === false) {
+            const why = (r as { error?: unknown }).error
+            hooks.onSettingsFailure?.({ op: 'set', reason: `${key}: ${String(why ?? 'refused')}` })
+            return false
+          }
+        }
       } catch (err) {
         hooks.onSettingsFailure?.({ op: 'set', reason: String(err) })
         return false
