@@ -65,6 +65,11 @@ Pinned detached worktree at `f029e6f`, after `pnpm install --frozen-lockfile`:
   behaving declarations versus the contract baseline 34/37 at `6049c26`, load 11.01**: the three
   old survivors are now killed and the three new G2 claims are killed. Equivalent mutants retain
   their declared SURVIVED verdicts.
+- Built-CLI execution probe — the first direct run went RED with `SyntaxError` because the bundle
+  contained two shebangs. `scripts/build.mjs` now executes the emitted CLI headlessly and requires
+  its named disconnected state. Detached SHA `73dfd8d`, load average **3.43** `[measured-here]`:
+  build PASS, **4 files / 0.18 MB**, activation smoke PASS, emitted CLI executes and exits 1 after
+  rendering `control: not connected` (the expected unavailable result, not a crash).
 
 ## Deferred, with reasons
 
