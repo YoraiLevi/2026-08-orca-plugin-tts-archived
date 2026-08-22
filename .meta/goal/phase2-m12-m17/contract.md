@@ -48,7 +48,9 @@ Cap 3-4 concurrent agents. v1 decisions reopenable with evidence.
       **The perceptual half — "you can tell who is speaking without being told" — is the
       author's and is a legitimate terminal state for that half.**
 
-- [ ] **G7 — M17 re-scoped against the lifted constraint.** The recorded blockers were (a) no
+- [x] **G7 — M17 re-scoped.** ✅ **MET — a measured answer, and the old conclusion did not survive re-derivation.** The 50 MB cap **never blocked M17a**, which is option E, push-to-talk, shipping no model. It blocked **M17c**: ORCA's smallest English model is 87.7 MiB and Moonshine tiny 119.0 MiB, against a VAD model at ~1–2 MB. R7-34 had already found the binary cost is owed by TTS anyway, so *the delta STT adds is the model download and nothing else* — with the cap gone that was the last objection, and **M17c moves from refused-on-size to unscored**. Confirmed unchanged at source: `dictation`/`speech` appear nowhere in `plugin-host-api.ts`, so ORCA's STT stays unreachable — reachability, not the panel. Written up as `docs/design/013-voice-input.md` section 0. Original text follows.
+
+- [ ] **G7 original —** The recorded blockers were (a) no
       local STT under a 50 MB cap and (b) ORCA's STT is main-process only. **(a) is void — the
       author has lifted the size cap.** Re-examine (b) by reading ORCA's source: main-process
       only may still be reachable via a command rather than a direct call.

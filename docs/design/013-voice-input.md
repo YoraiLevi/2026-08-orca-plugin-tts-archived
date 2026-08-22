@@ -86,6 +86,33 @@ and the legacy `System.Speech` recognizer **[documented]**. **Stock Linux ships 
 
 ---
 
+## 0. Amendment 2026-08-22 — the author lifted the 50 MB cap, and it changes exactly one verdict
+
+Re-derived from source rather than inherited, because "M17 cannot be built" had been repeated
+from this document without re-checking which milestone it applied to.
+
+**What the cap was actually blocking.** Not M17a. M17a is option E — push-to-talk plus a
+listener-invoked recap — and it ships **no model at all**. The cap gated **M17c**, the own-STT
+stack, where the smallest English model ORCA itself ships is **87.7 MiB** `[documented]` and
+Moonshine tiny is **119.0 MiB** `[documented]` — 1.75× and 2.4× a 50 MB cap. Section 8 above
+records a VAD model at **~1–2 MB**, comfortably inside it even before the lift.
+
+**So the lift changes M17c's verdict and nothing else.** And R7-34 had already moved that verdict
+halfway: the `win-arm64` binary, its extraction and the signing question are **already owed by the
+default TTS engine**, so *"the delta STT actually adds is the model download and nothing else."*
+With the cap gone, that delta is the whole remaining objection. **M17c should be re-scored, not
+re-refused.**
+
+**What has NOT changed, and is confirmed at source.** ORCA's own STT stays unreachable from a
+plugin. `dictation` and `speech` appear nowhere in
+`~/source/orca/src/shared/plugins/plugin-host-api.ts` — checked by grep on 2026-08-22, the same
+file whose `settingsSetParams = z.object({ key, value })` at `:90` was verified the same hour.
+T170's conclusion holds and its stated reason was right: **reachability, not the panel.**
+
+**Consequence for the roadmap.** M17a was never blocked by the cap and remains buildable today;
+its cost is push-to-talk plumbing plus T173's close condition, not a model. M17b (option C, a
+recognizer behind a setting) is unchanged. M17c moves from *refused on size* to *unscored*.
+
 ## 1. What voice input actually has to do here
 
 It is worth being precise, because the milestone's name hides a split that decides everything.
