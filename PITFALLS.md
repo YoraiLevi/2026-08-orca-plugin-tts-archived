@@ -102,7 +102,21 @@ first mutant for a reason that has nothing to do with the mutant, and reads as a
 Four seconds; reported by the agent who hit it.
 
 Develop there, then copy finished files back for a single short `git commit -- <paths>` window.
-Costs one install; removes the whole class. Found by an agent that noticed a mutant in a file
+Costs one install; removes the whole class.
+
+**And the restore is NOT reliable, which is the part that makes the worktree mandatory rather
+than tidy.** The harness restores each file in a `finally` — and **a `finally` does not run when
+the process is killed**. Verified the hard way on 2026-08-22: a run stopped mid-flight left two
+live mutants in the shared tree — `decoders.ts` with the thinking/`tool_use` guards removed, so
+the model's reasoning would have been SPOKEN ALOUD (principle VIII), and `os-synth/index.ts` with
+`c.kill('SIGKILL')` replaced by `void c`, so barge-in was dead. Committing either would have
+shipped a severe defect under an innocent message.
+
+So the shared-tree hazard is not only "a peer edits during the window". It is that **any
+interruption — a timeout, a kill, a crash — leaves the mutation applied**, and the next `git
+commit` picks it up. The agent who wrote this entry walked into it twice within three hours of
+writing it. Knowing the failure mode by name does not prevent it; running somewhere disposable
+does. Found by an agent that noticed a mutant in a file
 it did not put there, rather than by anything failing.
 
 ## P40 — A test that arranges its precondition by out-running the system fails for reasons unrelated to the code, and the misdiagnosis is worse than the flake
