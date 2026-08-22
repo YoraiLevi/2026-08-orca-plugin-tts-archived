@@ -187,42 +187,29 @@ export class SentencePieceUnigram {
   }
 
   /**
-   * Viterbi over code points, maximising the summed piece score.
+   * Encode as Python `sentencepiece.SentencePieceProcessor.Encode` does it.
    *
-   * Two details are load-bearing and both were settled by the oracle rather than by reasoning:
+   * **That is `Model::EncodeOptimized`, not `Lattice::Viterbi`, and the difference was
+   * measurable.** `d6f6c80` ported the lattice: one node per candidate, first-wins among
+   * `end_nodes_` on a float32 tie. That took an 11,344-input corpus from 17 disagreements to 1
+   * (`Zggggg`). Round 16 then found seven more of the same class on a 728-input `Xyyyyy` grid —
+   * the lattice remainder is not a singleton, and Python never ran Viterbi for `Encode()` at all.
+   *
+   * `EncodeOptimized` (unigram_model.cc) keeps **one best path ending at each position**. For
+   * each start it walks matching pieces shortest-first and replaces the path ending at
+   * `start + length` only when `starts_at == -1` (first to arrive) or the candidate score is
+   * strictly greater. Ties therefore go to the earlier start — the longer piece — which is the
+   * opposite of "first node in `end_nodes_`". `>` and `>=` on the lattice have both been
+   * measured (17 and 21 disagreements, opposite directions) and are not this fix.
+   *
+   * Two other details are load-bearing and both were settled by the oracle rather than by
+   * reasoning:
    *
    *  - **empty input is empty output.** The dummy prefix would otherwise make `''` encode to
    *    `[▁]`, which is one spurious token of silence at the head of every empty utterance.
-   *  - **byte fallback is offered at every position**, not only where nothing matched. A code
-   *    point that has its own piece can still be cheaper as bytes in an unusual context, and the
-   *    reference lattice offers both paths.
-   */
-  /**
-   * Encode, as SentencePiece's lattice does it.
-   *
-   * **This is a faithful port, not an equivalent algorithm, and the difference was measurable.**
-   * The first version was an ordinary Viterbi keeping one best score per position with float64
-   * accumulation. It agreed with upstream on 11,327 of 11,344 inputs and disagreed on runs of a
-   * repeated letter — `Zccc` came out `['▁Z','c','cc']` against upstream's `['▁Z','cc','c']`
-   * (R14-04). Two theories were tested and both were WRONG: flipping `>` to `>=` moved the count
-   * to 21 in the opposite direction, and `c + cc === cc + c` in both float64 and float32 so it
-   * looked like it could not be precision.
-   *
-   * What the probe actually showed is that upstream's answer is not consistent even between
-   * letters — `Zbbb` is `['▁Z','b','bb']` while `Zccc` is `['▁Z','cc','c']`. No tie-break rule
-   * produces both. What produces both is **float32 accumulation**, where the ORDER of additions
-   * changes the sum: `(B + b) + bb` and `(B + bb) + b` are not the same float32 number even though
-   * `b + bb === bb + b`. The isolated comparison that seemed to rule precision out was measuring
-   * the wrong thing.
-   *
-   * So, exactly as `lattice.cc` does it:
-   *
-   *  - every candidate piece is a NODE with its own best predecessor and its own backtrace score,
-   *    rather than one best score per position;
-   *  - for each node starting at `pos`, the best node ENDING at `pos` is chosen, with the first
-   *    one encountered winning a tie;
-   *  - and every addition is rounded to float32 by `Math.fround`, because the reference stores and
-   *    accumulates `float`.
+   *  - **byte fallback is a post-process of UNK**, not a lattice alternative scored per byte.
+   *    Unknown characters are one UNK node at `min_score - 10`; the processor then emits one
+   *    byte piece per UTF-8 byte. Scoring `unk * nbytes` in the lattice is a different path.
    */
   encode(text: string): number[] {
     if (text === '') return []
@@ -230,87 +217,91 @@ export class SentencePieceUnigram {
     const n = chars.length
     if (n === 0) return []
 
-    interface Node {
-      readonly begin: number
-      readonly end: number
-      readonly id: number
-      readonly score: number
+    interface Best {
       /** Several ids when this node is a byte-fallback expansion of one character. */
-      readonly ids: readonly number[]
-      prev: Node | null
-      backtrace: number
+      ids: readonly number[]
+      score: number
+      startsAt: number
     }
 
-    const beginNodes: Node[][] = Array.from({ length: n + 1 }, () => [])
-    const endNodes: Node[][] = Array.from({ length: n + 1 }, () => [])
-    const insert = (node: Node): void => {
-      beginNodes[node.begin]?.push(node)
-      endNodes[node.end]?.push(node)
-    }
+    // BOS lives at index 0 with score 0 and `startsAt === -1`, matching EncodeOptimized's
+    // default `BestPathNode`. Every later index is filled left-to-right; a single-character
+    // piece or an UNK node always advances by one, so no position is skipped.
+    const best: Best[] = Array.from({ length: n + 1 }, () => ({
+      ids: [], score: 0, startsAt: -1,
+    }))
 
-    // Populate, begin position ascending and piece length ascending within each — the order the
-    // reference's trie walk produces, and the order that decides every tie below.
-    for (let i = 0; i < n; i++) {
-      const limit = Math.min(this.#maxPieceLen, n - i)
-      let candidate = ''
+    // EncodeOptimized rescales when the running score would overflow a float. TTS captions
+    // never reach ±1e5, but omitting it is a second algorithm, not a simplification.
+    const kScoreResetThreshold = 100000
+    let maxFrontier = 0
+    for (let startsAt = 0; startsAt < n; startsAt++) {
+      const here = best[startsAt]
+      if (here === undefined) throw new Error(`tokenizer read past the end of the input at ${startsAt}`)
+      let till = here.score
+      if (till < -kScoreResetThreshold || till > kScoreResetThreshold) {
+        const offset = till
+        for (let i = startsAt; i <= maxFrontier; i++) {
+          const node = best[i]
+          if (node !== undefined && (i === startsAt || node.startsAt !== -1)) {
+            node.score = Math.fround(node.score - offset)
+          }
+        }
+        till = 0
+      }
+
       let hasSingleChar = false
+      const limit = Math.min(this.#maxPieceLen, n - startsAt)
+      let candidate = ''
       for (let len = 1; len <= limit; len++) {
-        candidate += this.#charAt(chars, i + len - 1)
+        candidate += this.#charAt(chars, startsAt + len - 1)
         const hit = this.#usable.get(candidate)
         if (hit === undefined) continue
+        maxFrontier = Math.max(maxFrontier, startsAt + len)
+        const candScore = Math.fround(hit.score + till)
+        const target = best[startsAt + len]
+        if (target === undefined) continue
+        // First-wins: EncodeOptimized replaces only when empty or strictly greater.
+        if (target.startsAt === -1 || candScore > target.score) {
+          target.score = candScore
+          target.startsAt = startsAt
+          target.ids = [hit.id]
+        }
         if (len === 1) hasSingleChar = true
-        insert({
-          begin: i, end: i + len, id: hit.id, ids: [hit.id],
-          score: Math.fround(hit.score), prev: null, backtrace: 0,
-        })
       }
-      // AFTER the matches, not before, exactly as `PopulateNodes` does it — and only when no
-      // single-character piece matched, which is the reference's `has_single_node`. Insertion
-      // order IS the tie-break, so putting this first silently changes which segmentation wins.
+
+      // AFTER the matches, and only when no single-character piece matched — the
+      // reference's `has_single_node`. UNK is scored once per character, not per byte.
       if (!hasSingleChar) {
-        const one = this.#charAt(chars, i)
+        const one = this.#charAt(chars, startsAt)
         const bytes = Buffer.from(one, 'utf8')
         const ids: number[] = []
         for (const b of bytes) {
           const id = this.#byteId[b] ?? -1
           ids.push(id >= 0 ? id : this.unkId)
         }
-        insert({
-          begin: i, end: i + 1, id: ids[0] ?? this.unkId, ids,
-          score: Math.fround(this.#unkPenalty * bytes.length), prev: null, backtrace: 0,
-        })
-      }
-    }
-
-    // The forward pass. `begin === 0` has no predecessor and starts at zero, which is what the
-    // reference's BOS node provides.
-    for (let pos = 0; pos <= n; pos++) {
-      for (const rnode of beginNodes[pos] ?? []) {
-        if (pos === 0) { rnode.prev = null; rnode.backtrace = rnode.score; continue }
-        let best: Node | null = null
-        let bestScore = 0
-        for (const lnode of endNodes[pos] ?? []) {
-          const score = Math.fround(lnode.backtrace + rnode.score)
-          if (best === null || score > bestScore) { best = lnode; bestScore = score }
+        maxFrontier = Math.max(maxFrontier, startsAt + 1)
+        const target = best[startsAt + 1]
+        const candScore = Math.fround(this.#unkPenalty + till)
+        if (target !== undefined && (target.startsAt === -1 || candScore > target.score)) {
+          target.score = candScore
+          target.startsAt = startsAt
+          target.ids = ids
         }
-        rnode.prev = best
-        rnode.backtrace = best === null ? Number.NEGATIVE_INFINITY : bestScore
       }
     }
-
-    // Pick the best node ending at the end, then walk back. Same tie rule as above.
-    let tail: Node | null = null
-    let tailScore = 0
-    for (const lnode of endNodes[n] ?? []) {
-      if (tail === null || lnode.backtrace > tailScore) { tail = lnode; tailScore = lnode.backtrace }
-    }
-    if (tail === null) throw new Error('no path through the tokenizer lattice')
 
     const out: number[] = []
-    for (let node: Node | null = tail; node !== null; node = node.prev) {
+    let endsAt = n
+    while (endsAt > 0) {
+      const node = best[endsAt]
+      if (node === undefined || node.startsAt < 0) {
+        throw new Error('no path through the tokenizer lattice')
+      }
       for (let k = node.ids.length - 1; k >= 0; k--) out.push(node.ids[k] ?? this.unkId)
+      endsAt = node.startsAt
     }
-    return out.reverse()
+    return out.toReversed()
   }
 
   /**

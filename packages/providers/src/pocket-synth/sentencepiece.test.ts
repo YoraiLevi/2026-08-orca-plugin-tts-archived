@@ -74,7 +74,7 @@ describe('SentencePiece unigram — against the Python reference', () => {
   })
 
   /**
-   * R14-04, closed but for one case, and the route there is worth more than the result.
+   * R14-04 / R16-04.
    *
    * The defect: our Viterbi and SentencePiece's disagreed on runs of a repeated letter — `Zccc`
    * was `['▁Z','c','cc']` here and `['▁Z','cc','c']` upstream. **Two confident theories were
@@ -88,11 +88,15 @@ describe('SentencePiece unigram — against the Python reference', () => {
    * `(B + b) + bb` and `(B + bb) + b` are different float32 numbers even though `b + bb === bb + b`.
    * The isolated comparison that "ruled out precision" was measuring the wrong expression.
    *
-   * So `encode` is now a faithful port of `lattice.cc`: nodes carrying their own predecessor and
-   * backtrace rather than one best per position, insertion order as the tie-break, the unknown node
-   * inserted AFTER the trie matches, and `Math.fround` on every addition.
+   * Porting `Lattice::Viterbi` took that corpus from 17 disagreements to 1 (`Zggggg`). Round 16
+   * then built a 728-input `Xyyyyy` grid and found seven more of the same shape — the remainder
+   * is a CLASS, not a singleton. The 11,344 figure was a statement about that corpus, not about
+   * the tokenizer. Python `Encode()` does not call `Lattice::Viterbi` at all: it calls
+   * `Model::EncodeOptimized`, which keeps one best path per UTF-8 position (first-wins on `>`).
+   * The lattice remainder is the documented "almost identical" gap between those two algorithms.
    *
-   * **11,343 / 11,344 exact**, from 11,327. The one survivor is below.
+   * Expected ids come from Python `sentencepiece`, pasted. A special-case of `Zggggg` would
+   * make a singleton row green and leave the rest of the class speaking the wrong ids.
    */
   it('R14-04: the cases that started it now match upstream exactly', () => {
     expect(sp.encode('Zccc')).toEqual([1557, 3169, 440])
@@ -101,16 +105,37 @@ describe('SentencePiece unigram — against the Python reference', () => {
     expect(sp.encode('Zbbb')).toEqual([1557, 512, 1363])
   })
 
-  it.fails('R14-04 remainder: one five-letter run still resolves the other way', () => {
-    // `Zggggg`: upstream ['▁Z','gg','g','gg'], ours ['▁Z','g','gg','gg']. Traced by hand to a
-    // float32 tie at the final position where both candidates round to -34.59474182128906, so the
-    // winner is decided purely by node insertion order in `end_nodes_`. One residual ordering
-    // difference remains and it is NOT worth a fifth guess: the honest position is that this is
-    // measured, bounded, and open.
-    //
-    // Blast radius, measured rather than asserted: 1 in 11,344 over an adversarial corpus, and
-    // 0 in 180 realistic inputs. `it.fails` so it goes RED the day somebody closes it.
-    expect(sp.encode('Zggggg')).toEqual([1557, 1129, 453, 1129])
+  /**
+   * Minimized members of the `X + y.repeat(5)` class that `Lattice::Viterbi` still loses and
+   * `EncodeOptimized` wins. Python ids, pasted. The first version of R14-04 named only `Zggggg`;
+   * a row that names one member cannot fail for the other seventeen.
+   */
+  const REMAINDER_CLASS: { text: string, ids: number[] }[] = [
+    { text: 'fggggg', ids: [521, 1129, 453, 1129] },
+    { text: 'jbbbbb', ids: [260, 1000, 1363, 512, 1363] },
+    { text: 'nzzzzz', ids: [953, 1818, 690, 1818] },
+    { text: 'qzzzzz', ids: [260, 3937, 1818, 690, 1818] },
+    { text: 'uzzzzz', ids: [260, 483, 1818, 690, 1818] },
+    { text: 'vzzzzz', ids: [1451, 1818, 690, 1818] },
+    { text: 'wbbbbb', ids: [859, 1363, 512, 1363] },
+    { text: 'Gzzzzz', ids: [618, 1818, 690, 1818] },
+    { text: 'Hccccc', ids: [993, 3169, 440, 3169] },
+    { text: 'Hzzzzz', ids: [993, 1818, 690, 1818] },
+    { text: 'Lzzzzz', ids: [963, 1818, 690, 1818] },
+    { text: 'Qbbbbb', ids: [260, 2175, 1363, 512, 1363] },
+    { text: 'Qooooo', ids: [260, 2175, 1339, 393, 1339] },
+    { text: 'Szzzzz', ids: [446, 1818, 690, 1818] },
+    { text: 'Uggggg', ids: [928, 1129, 453, 1129] },
+    { text: 'Vzzzzz', ids: [871, 1818, 690, 1818] },
+    { text: 'Wzzzzz', ids: [940, 1818, 690, 1818] },
+    { text: 'Zggggg', ids: [1557, 1129, 453, 1129] },
+  ]
+
+  it('R16-04 remainder is a class of lattice ties, not Zggggg alone', () => {
+    const disagreed = REMAINDER_CLASS.filter(
+      ({ text, ids }) => JSON.stringify(sp.encode(text)) !== JSON.stringify(ids),
+    )
+    expect(disagreed.map((d) => d.text), 'members that still disagree with Python').toEqual([])
   })
 
   it('R14-04 blast radius: no realistic input disagrees, including elongated words', () => {
