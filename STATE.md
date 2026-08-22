@@ -13,8 +13,19 @@
 
 ## IN PROGRESS — one task, named, per R041
 
-**`PV-081` — R16-05/R16-06: the UI probe is calibrated to the FALLBACK.** Owned by an agent
-(`PV-probe`) that may have been cut off by the 5-hour window; check its file before redoing it.
+**`PV-081` — R16-05/R16-06: the UI probe is calibrated to the FALLBACK.**
+
+**Both agents were cut off mid-task and their work is PRESERVED, NOT REVIEWED, at `87f8a57`.**
+It was tested before committing — 967 passing, typecheck 0, lint 0 — so the tree is safe to resume
+from, but neither agent reported and neither change is verified.
+
+**First three things on resume, in this order:**
+1. `orca orchestration check` — their reports are in the mailbox, and reading `git log` instead has
+   already cost this project a critical defect once.
+2. `node scripts/ui-probe.mjs --prove`, **and then run it with the model absent** — that is the
+   entire point of R16-05 and the reason the author cannot yet be told the picker works.
+3. Re-derive the tokenizer's true disagreement rate over a corpus its fixer did not choose. The
+   `it.fails` rows are gone; whether the class is CLOSED or merely BOUNDED is unknown.
 
 - **Gate:** with Pocket ABSENT, `node scripts/ui-probe.mjs` must NOT report U6–U9 green. Today it
   does, which means the nine green checks I reported to the author twice **do not prove a neural
