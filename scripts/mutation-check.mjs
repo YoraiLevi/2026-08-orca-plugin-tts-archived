@@ -348,7 +348,21 @@ const MUTANTS = [
     from: '        this.#truncatedRetries.set(file, spent + 1)',
     to: '        this.#truncatedRetries.set(file, MAX_TRUNCATED_RETRIES)',
     test: 'packages/plugin/src/huddle/huddle.test.ts',
-    // Was a KNOWN GAP surviving on Linux; closed 2026-08-22 by changing what the test asserts.
+    // Was a KNOWN GAP surviving on Linux; CLOSED and VERIFIED ON LINUX 2026-08-22.
+    //
+    // `39/40 mutants behaved as declared` in a node:24-bookworm container with a real
+    // `pnpm install` — this mutant `killed` `[measured-here]`. Every earlier claim about it was
+    // reasoned from macOS plus a hypothesis about `fs.watch`; this is the first time the thing
+    // itself was run on the platform in question.
+    //
+    // Two corrections fall out of that, and both are about the reader rather than the code:
+    //
+    //   1. My hypothesis was WRONG. In isolation the old test already killed this mutant on
+    //      Linux — `LINUX-SPOKEN: []`, nothing spoken. The post-dispose append does NOT reach a
+    //      live watcher there. I had built two fixes on that story, one of which broke macOS.
+    //   2. The CI verdict I kept re-reading was from `ab66ec2`, BEFORE the code-path assertion
+    //      landed. A stale run treated as a live failure — the same shape as the stale usage
+    //      meter, and the reason a number needs its commit attached before it means anything.
     //
     // The row used to prove itself by outcome — "the reply arrived" — which is only evidence on a
     // platform where the retry is the ONLY thing that could have delivered it. On Linux it is not:
