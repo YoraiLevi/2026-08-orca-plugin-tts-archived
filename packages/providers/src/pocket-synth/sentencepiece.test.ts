@@ -74,43 +74,43 @@ describe('SentencePiece unigram — against the Python reference', () => {
   })
 
   /**
-   * R14-04, confirmed independently and left OPEN on purpose.
+   * R14-04, closed but for one case, and the route there is worth more than the result.
    *
-   * `it.fails` is this repo's convention for a contract that is known broken: the row is green
-   * *because* the defect is present, and turns RED the moment somebody fixes it. That is worth
-   * more than a comment, because a comment cannot notice.
+   * The defect: our Viterbi and SentencePiece's disagreed on runs of a repeated letter — `Zccc`
+   * was `['▁Z','c','cc']` here and `['▁Z','cc','c']` upstream. **Two confident theories were
+   * measured and both were wrong.** Flipping `>` to `>=` moved an 11,344-input corpus from 17
+   * disagreements to 21, in the opposite direction. And `c + cc === cc + c` in float64 AND
+   * float32, which appeared to rule out precision entirely.
    *
-   * **What is wrong.** Our Viterbi and SentencePiece's disagree when a run of one repeated letter
-   * creates an EXACT score tie between two segmentations. `Zccc` is `['▁Z','cc','c']` upstream and
-   * `['▁Z','c','cc']` here. `c` scores -7.24249267578125 and `cc` -10.507535934448242, and
-   * `c + cc === cc + c` in both float64 and float32 — so this is NOT a precision defect and the
-   * float32 theory was tested and rejected. It is a tie-break ORDER difference, and the fix is a
-   * faithful port of SentencePiece's lattice (nodes carry their own best predecessor; ties resolve
-   * by insertion order of `end_nodes_`), not a comparison operator. Flipping `>` to `>=` was tried
-   * and made it WORSE — 17 disagreements became 21, in the opposite direction.
+   * What broke it open was probing upstream instead of reasoning about it: `Zbbb` is
+   * `['▁Z','b','bb']` while `Zccc` is `['▁Z','cc','c']`. **No tie-break rule produces both.** What
+   * produces both is float32 accumulation, where the ORDER of additions changes the sum —
+   * `(B + b) + bb` and `(B + bb) + b` are different float32 numbers even though `b + bb === bb + b`.
+   * The isolated comparison that "ruled out precision" was measuring the wrong expression.
    *
-   * **How wrong, measured.** Over an 11,344-input differential corpus against Python
-   * `sentencepiece`: **11,327 exact, 17 disagreements, and all 17 are runs of a single repeated
-   * character** (`Zccc`, `Zbbbbb`, `Zzzzzzzz`). Over 180 realistic inputs — every line of every
-   * committed fixture plus sixteen deliberately elongated words like `hmmm`, `nooo`, `shhh` —
-   * **180/180 exact**. So the blast radius today is text this product does not produce, which is
-   * why it is recorded and scheduled rather than blocking the phase.
+   * So `encode` is now a faithful port of `lattice.cc`: nodes carrying their own predecessor and
+   * backtrace rather than one best per position, insertion order as the tie-break, the unknown node
+   * inserted AFTER the trie matches, and `Math.fround` on every addition.
    *
-   * **Why it still matters.** Token ids are model inputs. Equal decoded text does not make the
-   * audio equivalent, so "it round-trips" is not a defence.
-   *
-   * The lesson is the one this project keeps relearning: `sentencepiece.test.ts` reported
-   * 24/24 exact and 185/185 on the corpus I chose. A reviewer's 34,997-input corpus found this in
-   * one pass. **A corpus the author picked is a corpus that flatters the author.**
+   * **11,343 / 11,344 exact**, from 11,327. The one survivor is below.
    */
-  it.fails('R14-04: ties inside a repeated-letter run resolve the other way from upstream', () => {
-    // Upstream: ['▁Z','cc','c'] = [1557, 3169, 440].
+  it('R14-04: the cases that started it now match upstream exactly', () => {
     expect(sp.encode('Zccc')).toEqual([1557, 3169, 440])
+    expect(sp.encode('0bbb')).toEqual([260, 316, 1363, 512])
+    // And the case whose asymmetry was the clue — no single tie rule gives both of these.
+    expect(sp.encode('Zbbb')).toEqual([1557, 512, 1363])
   })
 
-  it.fails('R14-04: the same defect with a different letter and a digit prefix', () => {
-    // Upstream: ['▁','0','bb','b'] = [260, 316, 1363, 512].
-    expect(sp.encode('0bbb')).toEqual([260, 316, 1363, 512])
+  it.fails('R14-04 remainder: one five-letter run still resolves the other way', () => {
+    // `Zggggg`: upstream ['▁Z','gg','g','gg'], ours ['▁Z','g','gg','gg']. Traced by hand to a
+    // float32 tie at the final position where both candidates round to -34.59474182128906, so the
+    // winner is decided purely by node insertion order in `end_nodes_`. One residual ordering
+    // difference remains and it is NOT worth a fifth guess: the honest position is that this is
+    // measured, bounded, and open.
+    //
+    // Blast radius, measured rather than asserted: 1 in 11,344 over an adversarial corpus, and
+    // 0 in 180 realistic inputs. `it.fails` so it goes RED the day somebody closes it.
+    expect(sp.encode('Zggggg')).toEqual([1557, 1129, 453, 1129])
   })
 
   it('R14-04 blast radius: no realistic input disagrees, including elongated words', () => {

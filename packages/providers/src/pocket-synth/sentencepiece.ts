@@ -197,63 +197,118 @@ export class SentencePieceUnigram {
    *    point that has its own piece can still be cheaper as bytes in an unusual context, and the
    *    reference lattice offers both paths.
    */
+  /**
+   * Encode, as SentencePiece's lattice does it.
+   *
+   * **This is a faithful port, not an equivalent algorithm, and the difference was measurable.**
+   * The first version was an ordinary Viterbi keeping one best score per position with float64
+   * accumulation. It agreed with upstream on 11,327 of 11,344 inputs and disagreed on runs of a
+   * repeated letter — `Zccc` came out `['▁Z','c','cc']` against upstream's `['▁Z','cc','c']`
+   * (R14-04). Two theories were tested and both were WRONG: flipping `>` to `>=` moved the count
+   * to 21 in the opposite direction, and `c + cc === cc + c` in both float64 and float32 so it
+   * looked like it could not be precision.
+   *
+   * What the probe actually showed is that upstream's answer is not consistent even between
+   * letters — `Zbbb` is `['▁Z','b','bb']` while `Zccc` is `['▁Z','cc','c']`. No tie-break rule
+   * produces both. What produces both is **float32 accumulation**, where the ORDER of additions
+   * changes the sum: `(B + b) + bb` and `(B + bb) + b` are not the same float32 number even though
+   * `b + bb === bb + b`. The isolated comparison that seemed to rule precision out was measuring
+   * the wrong thing.
+   *
+   * So, exactly as `lattice.cc` does it:
+   *
+   *  - every candidate piece is a NODE with its own best predecessor and its own backtrace score,
+   *    rather than one best score per position;
+   *  - for each node starting at `pos`, the best node ENDING at `pos` is chosen, with the first
+   *    one encountered winning a tie;
+   *  - and every addition is rounded to float32 by `Math.fround`, because the reference stores and
+   *    accumulates `float`.
+   */
   encode(text: string): number[] {
     if (text === '') return []
     const chars = [...this.normalize(text)]
     const n = chars.length
     if (n === 0) return []
 
-    const best = new Float64Array(n + 1).fill(Number.NEGATIVE_INFINITY)
-    const from = new Int32Array(n + 1).fill(-1)
-    const pieceAt = new Int32Array(n + 1).fill(-1)
-    const BYTE_FALLBACK = -2
-    best[0] = 0
+    interface Node {
+      readonly begin: number
+      readonly end: number
+      readonly id: number
+      readonly score: number
+      /** Several ids when this node is a byte-fallback expansion of one character. */
+      readonly ids: readonly number[]
+      prev: Node | null
+      backtrace: number
+    }
 
+    const beginNodes: Node[][] = Array.from({ length: n + 1 }, () => [])
+    const endNodes: Node[][] = Array.from({ length: n + 1 }, () => [])
+    const insert = (node: Node): void => {
+      beginNodes[node.begin]?.push(node)
+      endNodes[node.end]?.push(node)
+    }
+
+    // Populate, begin position ascending and piece length ascending within each — the order the
+    // reference's trie walk produces, and the order that decides every tie below.
     for (let i = 0; i < n; i++) {
-      const here = best[i] ?? Number.NEGATIVE_INFINITY
-      if (here === Number.NEGATIVE_INFINITY) continue
       const limit = Math.min(this.#maxPieceLen, n - i)
       let candidate = ''
+      let hasSingleChar = false
       for (let len = 1; len <= limit; len++) {
         candidate += this.#charAt(chars, i + len - 1)
         const hit = this.#usable.get(candidate)
         if (hit === undefined) continue
-        const score = here + hit.score
-        if (score > (best[i + len] ?? Number.NEGATIVE_INFINITY)) {
-          best[i + len] = score
-          from[i + len] = i
-          pieceAt[i + len] = hit.id
-        }
+        if (len === 1) hasSingleChar = true
+        insert({
+          begin: i, end: i + len, id: hit.id, ids: [hit.id],
+          score: Math.fround(hit.score), prev: null, backtrace: 0,
+        })
       }
-      const one = this.#charAt(chars, i)
-      if (!this.#usable.has(one)) {
+      // AFTER the matches, not before, exactly as `PopulateNodes` does it — and only when no
+      // single-character piece matched, which is the reference's `has_single_node`. Insertion
+      // order IS the tie-break, so putting this first silently changes which segmentation wins.
+      if (!hasSingleChar) {
+        const one = this.#charAt(chars, i)
         const bytes = Buffer.from(one, 'utf8')
-        const score = here + this.#unkPenalty * bytes.length
-        if (score > (best[i + 1] ?? Number.NEGATIVE_INFINITY)) {
-          best[i + 1] = score
-          from[i + 1] = i
-          pieceAt[i + 1] = BYTE_FALLBACK
-        }
-      }
-    }
-
-    const out: number[] = []
-    let i = n
-    while (i > 0) {
-      const prev = from[i] ?? -1
-      if (prev < 0) throw new Error(`no path through the tokenizer lattice at position ${i}`)
-      if (pieceAt[i] === BYTE_FALLBACK) {
-        const bytes = Buffer.from(chars.slice(prev, i).join(''), 'utf8')
         const ids: number[] = []
         for (const b of bytes) {
           const id = this.#byteId[b] ?? -1
           ids.push(id >= 0 ? id : this.unkId)
         }
-        out.push(...ids.reverse())
-      } else {
-        out.push(pieceAt[i] ?? this.unkId)
+        insert({
+          begin: i, end: i + 1, id: ids[0] ?? this.unkId, ids,
+          score: Math.fround(this.#unkPenalty * bytes.length), prev: null, backtrace: 0,
+        })
       }
-      i = prev
+    }
+
+    // The forward pass. `begin === 0` has no predecessor and starts at zero, which is what the
+    // reference's BOS node provides.
+    for (let pos = 0; pos <= n; pos++) {
+      for (const rnode of beginNodes[pos] ?? []) {
+        if (pos === 0) { rnode.prev = null; rnode.backtrace = rnode.score; continue }
+        let best: Node | null = null
+        let bestScore = 0
+        for (const lnode of endNodes[pos] ?? []) {
+          const score = Math.fround(lnode.backtrace + rnode.score)
+          if (best === null || score > bestScore) { best = lnode; bestScore = score }
+        }
+        rnode.prev = best
+        rnode.backtrace = best === null ? Number.NEGATIVE_INFINITY : bestScore
+      }
+    }
+
+    // Pick the best node ending at the end, then walk back. Same tie rule as above.
+    let tail: Node | null = null
+    let tailScore = 0
+    for (const lnode of endNodes[n] ?? []) {
+      if (tail === null || lnode.backtrace > tailScore) { tail = lnode; tailScore = lnode.backtrace }
+    }
+    if (tail === null) throw new Error('no path through the tokenizer lattice')
+
+    const out: number[] = []
+    for (let node: Node | null = tail; node !== null; node = node.prev) {
+      for (let k = node.ids.length - 1; k >= 0; k--) out.push(node.ids[k] ?? this.unkId)
     }
     return out.reverse()
   }
