@@ -73,6 +73,60 @@ describe('SentencePiece unigram — against the Python reference', () => {
     expect(sp.encode(text)).toEqual(ids)
   })
 
+  /**
+   * R14-04, confirmed independently and left OPEN on purpose.
+   *
+   * `it.fails` is this repo's convention for a contract that is known broken: the row is green
+   * *because* the defect is present, and turns RED the moment somebody fixes it. That is worth
+   * more than a comment, because a comment cannot notice.
+   *
+   * **What is wrong.** Our Viterbi and SentencePiece's disagree when a run of one repeated letter
+   * creates an EXACT score tie between two segmentations. `Zccc` is `['▁Z','cc','c']` upstream and
+   * `['▁Z','c','cc']` here. `c` scores -7.24249267578125 and `cc` -10.507535934448242, and
+   * `c + cc === cc + c` in both float64 and float32 — so this is NOT a precision defect and the
+   * float32 theory was tested and rejected. It is a tie-break ORDER difference, and the fix is a
+   * faithful port of SentencePiece's lattice (nodes carry their own best predecessor; ties resolve
+   * by insertion order of `end_nodes_`), not a comparison operator. Flipping `>` to `>=` was tried
+   * and made it WORSE — 17 disagreements became 21, in the opposite direction.
+   *
+   * **How wrong, measured.** Over an 11,344-input differential corpus against Python
+   * `sentencepiece`: **11,327 exact, 17 disagreements, and all 17 are runs of a single repeated
+   * character** (`Zccc`, `Zbbbbb`, `Zzzzzzzz`). Over 180 realistic inputs — every line of every
+   * committed fixture plus sixteen deliberately elongated words like `hmmm`, `nooo`, `shhh` —
+   * **180/180 exact**. So the blast radius today is text this product does not produce, which is
+   * why it is recorded and scheduled rather than blocking the phase.
+   *
+   * **Why it still matters.** Token ids are model inputs. Equal decoded text does not make the
+   * audio equivalent, so "it round-trips" is not a defence.
+   *
+   * The lesson is the one this project keeps relearning: `sentencepiece.test.ts` reported
+   * 24/24 exact and 185/185 on the corpus I chose. A reviewer's 34,997-input corpus found this in
+   * one pass. **A corpus the author picked is a corpus that flatters the author.**
+   */
+  it.fails('R14-04: ties inside a repeated-letter run resolve the other way from upstream', () => {
+    // Upstream: ['▁Z','cc','c'] = [1557, 3169, 440].
+    expect(sp.encode('Zccc')).toEqual([1557, 3169, 440])
+  })
+
+  it.fails('R14-04: the same defect with a different letter and a digit prefix', () => {
+    // Upstream: ['▁','0','bb','b'] = [260, 316, 1363, 512].
+    expect(sp.encode('0bbb')).toEqual([260, 316, 1363, 512])
+  })
+
+  it('R14-04 blast radius: no realistic input disagrees, including elongated words', () => {
+    // The severity claim above, as a check rather than a sentence. These are the inputs a reply
+    // actually contains; if one of them ever starts disagreeing, the finding has grown and this
+    // row is where it shows up.
+    //
+    // Expected ids come from Python `sentencepiece`, pasted. The first version of this case had
+    // ids I typed from memory and it FAILED -- which is the whole point of the rule it broke, in
+    // the same commit that documents the rule. An expected value invented by the author is not an
+    // oracle, it is the implementation's opinion written twice.
+    expect(sp.encode('hmmm')).toEqual([260, 3428, 283])
+    expect(sp.encode('shhh')).toEqual([1069, 506, 506])
+    expect(sp.encode('nooo')).toEqual([354, 1339])
+  })
+
   it('CONTROL: a deliberately wrong expectation fails', () => {
     // Without this, "every case passed" would also be true of a test that asserted nothing.
     expect(sp.encode('Hello world.')).not.toEqual([1, 2, 3])
