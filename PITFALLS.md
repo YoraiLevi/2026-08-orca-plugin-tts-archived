@@ -25,7 +25,11 @@ meaningful with a load average attached** — 36/37 at load 45 and 37/37 at load
 tree. Both readings above are from the same detached worktree at the same commit (P41), so the
 worktree discipline does **not** cover this; it is a second, independent variable.
 
-## P42 — `speak('replace')` cut the announcement that was queued in front of it, and the loss looked like a short sentence
+## P44 — `speak('replace')` cut the announcement that was queued in front of it, and the loss looked like a short sentence
+> **Was P42 in `9079f27`; renumbered here.** It collided with the `say`-leak P42 (`794e82c`),
+> written minutes later by another agent — P12's exact scenario, and the second time this file
+> has produced one. `grep '^## P'` was run before writing, and was still stale by the time the
+> commit landed: the check is only as fresh as the gap between reading and writing.
 **Symptom:** the held settings report was spoken as exactly `"Before that. "` and then the reply
 started. The rest of the sentence — the part that named the file, the reason and the path — was
 gone. Measured while writing the G1 tests, reproducible every run, not a flake:
