@@ -1091,7 +1091,7 @@ const POCKET_DOWNLOAD_FILES = [
 
 async function readyModelFixture (dir) {
   await mkdir(dir, { recursive: true })
-  for (const file of [...POCKET_DOWNLOAD_FILES, 'MODEL_LICENSE.txt']) {
+  for (const file of [...POCKET_DOWNLOAD_FILES, 'LICENSE', 'MODEL_LICENSE.txt']) {
     await writeFile(join(dir, file), 'fixture')
   }
   await writeFile(join(dir, '.orca-tts-model-manifest'), '2\n')

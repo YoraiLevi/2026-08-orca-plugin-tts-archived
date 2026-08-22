@@ -21,11 +21,11 @@
  * CC-BY-4.0 requires and as buzz does.
  */
 
-import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile, rename, rm, readdir } from 'node:fs/promises'
+import { createHash, randomBytes } from 'node:crypto'
+import { mkdir, readFile, writeFile, rename, rm, readdir, open } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { join, dirname, basename } from 'node:path'
 // `.ts`, not `.js`, and the extension is load-bearing rather than a style choice. The Voice Lab
 // imports this module under PLAIN NODE, whose resolver does not rewrite `.js` to `.ts` — vitest
 // does, which is exactly how a suite goes green over a tree that cannot boot (P37, SC-14). The
@@ -82,6 +82,20 @@ export const MODEL_TOTAL_BYTES = MODEL_ARTIFACTS.reduce((n, a) => n + a.bytes, 0
 
 export const MANIFEST_FILE = '.orca-tts-model-manifest'
 export const LICENSE_FILE = 'MODEL_LICENSE.txt'
+/**
+ * The unmodified upstream CC-BY-4.0 text. Distinct from `LICENSE_FILE`, which is our local
+ * attribution sidecar. R15-09 / PV-075: fetching this is not the same as requiring it for
+ * `ready` — both must be true, and the file is pinned by digest AND length like every weight.
+ *
+ * Digest measured from Hugging Face at `MODEL_REVISION` (`onnx/LICENSE`) and re-checked against
+ * the vendored copy at `model/LICENSE`.
+ */
+export const UPSTREAM_LICENSE_FILE = 'LICENSE'
+export const UPSTREAM_LICENSE: ModelArtifact = {
+  file: UPSTREAM_LICENSE_FILE,
+  sha256: 'fe7b4ce83b8381cc5b216bbb4af73c570688d1b819c73bbaed8ca401f4677cd6',
+  bytes: 18_655,
+}
 
 export const LICENSE_TEXT = `Pocket TTS model files
 ======================
@@ -144,11 +158,12 @@ export const VOICES_TOTAL_BYTES = VOICE_ARTIFACTS.reduce((n, a) => n + a.bytes, 
  */
 export const INSTALL_TOTAL_BYTES = MODEL_TOTAL_BYTES + VOICES_TOTAL_BYTES
 
-/** Every file that must be present for the model to be usable — weights AND voices. */
+/** Every file that must be present for the model to be usable — weights, voices, AND both licence sidecars. */
 export function requiredFiles(): string[] {
   return [
     ...MODEL_ARTIFACTS.map((a) => a.file),
     ...VOICE_ARTIFACTS.map((a) => a.file),
+    UPSTREAM_LICENSE_FILE,
     LICENSE_FILE,
     MANIFEST_FILE,
   ]
@@ -162,8 +177,13 @@ export type ModelStatus =
 /**
  * Is the cache usable? Reports WHICH files are missing rather than a bare boolean, because
  * "the model is not ready" is not an actionable sentence and "mimi_encoder.onnx is missing" is.
+ *
+ * R15-02: a crash between `rename(live, backup)` and `rename(staging, live)` leaves the known-good
+ * copy under a sibling name. Recover that before answering, otherwise `ready` is a property of
+ * whether this process's pid matches the one that died, which is not a property of the cache.
  */
 export async function modelStatus(dir = modelDir()): Promise<ModelStatus> {
+  await recoverLiveFromBackup(dir)
   if (!existsSync(dir)) return { kind: 'absent', dir, missing: requiredFiles() }
   const present = new Set(await readdir(dir))
   const missing = requiredFiles().filter((f) => !present.has(f))
@@ -172,6 +192,157 @@ export async function modelStatus(dir = modelDir()): Promise<ModelStatus> {
   const want = String(MANIFEST_VERSION)
   if (found !== want) return { kind: 'stale', dir, found, want }
   return { kind: 'ready', dir }
+}
+
+/* --------------------------------------------------------------- crash-safe swap + single writer */
+
+/**
+ * Second writer is refused BY NAME, not by racing a pid-suffixed scratch path and hoping.
+ * R15-02: two Voice Labs both acquired the supposed in-process slot because there was no
+ * filesystem-visible lock scoped to the cache.
+ */
+export class ModelDownloadInProgressError extends Error {
+  readonly lockPath: string
+  readonly holderPid: number | null
+
+  constructor(lockPath: string, holderPid: number | null) {
+    const who = holderPid !== null ? ` (pid ${holderPid})` : ''
+    super(`model cache download already in progress${who}; refusing a second writer for ${lockPath}`)
+    this.name = 'ModelDownloadInProgressError'
+    this.lockPath = lockPath
+    this.holderPid = holderPid
+  }
+}
+
+function lockPathFor(dir: string): string {
+  return `${dir}.lock`
+}
+
+function backupPathFor(dir: string): string {
+  return `${dir}.previous`
+}
+
+function journalPathFor(dir: string): string {
+  return `${dir}.swap-journal`
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    // EPERM: the process exists, we just cannot signal it.
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+async function readLockPid(lockPath: string): Promise<number | null> {
+  try {
+    const raw = (await readFile(lockPath, 'utf8')).trim()
+    const pid = Number(raw)
+    return Number.isInteger(pid) && pid > 0 ? pid : null
+  } catch {
+    return null
+  }
+}
+
+interface HeldLock {
+  readonly path: string
+  release: () => Promise<void>
+}
+
+async function acquireDownloadLock(dir: string): Promise<HeldLock> {
+  const lockPath = lockPathFor(dir)
+  const tryCreate = async (): Promise<HeldLock | 'busy'> => {
+    try {
+      const fh = await open(lockPath, 'wx')
+      await fh.writeFile(`${process.pid}\n`)
+      let released = false
+      return {
+        path: lockPath,
+        release: async () => {
+          if (released) return
+          released = true
+          await fh.close().catch(() => undefined)
+          await rm(lockPath, { force: true })
+        },
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      return 'busy'
+    }
+  }
+
+  const first = await tryCreate()
+  if (first !== 'busy') return first
+
+  const holder = await readLockPid(lockPath)
+  if (holder !== null && pidAlive(holder)) {
+    throw new ModelDownloadInProgressError(lockPath, holder)
+  }
+  // Stale: the holder died (SIGKILL does not run `finally`). Steal once.
+  await rm(lockPath, { force: true })
+  const second = await tryCreate()
+  if (second !== 'busy') return second
+  const other = await readLockPid(lockPath)
+  throw new ModelDownloadInProgressError(lockPath, other)
+}
+
+function isBackupName(base: string, name: string): boolean {
+  return name === `${base}.previous` || name.startsWith(`${base}.previous-`)
+}
+
+function isStagingName(base: string, name: string): boolean {
+  return name.startsWith(`${base}.staging-`)
+}
+
+/**
+ * If live is gone and a backup sibling remains, put the backup back.
+ *
+ * Does NOT recover while a live writer holds the lock — that writer is mid-swap and the missing
+ * live directory is the window, not a crash. A dead pid in the lock file is a crash; then we do
+ * recover. Also accepts the old `*.previous-<pid>` names so a cache crashed under the R14-06
+ * scheme is not orphaned forever (or deleted on pid reuse).
+ */
+async function recoverLiveFromBackup(dir: string): Promise<void> {
+  if (existsSync(dir)) return
+  const lockPath = lockPathFor(dir)
+  if (existsSync(lockPath)) {
+    const holder = await readLockPid(lockPath)
+    if (holder !== null && pidAlive(holder)) return
+  }
+  const parent = dirname(dir)
+  const base = basename(dir)
+  if (!existsSync(parent)) return
+  const backups = (await readdir(parent))
+    .filter((n) => isBackupName(base, n))
+    .toSorted((a, b) => {
+      if (a === `${base}.previous`) return -1
+      if (b === `${base}.previous`) return 1
+      return a.localeCompare(b)
+    })
+  if (backups.length === 0) return
+  const chosen = backups[0]
+  if (chosen === undefined) return
+  try {
+    await rename(join(parent, chosen), dir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw err
+  }
+  await rm(journalPathFor(dir), { force: true })
+}
+
+async function removeMatchingSiblings(
+  dir: string,
+  match: (base: string, name: string) => boolean,
+): Promise<void> {
+  const parent = dirname(dir)
+  const base = basename(dir)
+  if (!existsSync(parent)) return
+  for (const name of await readdir(parent)) {
+    if (match(base, name)) await rm(join(parent, name), { recursive: true, force: true })
+  }
 }
 
 /* --------------------------------------------------------------------------------- fetching */
@@ -232,23 +403,27 @@ export interface DownloadOptions {
 /**
  * Fetch the whole bundle into `dir`, preserving whatever was there if anything goes wrong.
  *
- * **The swap is the dangerous part and the first version of it was wrong.** It did
- * `rm(dir)` and then `rename(staging, dir)`, so a crash, a full disk or a cross-device rename in
- * between destroyed the only working model — on the machine of someone whose download had just
- * failed, which is the machine that can least afford it. Round 14 (R14-06) demonstrated it by
- * throwing in that window and watching 20/20 tests stay green: nothing reached the swap at all,
- * because no fake body can satisfy a real 76 MB digest.
+ * **The swap is the dangerous part and the first two versions of it were each half-right.**
+ * Version 1 did `rm(dir)` then `rename(staging, dir)` — a throw in that window destroyed the
+ * only working model, and nothing reached the swap because no fake body can satisfy a 76 MB
+ * digest (R14-06). Version 2 staged beside live and caught JavaScript exceptions around the two
+ * renames, which is what the exception-path tests still prove. A `catch` does not run after
+ * SIGKILL. Staging and backup were named with `process.pid`, which is a per-process name and
+ * not a lock: a later process never scanned the orphan, and two writers both acquired the slot.
  *
- * The order now is the one that survives a failure at every step:
+ * The order now is the one that survives a failure AND a hard signal:
  *
- *   1. stage BESIDE the live directory, not in `tmpdir()` — a rename across filesystems is
- *      `EXDEV`, and `tmpdir()` is a different filesystem often enough to matter;
- *   2. move the live directory aside to a backup (a rename, so it is instant and reversible);
- *   3. rename staging into place;
- *   4. and only then discard the backup.
+ *   1. take a filesystem-visible exclusive lock on the cache, or refuse the second writer
+ *      by name (`ModelDownloadInProgressError`);
+ *   2. recover `backup → live` if live is missing — including leftover `*.previous-<pid>`
+ *      names from version 2 — BEFORE deleting any backup;
+ *   3. stage BESIDE the live directory under a unique name, not in `tmpdir()` (`EXDEV`);
+ *   4. move live aside to a STABLE backup name (`*.previous`), journal the phase, rename
+ *      staging into place, and only then discard the backup.
  *
- * A failure at 2, 3 or 4 rolls the backup back. There is no instant at which the machine has no
- * usable model unless it had none to begin with.
+ * A `catch` still rolls the backup back for exceptions. A later process recovers the same
+ * backup after a hard signal. There is no instant at which the machine has no recoverable
+ * model unless it had none to begin with.
  */
 export async function downloadModel(options: DownloadOptions = {}): Promise<string> {
   const dir = options.dir ?? modelDir()
@@ -258,81 +433,110 @@ export async function downloadModel(options: DownloadOptions = {}): Promise<stri
   const artifacts = options.artifacts ?? [...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS]
   const hooks = options.hooks ?? {}
 
-  // Siblings, not `tmpdir()`: same filesystem, so the renames below cannot fail with EXDEV.
-  const staging = `${dir}.staging-${process.pid}`
-  const backup = `${dir}.previous-${process.pid}`
-
   await mkdir(dirname(dir), { recursive: true })
-  await rm(staging, { recursive: true, force: true })
-  await mkdir(staging, { recursive: true })
-
-  const pinned = new Map(artifacts.map((a) => [a.file, a]))
-  const files = artifacts.map((a) => a.file)
+  const lock = await acquireDownloadLock(dir)
+  // Unique per attempt, not per pid: two in-process callers used to share `${dir}.staging-${pid}`.
+  const staging = `${dir}.staging-${process.pid}-${randomBytes(6).toString('hex')}`
+  const backup = backupPathFor(dir)
+  const journal = journalPathFor(dir)
 
   try {
-    for (const [index, file] of files.entries()) {
-      // `exactOptionalPropertyTypes` is on, so an explicit `undefined` is not the same as absent.
-      const init: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
-      const res = await doFetch(urlFor(file), init)
-      if (!res.ok) throw new Error(`downloading ${file}: HTTP ${res.status} ${res.statusText}`)
-      const total = Number(res.headers.get('content-length') ?? 0)
-      const body = Buffer.from(await res.arrayBuffer())
-      options.onProgress?.({ file, received: body.length, total, fileIndex: index, fileCount: files.length })
+    await recoverLiveFromBackup(dir)
+    await rm(journalPathFor(dir), { force: true })
+    // Live is the source of truth now. Leftover backups/staging are debris, not recovery.
+    if (existsSync(dir)) {
+      await removeMatchingSiblings(dir, isBackupName)
+    }
+    await removeMatchingSiblings(dir, isStagingName)
+    await mkdir(staging, { recursive: true })
 
-      const want = pinned.get(file)
-      if (want === undefined) throw new Error(`${file} is not in the pinned manifest`)
-      // Both checks, not either. A length check alone passes for any file of the right size; a
-      // digest alone gives a much worse message when a CDN hands back an HTML error page, which
-      // is the common failure and the one a person has to act on.
-      if (body.length !== want.bytes) {
-        throw new Error(`${file} is ${body.length} bytes, expected ${want.bytes} — refusing it`)
+    const pinned = new Map(artifacts.map((a) => [a.file, a]))
+    const files = artifacts.map((a) => a.file)
+
+    try {
+      for (const [index, file] of files.entries()) {
+        // `exactOptionalPropertyTypes` is on, so an explicit `undefined` is not the same as absent.
+        const init: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
+        const res = await doFetch(urlFor(file), init)
+        if (!res.ok) throw new Error(`downloading ${file}: HTTP ${res.status} ${res.statusText}`)
+        const total = Number(res.headers.get('content-length') ?? 0)
+        const body = Buffer.from(await res.arrayBuffer())
+        options.onProgress?.({ file, received: body.length, total, fileIndex: index, fileCount: files.length })
+
+        const want = pinned.get(file)
+        if (want === undefined) throw new Error(`${file} is not in the pinned manifest`)
+        // Both checks, not either. A length check alone passes for any file of the right size; a
+        // digest alone gives a much worse message when a CDN hands back an HTML error page, which
+        // is the common failure and the one a person has to act on.
+        if (body.length !== want.bytes) {
+          throw new Error(`${file} is ${body.length} bytes, expected ${want.bytes} — refusing it`)
+        }
+        const got = sha256(body)
+        if (got !== want.sha256) {
+          throw new Error(`${file} hashes to ${got}, expected ${want.sha256} — refusing it`)
+        }
+        await writeFile(join(staging, file), body)
       }
-      const got = sha256(body)
-      if (got !== want.sha256) {
-        throw new Error(`${file} hashes to ${got}, expected ${want.sha256} — refusing it`)
+
+      // Attribution beside the bytes, as CC-BY-4.0 requires. R14-08: fetching is REQUIRED.
+      // R15-09: the bytes are also pinned — a 200 that is not the licence is still a violation.
+      const licenceInit: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
+      const licence = await doFetch(urlFor('LICENSE'), licenceInit)
+      if (!licence.ok) {
+        throw new Error(
+          `the upstream LICENSE could not be fetched (HTTP ${licence.status} ${licence.statusText}). ` +
+          'These models are CC-BY-4.0 and may not be installed without it.',
+        )
       }
-      await writeFile(join(staging, file), body)
+      const licenceBody = Buffer.from(await licence.arrayBuffer())
+      if (licenceBody.length !== UPSTREAM_LICENSE.bytes) {
+        throw new Error(
+          `LICENSE is ${licenceBody.length} bytes, expected ${UPSTREAM_LICENSE.bytes} — refusing it`,
+        )
+      }
+      const licenceHash = sha256(licenceBody)
+      if (licenceHash !== UPSTREAM_LICENSE.sha256) {
+        throw new Error(
+          `LICENSE hashes to ${licenceHash}, expected ${UPSTREAM_LICENSE.sha256} — refusing it`,
+        )
+      }
+      await writeFile(join(staging, UPSTREAM_LICENSE_FILE), licenceBody)
+      await writeFile(join(staging, LICENSE_FILE), LICENSE_TEXT)
+
+      // The manifest goes LAST. A directory holding every file but this one reads as `absent`,
+      // which is exactly right for a download that died before it finished.
+      await writeFile(join(staging, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+      await hooks.afterStage?.()
+    } catch (err) {
+      await rm(staging, { recursive: true, force: true })
+      throw err
     }
 
-    // Attribution beside the bytes, as CC-BY-4.0 requires. R14-08: this is REQUIRED, not
-    // best-effort — an install that silently omits the upstream licence is a licence violation
-    // that nothing reports, so a failure to fetch it fails the download.
-    const licenceInit: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
-    const licence = await doFetch(urlFor('LICENSE'), licenceInit)
-    if (!licence.ok) {
-      throw new Error(
-        `the upstream LICENSE could not be fetched (HTTP ${licence.status} ${licence.statusText}). ` +
-        'These models are CC-BY-4.0 and may not be installed without it.',
-      )
+    // ---- the swap. Exceptions roll back here; a hard signal is recovered on the next entry. ----
+    const hadPrevious = existsSync(dir)
+    try {
+      if (hadPrevious) {
+        await writeFile(journal, 'backing-up\n')
+        await rename(dir, backup)
+      }
+      await hooks.afterBackup?.()
+      await writeFile(journal, 'installing\n')
+      await rename(staging, dir)
+      await hooks.afterSwap?.()
+      await writeFile(journal, 'committed\n')
+    } catch (err) {
+      // Put back exactly what was there. `force` on the staging cleanup because it may or may not
+      // still exist depending on where this threw.
+      await rm(dir, { recursive: true, force: true })
+      if (hadPrevious && existsSync(backup)) await rename(backup, dir)
+      await rm(staging, { recursive: true, force: true })
+      await rm(journal, { force: true })
+      throw err
     }
-    await writeFile(join(staging, 'LICENSE'), Buffer.from(await licence.arrayBuffer()))
-    await writeFile(join(staging, LICENSE_FILE), LICENSE_TEXT)
-
-    // The manifest goes LAST. A directory holding every file but this one reads as `absent`,
-    // which is exactly right for a download that died before it finished.
-    await writeFile(join(staging, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
-    await hooks.afterStage?.()
-  } catch (err) {
-    await rm(staging, { recursive: true, force: true })
-    throw err
+    await removeMatchingSiblings(dir, isBackupName)
+    await rm(journal, { force: true })
+    return dir
+  } finally {
+    await lock.release()
   }
-
-  // ---- the swap. Everything below is reversible until the last line. ----
-  const hadPrevious = existsSync(dir)
-  await rm(backup, { recursive: true, force: true })
-  try {
-    if (hadPrevious) await rename(dir, backup)
-    await hooks.afterBackup?.()
-    await rename(staging, dir)
-    await hooks.afterSwap?.()
-  } catch (err) {
-    // Put back exactly what was there. `force` on the staging cleanup because it may or may not
-    // still exist depending on where this threw.
-    await rm(dir, { recursive: true, force: true })
-    if (hadPrevious && existsSync(backup)) await rename(backup, dir)
-    await rm(staging, { recursive: true, force: true })
-    throw err
-  }
-  await rm(backup, { recursive: true, force: true })
-  return dir
 }

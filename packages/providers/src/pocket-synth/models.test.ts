@@ -7,16 +7,21 @@
  * `tokenizer.model`, which is the one artifact actually in the repo — so at least one entry of the
  * pinned table is proved to pin the right bytes rather than merely to be a well-formed hex string.
  */
+import { spawn, type ChildProcess } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync as read } from 'node:fs'
+import {
+  mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync,
+  readFileSync as read,
+} from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, MODEL_REVISION, MANIFEST_FILE, MANIFEST_VERSION,
-  LICENSE_FILE, VOICE_ARTIFACTS, VOICES_TOTAL_BYTES, INSTALL_TOTAL_BYTES,
+  LICENSE_FILE, UPSTREAM_LICENSE, UPSTREAM_LICENSE_FILE, VOICE_ARTIFACTS, VOICES_TOTAL_BYTES,
+  INSTALL_TOTAL_BYTES,
   downloadModel, modelDir, modelStatus, requiredFiles, sha256, urlFor,
   type ModelArtifact,
 } from './models.js'
@@ -26,15 +31,29 @@ import {
 } from './voices.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
+const MODELS_HREF = pathToFileURL(join(HERE, 'models.ts')).href
 const made: string[] = []
+const children: ChildProcess[] = []
 const scratch = (): string => {
   const d = mkdtempSync(join(tmpdir(), 'pocket-models-'))
   made.push(d)
   return d
 }
 afterEach(async () => {
+  for (const c of children.splice(0)) {
+    if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL')
+  }
   for (const d of made.splice(0)) await rm(d, { recursive: true, force: true })
 })
+
+/** Wait for a condition. Cap is a hang detector, not a budget (P40). */
+async function until(pred: () => boolean, what: string, ms = 10_000): Promise<void> {
+  const t0 = Date.now()
+  while (!pred()) {
+    if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what} — this is a HANG, not slowness`)
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
 
 /* --------------------------------------------------------------------------------- manifest */
 
@@ -253,7 +272,7 @@ function tinyFetch(opts: { failLicence?: boolean } = {}): typeof fetch {
     if (file === 'LICENSE') {
       return opts.failLicence === true
         ? new Response('nope', { status: 503, statusText: 'Service Unavailable' })
-        : new Response('upstream licence text')
+        : new Response(readFileSync(join(HERE, 'model/LICENSE')))
     }
     const body = TINY_BODIES[file]
     if (body === undefined) return new Response('not found', { status: 404, statusText: 'Not Found' })
@@ -277,7 +296,7 @@ describe('R14-06 — the swap is reversible at every step', () => {
     await downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() })
     // By effect: the new bytes are live, the licences are beside them, and the manifest is current.
     expect(read(join(dir, 'bundle.json'), 'utf8')).toBe('{"bundle_name":"tiny"}')
-    expect(read(join(dir, 'LICENSE'), 'utf8')).toBe('upstream licence text')
+    expect(read(join(dir, 'LICENSE'))).toEqual(readFileSync(join(HERE, 'model/LICENSE')))
     expect(existsSync(join(dir, LICENSE_FILE))).toBe(true)
     expect(read(join(dir, MANIFEST_FILE), 'utf8').trim()).toBe(String(MANIFEST_VERSION))
   })
@@ -429,5 +448,222 @@ describe('R14-02 — a reference clip is an artifact, not an assumption', () => 
     const s = await modelStatus(dir)
     expect(s.kind).toBe('stale')
     if (s.kind === 'stale') expect(s.found).toBe('1')
+  })
+})
+
+
+/* -------------------------------- R15-09 / PV-075: LICENSE is required, independently restated */
+
+describe('R15-09 / PV-075 — a cache with no upstream LICENSE is not ready', () => {
+  it('restates both licence sidecars by name, not by reading requiredFiles into the expectation', () => {
+    // P36: if requiredFiles() dropped LICENSE, seeding from it would shrink the expectation
+    // with the defect. The names below are the claim.
+    expect(requiredFiles()).toContain('LICENSE')
+    expect(requiredFiles()).toContain('MODEL_LICENSE.txt')
+  })
+
+  it('pins the upstream LICENSE by digest AND length, independently of requiredFiles', () => {
+    // Restated as a literal claim (P36). The vendored copy is the oracle that the pin is the
+    // real CC-BY-4.0 text, not a well-formed hex string.
+    expect(UPSTREAM_LICENSE.file).toBe('LICENSE')
+    expect(UPSTREAM_LICENSE.file).toBe(UPSTREAM_LICENSE_FILE)
+    expect(UPSTREAM_LICENSE.sha256).toBe('fe7b4ce83b8381cc5b216bbb4af73c570688d1b819c73bbaed8ca401f4677cd6')
+    expect(UPSTREAM_LICENSE.bytes).toBe(18_655)
+    const vendored = readFileSync(join(HERE, 'model/LICENSE'))
+    expect(vendored.length).toBe(UPSTREAM_LICENSE.bytes)
+    expect(sha256(vendored)).toBe(UPSTREAM_LICENSE.sha256)
+  })
+
+  it('REFUSES an upstream LICENSE whose digest does not match the pin', async () => {
+    const dir = join(scratch(), 'model')
+    const badLicence: typeof fetch = (async (input: string | URL | Request) => {
+      const file = String(input).split('/').pop() ?? ''
+      if (file === 'LICENSE') return new Response(Buffer.alloc(UPSTREAM_LICENSE.bytes, 1))
+      const body = TINY_BODIES[file]
+      if (body === undefined) return new Response('not found', { status: 404, statusText: 'Not Found' })
+      return new Response(body, { headers: { 'content-length': String(body.length) } })
+    }) as unknown as typeof fetch
+    await expect(downloadModel({ dir, artifacts: TINY, fetchImpl: badLicence }))
+      .rejects.toThrow(/LICENSE hashes to [0-9a-f]{64}, expected/)
+  })
+
+  it('delete LICENSE from a complete cache: status is no longer ready and NAMES it', async () => {
+    // Independent seed — every production artifact except the upstream LICENSE. Not
+    // `requiredFiles()` minus one, because that is how the R14-08 half-fix stayed green:
+    // LICENSE was never in the list the test asked about.
+    const dir = scratch()
+    mkdirSync(dir, { recursive: true })
+    for (const a of MODEL_ARTIFACTS) writeFileSync(join(dir, a.file), 'x')
+    for (const a of VOICE_ARTIFACTS) writeFileSync(join(dir, a.file), 'x')
+    writeFileSync(join(dir, LICENSE_FILE), 'x')
+    writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+    expect(existsSync(join(dir, 'LICENSE'))).toBe(false)
+
+    const s = await modelStatus(dir)
+    expect(s.kind, 'modelStatus called an attribution-incomplete cache ready').not.toBe('ready')
+    expect(s.kind).toBe('absent')
+    if (s.kind === 'absent') expect(s.missing).toContain('LICENSE')
+  })
+})
+
+
+/* -------------------- R15-02 / PV-073: swap survives process death and a second writer */
+
+const CHILD_PREAMBLE = `import { writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { downloadModel, sha256 } from ${JSON.stringify(MODELS_HREF)}
+
+const TINY_BODIES = {
+  'bundle.json': Buffer.from('{"bundle_name":"tiny"}'),
+  'tokenizer.model': Buffer.from('tiny tokenizer bytes'),
+  'mimi_encoder.onnx': Buffer.from('tiny encoder bytes'),
+}
+const TINY = Object.entries(TINY_BODIES).map(([file, body]) => ({
+  file, bytes: body.length, sha256: sha256(body),
+}))
+const tinyFetch = () => (async (input) => {
+  const file = String(input).split('/').pop() ?? ''
+  if (file === 'LICENSE') return new Response(readFileSync(${JSON.stringify(join(HERE, 'model/LICENSE'))}))
+  const body = TINY_BODIES[file]
+  if (body === undefined) return new Response('not found', { status: 404, statusText: 'Not Found' })
+  return new Response(body, { headers: { 'content-length': String(body.length) } })
+})
+`
+
+function spawnChild(scriptPath: string, args: string[]): ChildProcess {
+  const child = spawn(process.execPath, ['--experimental-strip-types', '--no-warnings', scriptPath, ...args], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  children.push(child)
+  return child
+}
+
+function waitExit(child: ChildProcess): Promise<number | null> {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve(child.exitCode)
+      return
+    }
+    child.once('exit', (code) => resolve(code))
+  })
+}
+
+describe('R15-02 / PV-073 — the swap survives process death and refuses a second writer', () => {
+  it('a hard SIGKILL between the two renames leaves the live model usable', async () => {
+    const root = scratch()
+    const dir = join(root, 'model')
+    const marker = join(root, 'at-seam')
+    const script = join(root, 'kill-child.ts')
+    seedReady(dir)
+    writeFileSync(script, `${CHILD_PREAMBLE}
+const dir = process.argv[2]
+const marker = process.argv[3]
+await downloadModel({
+  dir, artifacts: TINY, fetchImpl: tinyFetch(),
+  hooks: {
+    afterBackup: async () => {
+      writeFileSync(marker, 'at-seam')
+      await new Promise(() => {})
+    },
+  },
+})
+`)
+    const child = spawnChild(script, [dir, marker])
+    await until(() => existsSync(marker), 'child to reach afterBackup')
+    child.kill('SIGKILL')
+    await waitExit(child)
+
+    const s = await modelStatus(dir)
+    expect(
+      s.kind,
+      'SIGKILL removed the only live model; recovery exists only in catch',
+    ).toBe('ready')
+    expect(stillPrevious(dir), 'the known-good previous bytes must still be loadable').toBe(true)
+  }, 20_000)
+
+  it('recovers a pid-suffixed leftover backup when live is missing', async () => {
+    const dir = join(scratch(), 'model')
+    seedReady(dir)
+    const orphan = `${dir}.previous-999999`
+    renameSync(dir, orphan)
+    expect(existsSync(dir)).toBe(false)
+    const s = await modelStatus(dir)
+    expect(s.kind, 'a pid-suffixed backup is invisible to a later process').toBe('ready')
+    expect(stillPrevious(dir)).toBe(true)
+  })
+
+  it('two concurrent downloads: one is refused BY NAME and the winner completes', async () => {
+    const root = scratch()
+    const dir = join(root, 'model')
+    seedReady(dir)
+    const hold = join(root, 'holding')
+    const go = join(root, 'go')
+    const scriptA = join(root, 'writer-a.ts')
+    const scriptB = join(root, 'writer-b.ts')
+    const resultB = join(root, 'b-result')
+    writeFileSync(scriptA, `${CHILD_PREAMBLE}
+const dir = process.argv[2]
+const hold = process.argv[3]
+const go = process.argv[4]
+await downloadModel({
+  dir, artifacts: TINY, fetchImpl: tinyFetch(),
+  hooks: {
+    afterStage: async () => {
+      writeFileSync(hold, 'holding')
+      while (!existsSync(go)) await new Promise((r) => setTimeout(r, 20))
+    },
+  },
+})
+writeFileSync(hold + '.done', 'ok')
+`)
+    writeFileSync(scriptB, `${CHILD_PREAMBLE}
+const dir = process.argv[2]
+const result = process.argv[3]
+try {
+  await downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() })
+  writeFileSync(result, 'ok')
+} catch (err) {
+  writeFileSync(result, err instanceof Error ? err.message : String(err))
+}
+`)
+    const childA = spawnChild(scriptA, [dir, hold, go])
+    await until(() => existsSync(hold), 'writer A to hold the cache')
+    const childB = spawnChild(scriptB, [dir, resultB])
+    await until(() => existsSync(resultB), 'writer B to finish (refuse or complete)')
+    const bMessage = read(resultB, 'utf8')
+    expect(
+      bMessage,
+      'both processes accepted a writer for the same cache',
+    ).toMatch(/already in progress|refusing a second writer/i)
+    expect(bMessage, 'the refusal must name the condition, not a generic filesystem error').not.toBe('ok')
+
+    writeFileSync(go, 'go')
+    await until(() => existsSync(`${hold}.done`), 'winner A to complete the download')
+    await waitExit(childA)
+    await waitExit(childB)
+    expect(stillPrevious(dir)).toBe(false)
+    expect(read(join(dir, 'bundle.json'), 'utf8')).toBe('{"bundle_name":"tiny"}')
+  }, 20_000)
+
+  it('in-process: a second downloadModel is refused by name while the first still holds the lock', async () => {
+    const dir = join(scratch(), 'model')
+    seedReady(dir)
+    let release!: () => void
+    const held = new Promise<void>((r) => { release = r })
+    let holding = false
+    const first = downloadModel({
+      dir, artifacts: TINY, fetchImpl: tinyFetch(),
+      hooks: {
+        afterStage: async () => {
+          holding = true
+          await held
+        },
+      },
+    })
+    await until(() => holding, 'first download to acquire the writer slot')
+    await expect(downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() }))
+      .rejects.toThrow(/already in progress|refusing a second writer/i)
+    release()
+    await first
+    expect(read(join(dir, 'bundle.json'), 'utf8')).toBe('{"bundle_name":"tiny"}')
   })
 })
