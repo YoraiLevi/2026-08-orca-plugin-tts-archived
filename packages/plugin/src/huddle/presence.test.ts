@@ -37,6 +37,25 @@ const record = (id: string, text: string): string =>
 
 const settle = (ms = 260): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * Wait for a CONDITION, not for a duration.
+ *
+ * The first version of this file used a fixed 260 ms settle and passed at load 6, then failed at
+ * load 9.65 inside a full-suite run with "the control never spoke". The watcher had simply not
+ * delivered yet. Out-running a race is the defect this repo has now found four times — a
+ * queue-drain test, a cancel test, a skip test, and this one — so the precondition is OBSERVED.
+ *
+ * The cap is a hang detector, not a race budget: if the reply never arrives the test still fails,
+ * and it fails saying so rather than saying something misleading about mute.
+ */
+async function until (what: string, pred: () => boolean, capMs = 8000): Promise<void> {
+  const t0 = Date.now()
+  while (!pred()) {
+    if (Date.now() - t0 > capMs) throw new Error(`timed out after ${capMs} ms waiting for: ${what}`)
+    await settle(25)
+  }
+}
+
 /** Two sessions in ONE worktree, so both are reachable by the same watcher. */
 async function scaffoldTwo (): Promise<{ root: string; worktree: string; alpha: string; bravo: string }> {
   const root = await mkdtemp(join(tmpdir(), 'orca-tts-presence-'))
@@ -73,9 +92,7 @@ describe('G5 — presence: who is in the room, who is talking, and mute', () => 
     // CONTROL first: unmuted, the reply IS spoken. Without this the mute assertion below could
     // pass because nothing was ever spoken for an unrelated reason.
     await appendFile(alpha, record('a-1', 'audible one') + '\n')
-    await settle()
-    expect(speech.spoken, 'the control never spoke, so a silent mute proves nothing')
-      .toContain('audible one')
+    await until('the control reply to be spoken', () => speech.spoken.includes('audible one'))
 
     h.mute(alpha)
     await appendFile(alpha, record('a-2', 'must never be heard') + '\n')
@@ -85,8 +102,7 @@ describe('G5 — presence: who is in the room, who is talking, and mute', () => 
 
     h.unmute(alpha)
     await appendFile(alpha, record('a-3', 'audible again') + '\n')
-    await settle()
-    expect(speech.spoken, 'unmute did not resume speech').toContain('audible again')
+    await until('speech to resume after unmute', () => speech.spoken.includes('audible again'))
     // And the muted reply is NOT replayed on unmute — that would be P22's whole-history dump
     // arriving by a new route.
     expect(speech.spoken, 'unmute replayed what the listener chose to miss')
@@ -102,7 +118,7 @@ describe('G5 — presence: who is in the room, who is talking, and mute', () => 
     await settle(20)
 
     await appendFile(alpha, record('a-1', 'first') + '\n')
-    await settle()
+    await until('the first reply to be spoken', () => speech.spoken.includes('first'))
 
     const p = h.presence()
     expect(p.inRoom.map((r) => r.file), 'the session that spoke is not in the room')

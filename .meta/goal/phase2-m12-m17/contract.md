@@ -55,7 +55,9 @@ Cap 3-4 concurrent agents. v1 decisions reopenable with evidence.
       *Deliverable:* a measured answer and a build if it is buildable; an honest blocked with
       `file:line` if it is not. **Do not repeat the old conclusion without re-deriving it.**
 
-- [ ] **G8 — the suite is honest.** `mutation-check` **37/37**: no SURVIVED, no drifted
+- [x] **G8 — the suite is honest.** ✅ **MET.** `37/37 mutants behaved as declared`, detached worktree at `bb6f835` per P41. Every survivor is killed, including **`skip-reported-as-failure`** — *a control the listener pressed must never be reported as an engine failure* — which sat on the P22 helplessness path with a test that could not notice. `stop-one-sided` and `bargein-no-cancel` were re-pointed after a refactor dropped braces from `cancelSynthesis` and added an `await` in the queue; a drifted target reports ERROR, which is loud and meaningless while the invariant sits unguarded. Original text follows.
+
+- [ ] **G8 original —** `mutation-check` **37/37**: no SURVIVED, no drifted
       targets. Today it is **34/37** at `6049c26`, load 11.01 `[measured-here]` — I wrote 33 in an earlier revision and in three agent briefs; 34 is what the script actually reports. The survivors are
       `skip-reported-as-failure`, where a control the listener pressed is reported as an
       engine failure and its own test cannot notice.
