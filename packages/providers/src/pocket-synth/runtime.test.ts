@@ -208,17 +208,65 @@ describe('downloadRuntime', () => {
       .rejects.toThrow(/no binary for darwin-x64|system voices are unaffected/)
   })
 
-  it('KEEPS a working runtime when the swap fails', async () => {
-    const dir = join(scratch(), 'rt')
+  /**
+   * R16-03: the case that used to live here was named "KEEPS a working runtime when the swap
+   * fails" and its fixture was a tarball missing a file — which throws at the WANTED-FILES check,
+   * before `mkdir(staging)` and before either rename. **It never reached the swap it was named
+   * for.** The three below do, by injecting at each rename boundary.
+   */
+  const seedPrevious = (dir: string): void => {
     mkdirSync(dir, { recursive: true })
     for (const f of FILES) writeFileSync(join(dir, f), 'PREVIOUS')
     writeFileSync(join(dir, RUNTIME_MANIFEST_FILE), `${RUNTIME_VERSION}/${RUNTIME_MANIFEST_VERSION}\n`)
+  }
+  const stillPrevious = (dir: string): boolean =>
+    existsSync(join(dir, FILES[0] ?? '')) && readFileSync(join(dir, FILES[0] ?? ''), 'utf8') === 'PREVIOUS'
 
-    const tgz = makeTarball(KEY, FILES.slice(0, 1)) // missing a file -> throws during extraction
-    await expect(downloadRuntime({ dir, key: KEY, fetchImpl: tarballFetch(tgz), integrity: integrityOf(tgz) }))
-      .rejects.toThrow()
-    expect(readFileSync(join(dir, FILES[0] ?? ''), 'utf8')).toBe('PREVIOUS')
+  it('KEEPS a working runtime when the swap fails AFTER the live directory moved aside', async () => {
+    const dir = join(scratch(), 'rt')
+    seedPrevious(dir)
+    const tgz = makeTarball(KEY, FILES)
+    await expect(downloadRuntime({
+      dir, key: KEY, fetchImpl: tarballFetch(tgz), integrity: integrityOf(tgz),
+      hooks: { afterBackup: () => { throw new Error('injected: died mid-rename') } },
+    })).rejects.toThrow(/injected/)
+    expect(stillPrevious(dir), 'a failed swap destroyed the working runtime').toBe(true)
     expect((await runtimeStatus(dir, KEY)).kind).toBe('ready')
+  })
+
+  it('KEEPS a working runtime when activation fails AFTER the rename', async () => {
+    const dir = join(scratch(), 'rt')
+    seedPrevious(dir)
+    const tgz = makeTarball(KEY, FILES)
+    await expect(downloadRuntime({
+      dir, key: KEY, fetchImpl: tarballFetch(tgz), integrity: integrityOf(tgz),
+      hooks: { afterSwap: () => { throw new Error('injected: activation failed') } },
+    })).rejects.toThrow(/injected/)
+    expect(stillPrevious(dir)).toBe(true)
+  })
+
+  it('CONTROL: with no hook injected, the same run REPLACES the runtime', async () => {
+    // Without this, the two cases above would also pass if `downloadRuntime` did nothing at all.
+    const dir = join(scratch(), 'rt')
+    seedPrevious(dir)
+    const tgz = makeTarball(KEY, FILES)
+    await downloadRuntime({ dir, key: KEY, fetchImpl: tarballFetch(tgz), integrity: integrityOf(tgz) })
+    expect(stillPrevious(dir)).toBe(false)
+    expect((await runtimeStatus(dir, KEY)).kind).toBe('ready')
+  })
+
+  it('recovers a runtime left behind by a SIGKILLed predecessor', async () => {
+    // `finally` does not run when a process is killed, so the backup must have a STABLE name and
+    // the next start must read it. A per-pid backup name is a name, not a recovery — R15-02's
+    // lesson, applied here before it could be found a third time.
+    const root = scratch()
+    const dir = join(root, 'rt')
+    seedPrevious(join(root, 'rt.previous'))
+    expect(existsSync(dir)).toBe(false)
+    const tgz = makeTarball(KEY, FILES)
+    await downloadRuntime({ dir, key: KEY, fetchImpl: tarballFetch(tgz), integrity: integrityOf(tgz) })
+    expect((await runtimeStatus(dir, KEY)).kind).toBe('ready')
+    expect(existsSync(join(root, 'rt.previous'))).toBe(false)
   })
 
   it('reports progress through every stage, in order', async () => {

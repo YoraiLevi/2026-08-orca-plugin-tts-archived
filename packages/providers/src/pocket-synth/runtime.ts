@@ -31,6 +31,12 @@ import { mkdir, readFile, writeFile, rename, rm, readdir, chmod } from 'node:fs/
 import { gunzipSync } from 'node:zlib'
 import { join, dirname } from 'node:path'
 import { modelDir } from './models.ts'
+import {
+  DownloadInProgressError, acquireDownloadLock, backupPathFor, recoverLiveFromBackup,
+  removeMatchingSiblings, isBackupName, isStagingName,
+} from './safe-swap.ts'
+
+export { DownloadInProgressError }
 
 /** The exact version this project is built and tested against. Never a range. */
 export const RUNTIME_VERSION = '1.27.0'
@@ -217,6 +223,12 @@ export async function downloadRuntime(options: {
   tarballUrl?: string
   /** Tests inject the integrity of that archive. Production never passes this. */
   integrity?: string
+  /** Failure-injection points, so a test can fail AFTER each rename. Tests only. */
+  hooks?: {
+    afterStage?: () => void | Promise<void>
+    afterBackup?: () => void | Promise<void>
+    afterSwap?: () => void | Promise<void>
+  }
 } = {}): Promise<string> {
   const key = options.key ?? platformKey()
   const wanted = RUNTIME_FILES[key]
@@ -269,39 +281,56 @@ export async function downloadRuntime(options: {
   }
 
   options.onProgress?.({ stage: 'installing' })
-  const staging = `${dir}.staging-${process.pid}`
-  const backup = `${dir}.previous-${process.pid}`
+
+  /*
+   * R16-03. This cache was written AFTER the model cache had been fixed twice for the same
+   * defect — R14-06 (delete-then-rename) and R15-02 (survives an exception but not SIGKILL or a
+   * second writer) — and it shipped with the original bug anyway. Its test named
+   * "KEEPS a working runtime when the swap fails" threw at the wanted-files check, before
+   * `mkdir(staging)` and before either rename, so it never touched the window it was named for.
+   *
+   * Fixing one call site three times is how a defect becomes a habit. The machinery is now
+   * `./safe-swap.ts`, shared with the model cache, so neither can have a different answer and the
+   * next cache cannot either.
+   */
   await mkdir(dirname(dir), { recursive: true })
-  await rm(staging, { recursive: true, force: true })
-  await mkdir(staging, { recursive: true })
+  // Anything left by a killed predecessor is recovered BEFORE we take the lock, because a stable
+  // `.previous` is only a recovery if something reads it.
+  await recoverLiveFromBackup(dir)
+  const lock = await acquireDownloadLock(dir)
+  const staging = `${dir}.staging-${process.pid}`
+  const backup = backupPathFor(dir)
 
   try {
+    await rm(staging, { recursive: true, force: true })
+    await mkdir(staging, { recursive: true })
     for (const [name, body] of found) {
       await writeFile(join(staging, name), body)
-      // The binding is loaded, not executed, but the shared libraries must be readable and the
-      // node file must keep its executable bit on platforms that care.
+      // The binding is loaded rather than executed, but the shared libraries must be readable and
+      // the `.node` file must keep its executable bit where the platform cares.
       if (name.endsWith('.node') || name.endsWith('.dylib') || name.endsWith('.so.1')) {
         await chmod(join(staging, name), 0o755)
       }
       options.onProgress?.({ stage: 'installing', file: name })
     }
     await writeFile(join(staging, RUNTIME_MANIFEST_FILE), `${RUNTIME_VERSION}/${RUNTIME_MANIFEST_VERSION}\n`)
-  } catch (err) {
-    await rm(staging, { recursive: true, force: true })
-    throw err
-  }
+    await options.hooks?.afterStage?.()
 
-  const hadPrevious = existsSync(dir)
-  await rm(backup, { recursive: true, force: true })
-  try {
+    const hadPrevious = existsSync(dir)
+    await rm(backup, { recursive: true, force: true })
     if (hadPrevious) await rename(dir, backup)
+    await options.hooks?.afterBackup?.()
     await rename(staging, dir)
+    await options.hooks?.afterSwap?.()
+    await rm(backup, { recursive: true, force: true })
+    return dir
   } catch (err) {
     await rm(dir, { recursive: true, force: true })
-    if (hadPrevious && existsSync(backup)) await rename(backup, dir)
+    if (existsSync(backup)) await rename(backup, dir)
     await rm(staging, { recursive: true, force: true })
     throw err
+  } finally {
+    await lock.release()
+    await removeMatchingSiblings(dir, (name, base) => isStagingName(base, name) && !isBackupName(base, name))
   }
-  await rm(backup, { recursive: true, force: true })
-  return dir
 }
