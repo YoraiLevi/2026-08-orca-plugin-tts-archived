@@ -6,6 +6,7 @@
  * a test run must not make a sound at the author's machine.
  */
 import { describe, it, expect } from 'vitest'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -142,6 +143,190 @@ function fakeProvider ({ backend = null, chunksPerCall = 1, throwOnPrepare = nul
     cancel () {}
   }
 }
+
+function routedProvider ({ id, voices, throwOnPrepare = null } = {}) {
+  const calls = []
+  let prepareCalls = 0
+  return {
+    id,
+    calls,
+    get prepareCalls () { return prepareCalls },
+    async prepare () {
+      prepareCalls++
+      if (throwOnPrepare) throw throwOnPrepare
+    },
+    async listVoices () { return voices },
+    async * generate (text, options = {}) {
+      calls.push({ text, options })
+      yield {
+        data: new Uint8Array([82, 73, 70, 70]),
+        format: 'wav', sampleRate: 22_050, channels: 1
+      }
+    },
+    cancel () {}
+  }
+}
+
+describe('R14-03 — /speak dispatches a backend-qualified voice key', () => {
+  it('routes the review payload to Pocket and hands it bare "eve", never "pocket:eve"', async () => {
+    const os = routedProvider({ id: 'os-synth', voices: ['Alex'] })
+    const pocket = routedProvider({ id: 'pocket', voices: ['pocket:eve'] })
+    const { base, close } = await listen(createLabServer({ provider: os, pocketProvider: pocket }))
+    try {
+      const res = await fetch(`${base}/speak`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        // Exact payload from R14-03. The page's nested `options.synthesize.voice` shape is
+        // exercised separately below; accepting one and ignoring the other was the measured bug.
+        body: JSON.stringify({ text: 'Backend dispatch probe.', options: { voice: 'pocket:eve' }, stream: false })
+      })
+      const body = await res.json()
+      expect(res.status).toBe(200)
+      expect(pocket.calls).toHaveLength(1)
+      expect(pocket.calls[0].options.voice).toBe('eve')
+      expect(pocket.calls[0].options.voice).not.toContain(':')
+      expect(os.calls).toEqual([])
+      expect(body).toMatchObject({ backend: 'pocket', voice: 'eve' })
+      expect(body.degradation).toBeUndefined()
+    } finally { await close() }
+  })
+
+  it('strips os: before the existing OS provider too', async () => {
+    const os = routedProvider({ id: 'os-synth', voices: ['Alex'] })
+    const pocket = routedProvider({ id: 'pocket', voices: ['pocket:eve'] })
+    const { base, close } = await listen(createLabServer({ provider: os, pocketProvider: pocket }))
+    try {
+      const res = await fetch(`${base}/speak`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          text: 'OS dispatch probe.', options: { synthesize: { voice: 'os:Alex' } }, stream: false
+        })
+      })
+      const body = await res.json()
+      expect(os.calls).toHaveLength(1)
+      expect(os.calls[0].options.voice).toBe('Alex')
+      expect(pocket.calls).toEqual([])
+      expect(body).toMatchObject({ backend: 'os', voice: 'Alex' })
+    } finally { await close() }
+  })
+
+  it('names an unavailable requested backend and the OS fallback in a renderable field', async () => {
+    const os = routedProvider({ id: 'os-synth', voices: ['Alex'] })
+    const pocket = routedProvider({
+      id: 'pocket', voices: ['pocket:eve'],
+      throwOnPrepare: new Error('onnxruntime-node has no binary for this machine')
+    })
+    const { base, close } = await listen(createLabServer({ provider: os, pocketProvider: pocket }))
+    try {
+      const res = await fetch(`${base}/speak`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Fallback probe.', options: { synthesize: { voice: 'pocket:eve' } }, stream: false
+        })
+      })
+      const body = await res.json()
+      expect(res.status).toBe(200)
+      expect(pocket.calls).toEqual([])
+      expect(os.calls).toHaveLength(1)
+      expect(os.calls[0].options.voice).toBeUndefined()
+      expect(body.backend).toBe('os')
+      expect(body.degradation).toMatchObject({
+        code: 'backend_unavailable', requestedBackend: 'pocket', servedBackend: 'os'
+      })
+      expect(body.degradation.reason).toMatch(/onnxruntime-node has no binary/)
+    } finally { await close() }
+  })
+
+  it('does not guess when the requested backend has no such voice', async () => {
+    const os = routedProvider({ id: 'os-synth', voices: ['Alex'] })
+    const pocket = routedProvider({ id: 'pocket', voices: ['pocket:eve'] })
+    const { base, close } = await listen(createLabServer({ provider: os, pocketProvider: pocket }))
+    try {
+      const res = await fetch(`${base}/speak`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Null resolver probe.', options: { synthesize: { voice: 'pocket:nobody' } }, stream: false
+        })
+      })
+      const body = await res.json()
+      expect(pocket.prepareCalls).toBe(0)
+      expect(pocket.calls).toEqual([])
+      expect(os.calls).toHaveLength(1)
+      expect(os.calls[0].options.voice).toBeUndefined()
+      expect(body.degradation).toMatchObject({
+        code: 'voice_unavailable', requestedBackend: 'pocket', requestedVoice: 'nobody',
+        servedBackend: 'os'
+      })
+    } finally { await close() }
+  })
+
+  it('names a backend that is not registered, separately from a missing voice', async () => {
+    const os = routedProvider({ id: 'os-synth', voices: ['Alex'] })
+    const pocket = routedProvider({ id: 'pocket', voices: ['pocket:eve'] })
+    const { base, close } = await listen(createLabServer({ provider: os, pocketProvider: pocket }))
+    try {
+      const res = await fetch(`${base}/speak`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Unknown backend probe.', options: { synthesize: { voice: 'cloud:eve' } }, stream: false
+        })
+      })
+      const body = await res.json()
+      expect(pocket.prepareCalls).toBe(0)
+      expect(pocket.calls).toEqual([])
+      expect(os.calls).toHaveLength(1)
+      expect(body.degradation).toMatchObject({
+        code: 'backend_unavailable', requestedBackend: 'cloud', requestedVoice: 'eve',
+        servedBackend: 'os'
+      })
+      expect(body.degradation.reason).toMatch(/not registered/)
+    } finally { await close() }
+  })
+
+  it('puts the same degradation field on the streaming head the page actually renders', async () => {
+    const os = routedProvider({ id: 'os-synth', voices: ['Alex'] })
+    const pocket = routedProvider({
+      id: 'pocket', voices: ['pocket:eve'],
+      throwOnPrepare: new Error('Pocket model is not downloaded')
+    })
+    const { base, close } = await listen(createLabServer({ provider: os, pocketProvider: pocket }))
+    try {
+      const res = await fetch(`${base}/speak`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          text: 'Streaming fallback probe.',
+          options: { synthesize: { voice: 'pocket:eve' } }
+        })
+      })
+      const records = []
+      for await (const record of readLines(res)) records.push(record)
+      expect(records[0]).toMatchObject({
+        kind: 'head', backend: 'os', voice: null,
+        degradation: {
+          code: 'backend_unavailable', requestedBackend: 'pocket', servedBackend: 'os'
+        }
+      })
+      expect(records[0].degradation.reason).toMatch(/not downloaded/)
+    } finally { await close() }
+  })
+
+  it('keeps the named Linux speech-service backend while also naming the routed provider', async () => {
+    const os = {
+      ...fakeProvider({ backend: 'spd-say' }),
+      id: 'os-synth', async listVoices () { return ['Alex'] }
+    }
+    const pocket = routedProvider({ id: 'pocket', voices: ['pocket:eve'] })
+    const { base, close } = await listen(createLabServer({ provider: os, pocketProvider: pocket }))
+    try {
+      const body = await (await fetch(`${base}/speak`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Elsewhere route probe.', stream: false })
+      })).json()
+      expect(body).toMatchObject({
+        played: 'elsewhere', backend: 'spd-say', providerBackend: 'os', voice: null
+      })
+    } finally { await close() }
+  })
+})
 
 describe('004 section 2 — there are three provider outcomes, not two', () => {
   it('bytes: returns base64 chunks and never a file path', async () => {
@@ -828,6 +1013,22 @@ describe('PV-031 — /model/status names what is missing', () => {
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  it('marks a ready cache present at server start as preseeded or otherwise unverified', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-preseeded-'))
+    await readyModelFixture(dir)
+    const { base, close } = await listen(createLabServer({ modelDirectory: dir }))
+    try {
+      const body = await (await fetch(`${base}/model/status`)).json()
+      expect(body.kind).toBe('ready')
+      expect(body.installation).toEqual({
+        source: 'preseeded-or-unverified', verified: false, manifestVersion: 2
+      })
+    } finally {
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('PV-032 — /model/download streams progress and a terminal result', () => {
@@ -844,7 +1045,13 @@ describe('PV-032 — /model/download streams progress and a terminal result', ()
       return options.dir
     }
     const { base, close } = await listen(createLabServer({
-      modelDirectory: dir, fetchImpl: noNetwork, downloadModelImpl
+      modelDirectory: dir, fetchImpl: noNetwork, downloadModelImpl,
+      // This row tests the transport. R14-10 below tests the real byte verifier with an
+      // independently hashed tiny artifact, so a 173 MB production manifest is never fabricated.
+      verifyModelInstallImpl: async () => ({
+        verified: true, manifestVersion: 2,
+        artifactCount: POCKET_DOWNLOAD_FILES.length, totalBytes: 1
+      })
     }))
     try {
       const res = await fetch(`${base}/model/download`, { method: 'POST' })
@@ -875,7 +1082,13 @@ describe('PV-032 — /model/download streams progress and a terminal result', ()
       })
       throw new Error('downloading flow_lm_main_int8.onnx: HTTP 503 Service Unavailable')
     }
-    const { base, close } = await listen(createLabServer({ modelDirectory: dir, downloadModelImpl }))
+    const { base, close } = await listen(createLabServer({
+      modelDirectory: dir, downloadModelImpl,
+      verifyModelInstallImpl: async () => ({
+        verified: true, manifestVersion: 2,
+        artifactCount: POCKET_DOWNLOAD_FILES.length, totalBytes: 1
+      })
+    }))
     try {
       const res = await fetch(`${base}/model/download`, { method: 'POST' })
       const records = []
@@ -886,6 +1099,100 @@ describe('PV-032 — /model/download streams progress and a terminal result', ()
       })
       expect(records.at(-1).cause).toMatch(/HTTP 503 Service Unavailable/)
       expect(records.at(-1).kind, 'the stream stopped without a terminal failure record').toBe('error')
+    } finally {
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('R14-10 — the falsifier distinguishes a verified page download from a preseeded cache', () => {
+  const manifestFile = '.r14-test-manifest'
+  const manifestVersion = 17
+  const correct = Buffer.from('the bytes the page downloaded')
+  const artifact = {
+    file: 'tiny-model.onnx', bytes: correct.length,
+    sha256: createHash('sha256').update(correct).digest('hex')
+  }
+
+  function statusProbe (dir, ready) {
+    return async () => ready.value
+      ? { kind: 'ready', dir }
+      : { kind: 'absent', dir, missing: [artifact.file] }
+  }
+
+  it('records manifest-and-digest verification only after this server downloaded the bytes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-proof-'))
+    const ready = { value: false }
+    const downloadModelImpl = async (options) => {
+      await writeFile(join(options.dir, artifact.file), correct)
+      await writeFile(join(options.dir, manifestFile), `${manifestVersion}\n`)
+      ready.value = true
+      return options.dir
+    }
+    const { base, close } = await listen(createLabServer({
+      modelDirectory: dir,
+      modelStatusImpl: statusProbe(dir, ready),
+      verificationArtifacts: [artifact], verificationManifestFile: manifestFile,
+      verificationManifestVersion: manifestVersion,
+      downloadModelImpl
+    }))
+    try {
+      const before = await (await fetch(`${base}/model/status`)).json()
+      expect(before.installation.verified).toBe(false)
+
+      const records = []
+      for await (const record of readLines(await fetch(`${base}/model/download`, { method: 'POST' }))) {
+        records.push(record)
+      }
+      expect(records.at(-1)).toMatchObject({
+        kind: 'complete', ok: true,
+        verification: {
+          verified: true, manifestVersion, artifactCount: 1, totalBytes: correct.length
+        }
+      })
+
+      const after = await (await fetch(`${base}/model/status`)).json()
+      expect(after.installation).toEqual({
+        source: 'voice-lab-download', verified: true,
+        manifestVersion, artifactCount: 1, totalBytes: correct.length
+      })
+    } finally {
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses to mint page-download provenance when a downloaded digest is wrong', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-proof-bad-'))
+    const ready = { value: false }
+    const downloadModelImpl = async (options) => {
+      await writeFile(join(options.dir, artifact.file), Buffer.from('wrong bytes'))
+      await writeFile(join(options.dir, manifestFile), `${manifestVersion}\n`)
+      ready.value = true
+      return options.dir
+    }
+    const { base, close } = await listen(createLabServer({
+      modelDirectory: dir,
+      modelStatusImpl: statusProbe(dir, ready),
+      verificationArtifacts: [artifact], verificationManifestFile: manifestFile,
+      verificationManifestVersion: manifestVersion,
+      downloadModelImpl
+    }))
+    try {
+      const records = []
+      for await (const record of readLines(await fetch(`${base}/model/download`, { method: 'POST' }))) {
+        records.push(record)
+      }
+      expect(records.at(-1)).toMatchObject({
+        kind: 'error', ok: false, error: 'model_download_failed', file: artifact.file
+      })
+      expect(records.at(-1).cause).toMatch(/tiny-model\.onnx.*(bytes|hash)/)
+
+      const status = await (await fetch(`${base}/model/status`)).json()
+      expect(status.installation).toEqual({
+        source: 'preseeded-or-unverified', verified: false, manifestVersion
+      })
     } finally {
       await close()
       await rm(dir, { recursive: true, force: true })
@@ -908,7 +1215,13 @@ describe('PV-033 — a second model download is refused by name', () => {
       await readyModelFixture(options.dir)
       return options.dir
     }
-    const { base, close } = await listen(createLabServer({ modelDirectory: dir, downloadModelImpl }))
+    const { base, close } = await listen(createLabServer({
+      modelDirectory: dir, downloadModelImpl,
+      verifyModelInstallImpl: async () => ({
+        verified: true, manifestVersion: 2,
+        artifactCount: POCKET_DOWNLOAD_FILES.length, totalBytes: 1
+      })
+    }))
     try {
       const firstPending = fetch(`${base}/model/download`, { method: 'POST' })
       const firstEffect = await Promise.race([

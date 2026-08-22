@@ -47,6 +47,7 @@ const CHUNKER_SRC = join(REPO_ROOT, 'packages/core/src/chunker/index.ts')
 const PROVIDER_SRC = join(REPO_ROOT, 'packages/providers/src/os-synth/index.ts')
 const POCKET_MODELS_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/models.ts')
 const POCKET_VOICES_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/voices.ts')
+const POCKET_PROVIDER_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/index.ts')
 
 const { normalize } = await import(pathToFileURL(NORMALIZER_SRC).href)
 const { Chunker } = await import(pathToFileURL(CHUNKER_SRC).href)
@@ -55,11 +56,12 @@ const { OsSynthProvider, LINUX_WAV_BACKENDS, LINUX_INSTALL_HINT } =
 const pocketModels = await import(pathToFileURL(POCKET_MODELS_SRC).href)
 const {
   modelStatus, modelDir: defaultModelDir, downloadModel,
-  MODEL_TOTAL_BYTES, MODEL_ARTIFACTS
+  MODEL_TOTAL_BYTES, MODEL_ARTIFACTS, MANIFEST_VERSION, MANIFEST_FILE, sha256
 } = pocketModels
 const {
-  POCKET_VOICES, parseVoiceKey, OS_BACKEND, POCKET_BACKEND
+  POCKET_VOICES, parseVoiceKey, resolveVoiceForBackend, OS_BACKEND, POCKET_BACKEND
 } = await import(pathToFileURL(POCKET_VOICES_SRC).href)
+const { PocketSynthProvider } = await import(pathToFileURL(POCKET_PROVIDER_SRC).href)
 // PV-050 can extend the already-landed model manager with pinned reference clips. Keep this
 // surface honest in both revisions: the downloader's optional expanded manifest, when present,
 // is what the progress count and advertised byte total describe.
@@ -227,6 +229,7 @@ export async function assertLoadedModuleIsOnDiskSource (fixtureDir = join(REPO_R
   assertSourceModule(pathToFileURL(PROVIDER_SRC).href, 'os-synth provider')
   assertSourceModule(pathToFileURL(POCKET_MODELS_SRC).href, 'Pocket model manager')
   assertSourceModule(pathToFileURL(POCKET_VOICES_SRC).href, 'Pocket voice registry')
+  assertSourceModule(pathToFileURL(POCKET_PROVIDER_SRC).href, 'Pocket provider')
 
   const names = existsSync(fixtureDir)
     ? (await readdir(fixtureDir)).filter((f) => f.endsWith('.md')).toSorted()
@@ -286,7 +289,8 @@ export const SPOKE_ELSEWHERE_DISABLED = ['compare', 'replay', 'stage-play', 'tim
  *     status code, which is the one thing this format must do that a single envelope cannot.
  *
  * The records, in order:
- *   { kind: 'head',        played, backend, spoken, chunkCount, timings }   exactly one, first
+ *   { kind: 'head',        played, backend, voice, degradation?, spoken,
+ *                           chunkCount, timings }                            exactly one, first
  *   { kind: 'chunk',       i, text, boundary, isFirst, format, ... base64 } zero or more
  *   { kind: 'chunk-error', i, text, name, message }                        zero or more
  *   { kind: 'end',         ok, delivered, lost, announcement, timings }     exactly one, last
@@ -727,9 +731,11 @@ async function readBody (req, limit = 8 * 1024 * 1024) {
 }
 
 /** `{ stream: false }` — one envelope, the shape this endpoint returned before FR-024. */
-async function speakOnce (res, prov, text, options, ac, allowElsewhere = false) {
-  const { status, body } = await speak(prov, text, options, { allowElsewhere, signal: ac.signal })
-  return json(res, status, body)
+async function speakOnce (res, route, text, ac, allowElsewhere = false) {
+  const { status, body } = await speak(
+    route.provider, text, route.options, { allowElsewhere, signal: ac.signal }
+  )
+  return json(res, status, routedBody(body, route))
 }
 
 /** Write one NDJSON record and RESOLVE ONLY WHEN THE SOCKET HAS TAKEN IT — that is the backpressure. */
@@ -747,19 +753,24 @@ function writeRecord (res, rec) {
  * format" above. Records produced before that point (a `head`, any early `chunk-error`) are held
  * and flushed together with the first chunk, in order.
  */
-async function speakStreaming (res, prov, text, options, { allowElsewhere, signal }) {
+async function speakStreaming (res, route, text, { allowElsewhere, signal }) {
   let started = false
   const pending = []
 
   // BACKPRESSURE IS THE `await` IN THIS LOOP. `speakStream` is suspended at its `yield` until the
   // loop asks for the next record, and the loop does not ask until the socket has taken the bytes
   // of the last one — so a slow page cannot make the server hold a whole fixture of WAVs.
-  for await (const rec of speakStream(prov, text, options, { allowElsewhere, signal })) {
+  for await (const original of speakStream(
+    route.provider, text, route.options, { allowElsewhere, signal }
+  )) {
+    const rec = original.kind === 'head'
+      ? { ...original, ...routeFields(route) }
+      : original
     if (rec.kind === 'fatal' || rec.kind === 'elsewhere') {
       // By construction nothing has been written yet: `fatal` is only reached before the first
       // chunk (after one, a failure is a `chunk-error` record instead).
       if (started) { await writeRecord(res, rec); res.end(); return }
-      return json(res, rec.status, rec.body)
+      return json(res, rec.status, routedBody(rec.body, route))
     }
     if (!started) {
       pending.push(rec)
@@ -778,7 +789,10 @@ async function speakStreaming (res, prov, text, options, { allowElsewhere, signa
   }
   if (!started) {
     // No chunks and no fatal: the utterance was empty, or Stop landed before the first chunk.
-    return json(res, 200, { played: 'browser', chunks: [], chunkCount: 0, spoken: pending.find((r) => r.kind === 'head')?.spoken ?? '', empty: true })
+    return json(res, 200, routedBody({
+      played: 'browser', chunks: [], chunkCount: 0,
+      spoken: pending.find((r) => r.kind === 'head')?.spoken ?? '', empty: true
+    }, route))
   }
   res.end()
 }
@@ -827,17 +841,214 @@ function voiceEntries (osVoices, pocketStatus) {
   return [...os, ...pocket]
 }
 
-function downloadFailureFile (err, completedFiles) {
+/** Read both the review payload (`options.voice`) and the page payload (`options.synthesize.voice`). */
+function requestedVoiceKey (options) {
+  const key = options?.synthesize?.voice ?? options?.voice
+  return typeof key === 'string' && key.length > 0 ? key : null
+}
+
+/**
+ * Replace a qualified key with the bare provider-local name, or remove voice on a loud fallback.
+ * The top-level `voice` spelling is consumed here so it cannot accidentally become a second wire.
+ */
+function optionsForProvider (options, voice) {
+  const { voice: _requestVoice, ...rest } = options ?? {}
+  const { voice: _qualifiedVoice, ...synthesize } = rest.synthesize ?? {}
+  return {
+    ...rest,
+    synthesize: voice === null ? synthesize : { ...synthesize, voice }
+  }
+}
+
+function degradation (code, requested, reason) {
+  return {
+    code,
+    requestedBackend: requested.backend,
+    requestedVoice: requested.voice,
+    servedBackend: OS_BACKEND,
+    reason
+  }
+}
+
+/**
+ * Resolve the backend BEFORE the response starts. Pocket `prepare()` is the availability probe:
+ * if its model/runtime cannot serve, the zero-setup OS floor speaks and the response names the
+ * substitution. A qualified key is never handed to either provider.
+ */
+async function routeSpeak (osProvider, pocketProvider, options) {
+  const key = requestedVoiceKey(options)
+  if (key === null) {
+    return {
+      provider: osProvider, options: optionsForProvider(options, null),
+      servedBackend: OS_BACKEND, voice: null, degradation: null
+    }
+  }
+
+  const requested = parseVoiceKey(key)
+  if (requested.backend === OS_BACKEND) {
+    return {
+      provider: osProvider, options: optionsForProvider(options, requested.voice),
+      servedBackend: OS_BACKEND, voice: requested.voice, degradation: null
+    }
+  }
+
+  if (requested.backend !== POCKET_BACKEND) {
+    return {
+      provider: osProvider, options: optionsForProvider(options, null),
+      servedBackend: OS_BACKEND, voice: null,
+      degradation: degradation(
+        'backend_unavailable', requested,
+        `Speech backend ${JSON.stringify(requested.backend)} is not registered; using ${OS_BACKEND} instead.`
+      )
+    }
+  }
+
+  let available
+  try {
+    available = await pocketProvider.listVoices()
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    return {
+      provider: osProvider, options: optionsForProvider(options, null),
+      servedBackend: OS_BACKEND, voice: null,
+      degradation: degradation('backend_unavailable', requested, reason)
+    }
+  }
+  const voice = resolveVoiceForBackend([key], POCKET_BACKEND, available)
+  if (voice === null) {
+    return {
+      provider: osProvider, options: optionsForProvider(options, null),
+      servedBackend: OS_BACKEND, voice: null,
+      degradation: degradation(
+        'voice_unavailable', requested,
+        `Pocket TTS has no voice named ${JSON.stringify(requested.voice)}; using ${OS_BACKEND} instead.`
+      )
+    }
+  }
+
+  try {
+    await pocketProvider.prepare()
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    return {
+      provider: osProvider, options: optionsForProvider(options, null),
+      servedBackend: OS_BACKEND, voice: null,
+      degradation: degradation('backend_unavailable', requested, reason)
+    }
+  }
+  return {
+    provider: pocketProvider, options: optionsForProvider(options, voice),
+    servedBackend: POCKET_BACKEND, voice, degradation: null
+  }
+}
+
+function routeFields (route) {
+  return {
+    backend: route.servedBackend,
+    voice: route.voice,
+    ...(route.degradation === null ? {} : { degradation: route.degradation })
+  }
+}
+
+function routedBody (body, route) {
+  if (typeof body?.played === 'string' && body.played.startsWith('elsewhere')) {
+    return {
+      ...body,
+      providerBackend: route.servedBackend,
+      voice: route.voice,
+      ...(route.degradation === null ? {} : { degradation: route.degradation })
+    }
+  }
+  return { ...body, ...routeFields(route) }
+}
+
+function downloadFailureFile (err, completedFiles, artifacts = DOWNLOAD_ARTIFACTS) {
   if (typeof err?.file === 'string' && err.file.length > 0) return err.file
   const message = err instanceof Error ? err.message : String(err)
-  const named = DOWNLOAD_ARTIFACTS.find((artifact) => message.includes(artifact.file))
+  const named = artifacts.find((artifact) => message.includes(artifact.file))
   if (named !== undefined) return named.file
   if (/\bLICENSE\b/.test(message)) return 'LICENSE'
-  return DOWNLOAD_ARTIFACTS[completedFiles]?.file ?? 'model'
+  return artifacts[completedFiles]?.file ?? 'model'
+}
+
+function verificationError (file, message) {
+  return Object.assign(new Error(message), { file })
+}
+
+/**
+ * Independently verify what the page just downloaded. `modelStatus()` proves names + manifest
+ * version; this proves the bytes behind every named artifact. A pre-existing ready directory is
+ * deliberately not granted this receipt: R14-10's falsifier must start empty and acquire here.
+ */
+async function verifyModelInstall (
+  dir, {
+    artifacts = DOWNLOAD_ARTIFACTS,
+    manifestFile = MANIFEST_FILE,
+    manifestVersion = MANIFEST_VERSION
+  } = {}
+) {
+  let found
+  try {
+    found = (await readFile(join(dir, manifestFile), 'utf8')).trim()
+  } catch (err) {
+    throw verificationError(
+      manifestFile,
+      `${manifestFile} could not be read after download: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+  if (found !== String(manifestVersion)) {
+    throw verificationError(
+      manifestFile,
+      `${manifestFile} says version ${JSON.stringify(found)}, expected ${manifestVersion}`
+    )
+  }
+
+  let totalBytes = 0
+  for (const artifact of artifacts) {
+    let body
+    try {
+      body = await readFile(join(dir, artifact.file))
+    } catch (err) {
+      throw verificationError(
+        artifact.file,
+        `${artifact.file} could not be read after download: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+    if (body.length !== artifact.bytes) {
+      throw verificationError(
+        artifact.file,
+        `${artifact.file} is ${body.length} bytes after download, expected ${artifact.bytes}`
+      )
+    }
+    const got = sha256(body)
+    if (got !== artifact.sha256) {
+      throw verificationError(
+        artifact.file,
+        `${artifact.file} hashes to ${got} after download, expected ${artifact.sha256}`
+      )
+    }
+    totalBytes += body.length
+  }
+  return {
+    verified: true, manifestVersion,
+    artifactCount: artifacts.length, totalBytes
+  }
+}
+
+function installationStatus (status, proof, manifestVersion) {
+  if (status.kind !== 'ready') {
+    return { source: 'not-ready', verified: false, manifestVersion }
+  }
+  if (proof !== null) return { source: 'voice-lab-download', ...proof }
+  return { source: 'preseeded-or-unverified', verified: false, manifestVersion }
 }
 
 async function streamModelDownload (
-  res, { dir, signal, fetchImpl, downloadModelImpl }
+  res, {
+    dir, signal, fetchImpl, downloadModelImpl, modelStatusImpl,
+    verifyModelInstallImpl, onVerified,
+    artifacts = DOWNLOAD_ARTIFACTS, totalBytes = DOWNLOAD_TOTAL_BYTES
+  }
 ) {
   res.writeHead(200, {
     'content-type': 'application/x-ndjson; charset=utf-8',
@@ -846,7 +1057,7 @@ async function streamModelDownload (
   })
   await writeRecord(res, {
     kind: 'start', backend: POCKET_BACKEND,
-    fileCount: DOWNLOAD_ARTIFACTS.length, totalBytes: DOWNLOAD_TOTAL_BYTES
+    fileCount: artifacts.length, totalBytes
   })
 
   // `downloadModel` calls onProgress synchronously after each complete file. Serialize those tiny
@@ -871,7 +1082,7 @@ async function streamModelDownload (
 
     // R003: the downloader returning is not the gate. Ask the cache whether the files it needs are
     // actually ready, so an injected or future downloader cannot earn a false terminal success.
-    const status = await modelStatus(dir)
+    const status = await modelStatusImpl(dir)
     if (status.kind !== 'ready') {
       const file = status.kind === 'absent' ? (status.missing[0] ?? 'model') : 'model'
       throw Object.assign(new Error(
@@ -881,9 +1092,17 @@ async function streamModelDownload (
       ), { file })
     }
 
+    // R14-10: `ready` can describe files a developer copied in by hand. Only an independent
+    // version + digest pass over THIS request's result earns the falsifier's download receipt.
+    const verification = await verifyModelInstallImpl(dir)
+    if (verification?.verified !== true) {
+      throw verificationError('model', 'the model verifier returned without verifying the install')
+    }
+    onVerified(verification)
+
     await writeRecord(res, {
       kind: 'complete', ok: true, backend: POCKET_BACKEND, dir,
-      fileCount: DOWNLOAD_ARTIFACTS.length, totalBytes: DOWNLOAD_TOTAL_BYTES
+      fileCount: artifacts.length, totalBytes, verification
     })
   } catch (err) {
     // An HTTP status cannot change after `start`; the failure therefore MUST be a terminal record.
@@ -892,7 +1111,7 @@ async function streamModelDownload (
     const cause = err instanceof Error ? err.message : String(err)
     await writeRecord(res, {
       kind: 'error', ok: false, error: 'model_download_failed', backend: POCKET_BACKEND,
-      file: downloadFailureFile(err, completedFiles),
+      file: downloadFailureFile(err, completedFiles, artifacts),
       name: err?.name ?? err?.constructor?.name ?? 'Error',
       cause,
       message: cause
@@ -902,17 +1121,28 @@ async function streamModelDownload (
 }
 
 export function createLabServer ({
-  provider, fixtureDir, pageDir, settingsPath,
-  modelDirectory, fetchImpl, downloadModelImpl = downloadModel
+  provider, pocketProvider, fixtureDir, pageDir, settingsPath,
+  modelDirectory, fetchImpl, downloadModelImpl = downloadModel,
+  modelStatusImpl = modelStatus, verifyModelInstallImpl,
+  verificationArtifacts = DOWNLOAD_ARTIFACTS,
+  verificationManifestFile = MANIFEST_FILE,
+  verificationManifestVersion = MANIFEST_VERSION
 } = {}) {
-  const prov = provider ?? new OsSynthProvider()
   const fixtures = fixtureDir ?? join(REPO_ROOT, 'fixtures')
   const page = pageDir ?? join(REPO_ROOT, 'voice-lab')
   const inbox = settingsPath ?? settingsPathFor()
   const pocketDir = modelDirectory ?? defaultModelDir()
+  const prov = provider ?? new OsSynthProvider()
+  const pocketProv = pocketProvider ?? new PocketSynthProvider({ dir: pocketDir })
+  const verifyInstall = verifyModelInstallImpl ?? ((dir) => verifyModelInstall(dir, {
+    artifacts: verificationArtifacts,
+    manifestFile: verificationManifestFile,
+    manifestVersion: verificationManifestVersion
+  }))
   let inflight = null
   let voiceCache = null
   let modelDownloadInFlight = null
+  let modelInstallProof = null
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${HOST}`)
@@ -936,9 +1166,10 @@ export function createLabServer ({
         // the synthesizer is cancelled here rather than at the next poll. `writableEnded` keeps a
         // NORMAL end (which also emits 'close') from looking like a listener pressing Stop.
         res.on('close', () => { if (!res.writableEnded) ac.abort() })
+        const route = await routeSpeak(prov, pocketProv, options)
         const done = stream === false
-          ? await speakOnce(res, prov, text, options, ac)
-          : await speakStreaming(res, prov, text, options, { allowElsewhere, signal: ac.signal })
+          ? await speakOnce(res, route, text, ac, allowElsewhere)
+          : await speakStreaming(res, route, text, { allowElsewhere, signal: ac.signal })
         if (inflight === ac) inflight = null
         return done
       }
@@ -947,6 +1178,7 @@ export function createLabServer ({
         inflight?.abort()
         inflight = null
         prov.cancel?.()
+        pocketProv.cancel?.()
         return json(res, 200, { stopped: true })
       }
 
@@ -954,7 +1186,7 @@ export function createLabServer ({
         if (voiceCache === null) voiceCache = await prov.listVoices()   // ~487 ms on macOS; cached (P28)
         // Model status is deliberately NOT cached: a completed button press must make Pocket
         // voices available on the very next GET without restarting this server.
-        const pocketStatus = await modelStatus(pocketDir)
+        const pocketStatus = await modelStatusImpl(pocketDir)
         return json(res, 200, {
           voices: voiceEntries(voiceCache, pocketStatus),
           platform: process.platform,
@@ -963,7 +1195,13 @@ export function createLabServer ({
       }
 
       if (req.method === 'GET' && path === '/model/status') {
-        return json(res, 200, await modelStatus(pocketDir))
+        const status = await modelStatusImpl(pocketDir)
+        return json(res, 200, {
+          ...status,
+          installation: installationStatus(
+            status, modelInstallProof, verificationManifestVersion
+          )
+        })
       }
 
       if (req.method === 'POST' && path === '/model/download') {
@@ -981,7 +1219,11 @@ export function createLabServer ({
         res.on('close', () => { if (!res.writableEnded) ac.abort() })
         try {
           return await streamModelDownload(res, {
-            dir: pocketDir, signal: ac.signal, fetchImpl, downloadModelImpl
+            dir: pocketDir, signal: ac.signal, fetchImpl, downloadModelImpl,
+            modelStatusImpl, verifyModelInstallImpl: verifyInstall,
+            onVerified: (proof) => { modelInstallProof = proof },
+            artifacts: verificationArtifacts,
+            totalBytes: verificationArtifacts.reduce((n, artifact) => n + artifact.bytes, 0)
           })
         } finally {
           if (modelDownloadInFlight === current) modelDownloadInFlight = null

@@ -360,7 +360,8 @@ describe('SC-14 — every module the Lab loads, loads under the resolver that sh
     // their absence the moment they were imported, which is the second time it has earned its
     // keep -- and this time against a change made by a different agent in a different file.
     'packages/providers/src/pocket-synth/models.ts',
-    'packages/providers/src/pocket-synth/voices.ts'
+    'packages/providers/src/pocket-synth/voices.ts',
+    'packages/providers/src/pocket-synth/index.ts'
   ]
 
   /**
