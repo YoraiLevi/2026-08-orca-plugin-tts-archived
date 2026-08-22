@@ -13,44 +13,52 @@
 
 ## IN PROGRESS — one task, named, per R041
 
-**`PV-067` — route `POST /speak` by backend key** (R14-03/R14-10), owned by an agent right now.
-My own next task is **`PV-065`**, the SentencePiece lattice port.
+**`PV-081` — R16-05/R16-06: the UI probe is calibrated to the FALLBACK.** Owned by an agent
+(`PV-probe`) that may have been cut off by the 5-hour window; check its file before redoing it.
 
-- **Gate for PV-065:** the two `it.fails` rows in `sentencepiece.test.ts` go GREEN and the
-  11,344-input differential corpus against Python reaches zero disagreements.
-- **Do not guess a third time.** `>` and `>=` have both been measured against that corpus: 17
-  disagreements and 21 respectively, in opposite directions. It is not a comparison operator and it
-  is not float precision (`c + cc === cc + c` in f64 and f32, checked). It is `end_nodes_`
-  insertion order in SentencePiece's lattice.
+- **Gate:** with Pocket ABSENT, `node scripts/ui-probe.mjs` must NOT report U6–U9 green. Today it
+  does, which means the nine green checks I reported to the author twice **do not prove a neural
+  voice was ever heard.** That is the single most important open item, because his review is the
+  critical path and this is the instrument that would tell him it works.
+- The other open agent task is **`PV-079`/R16-04**, the tokenizer: my `it.fails` names `Zggggg` as
+  "the one survivor" and round 16 found **seven** in a 728-input `Xyyyyy` grid. My 1-in-11,344 was a
+  statement about my corpus, not about the tokenizer.
 
-### Where the feature stands
+### Where the feature stands at `b94ad8a`
 
-**Phase 0-2 landed and then round 14 found three criticals in them, all now closed:** the model
-swap destroyed what it promised to preserve (PV-060), `ready` reported yes while no voice had a
-clip (PV-062), and there was **no delivery path for the native runtime at all** (PV-063) — that
-last one made the whole feature decorative for anybody who is not the author, since ORCA never runs
-`npm install` for a plugin.
+**967 tests, 43 files, 44/44 mutants, typecheck 0, lint 0, all pushed.**
 
-**The engine works and is proved by an oracle that can fail.** `scripts/pocket-e2e.mjs` transcribes
-its own output with an unrelated STT model and compares against the input text; `--prove` breaks
-the recurrent state fill and shows WER going 0.00 → 0.67.
+Round 15's nine are closed. Round 16 found six; **four are closed** (R16-01, R16-02, R16-03 by me;
+R16-04 and R16-05/06 are the two open agent tasks).
 
-**921 tests, 43 files, typecheck 0, lint 0** at `aa649af`.
+**The engine works and the oracle that says so is now sound** — `scripts/pocket-e2e.mjs` gates at
+WER **0** over four sentences, plus DURATION, WAVEFORM and DETERMINISM gates the transcriber cannot
+provide, and `--prove` runs a five-mutation matrix in which four go red and one is a declared
+equivalence.
 
-### Running in parallel — disjoint file sets, per P34
+### The pattern this session should be judged by
 
-| Agent | Owns | Task |
-|---|---|---|
-| PV-resampler | `pocket-synth/audio.{ts,test.ts}` | PV-066 (R14-09) |
-| PV-dispatch | `scripts/voice-lab.{mjs,test.mjs}` | PV-067 (R14-03/10) |
-| PV-picker | `voice-lab/index.html`, `scripts/ui-probe.mjs` | PV-040…044 — **the falsifier** |
-| PV-review15 | `docs/design/023-review-round15.md` | adversarial round 15 |
+Thirteen costumes of one defect: **a check that cannot fail for the thing it watches.** Three of
+round 15's nine and three of round 16's six were HALF-FINISHED REPAIRS OF MINE — the licence fetch
+fixed while its status check stayed unaware, a swap called "reversible at every step" on one tested
+path, an integrity pin for an executable that only checked the string's shape. And my own mutation
+matrix was vacuous three times before it was real.
 
-### Waiting on the author, and NOT blocking anything
+**`safe-swap.ts` is the response that generalises**: the swap defect was fixed three times in two
+places before it became one shared module. Prefer that shape.
 
-- **D004's principle-III judgement.** `darwin-x64` gets no neural voices because upstream publishes
-  no binary. Proceeding on the recorded default (R047): ship it, name the gap in the product.
-- C7 taste defaults · D002 Q5 policy · whether an INCONCLUSIVE probe should fail CI.
+### A PROCESS FAILURE WORTH NOT REPEATING
+
+Agents reported through `orca orchestration check`, and I was reading `git log` instead. **A worker
+asked which cancel contract to implement, timed out, took the weaker one, and round 15 then found
+exactly that defect.** Two more escalated the same SC-14 ownership question and both timed out.
+**Read the mailbox, not the commit log.**
+
+### Dispatch notes
+
+`grok` launches clean on the first try. `codex` needs its update prompt dismissed before every
+worker will start (three round-trips each). The `claude` launcher is disabled in this install, and
+the Agent tool cannot spawn — stale tmux team socket.
 
 ## One-paragraph status
 
