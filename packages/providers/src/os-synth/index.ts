@@ -38,6 +38,16 @@ export interface OsSynthOptions {
    * developer's machine and no audio capture anywhere) can be exercised at all.
    */
   readonly linuxBackend?: LinuxBackend
+  /**
+   * The backend candidates the Linux ladder probes, defaulting to `LINUX_BACKENDS`.
+   *
+   * `linuxBackend` seeds a backend that WORKS. This is the opposite seam, and the invariant "a
+   * synthesizer that cannot run must never report itself warm" needs it: with espeak-ng installed
+   * there is no way to make resolution fail, so the Linux arm of that test used to early-return
+   * and the guard went unexercised — 33 of 35 tests skipped, which the mutation harness reported
+   * as a surviving mutant with no further explanation.
+   */
+  readonly linuxBackendCandidates?: readonly LinuxBackend[]
 }
 
 /** PowerShell + Add-Type of System.Speech is slow to start; be generous but never unbounded. */
@@ -313,6 +323,7 @@ export class OsSynthProvider implements TtsProvider {
   #child: ChildProcess | null = null
   #cancelled = false
   #linuxBackend: LinuxBackend | null | undefined = undefined
+  #linuxCandidates: readonly LinuxBackend[] = LINUX_BACKENDS
   #announcedFloor = false
   #unavailableReason: string | null = null
   /**
@@ -329,6 +340,7 @@ export class OsSynthProvider implements TtsProvider {
     this.#timeoutMs = opts.timeoutMs ?? DEFAULT_SPAWN_TIMEOUT_MS
     this.#notify = opts.notify ?? (() => {})
     if (opts.linuxBackend !== undefined) this.#linuxBackend = opts.linuxBackend
+    if (opts.linuxBackendCandidates !== undefined) this.#linuxCandidates = opts.linuxBackendCandidates
   }
 
   get isWarm(): boolean { return this.#warm }
@@ -422,7 +434,7 @@ export class OsSynthProvider implements TtsProvider {
   async #resolveLinuxBackend(): Promise<LinuxBackend> {
     if (this.#linuxBackend !== undefined && this.#linuxBackend !== null) return this.#linuxBackend
     const tried: string[] = []
-    for (const backend of LINUX_BACKENDS) {
+    for (const backend of this.#linuxCandidates) {
       tried.push(backend)
       const ok = await this.#capture(backend, ['--version']).then(() => true, () => false)
       if (!ok) continue

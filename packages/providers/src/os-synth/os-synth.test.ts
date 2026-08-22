@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { OsSynthProvider, darwinCommand, linuxCommand, neutralizeInBandCommands, win32Command } from './index.ts'
+import { OsSynthProvider, type LinuxBackend, darwinCommand, linuxCommand, neutralizeInBandCommands, win32Command } from './index.ts'
 import { runProviderContract, CANCEL_BUDGET_MS } from '../contract.ts'  // test-only entry, never via the barrel
 
 // T045: the contract runs against the real OS synthesizer on whatever platform CI is on.
@@ -248,7 +248,26 @@ describe('E-06 in-band synthesizer commands never reach the engine', () => {
  */
 describe('006 finding 1 — prepare() must not report warm on a synthesizer that cannot run', () => {
   it('throws, names the reason, and stays cold when the binary cannot be resolved', async () => {
-    if (process.platform === 'linux') return   // the Linux ladder already throws; covered above
+    if (process.platform === 'linux') {
+      // WAS a bare `return` with the comment "the Linux ladder already throws; covered above".
+      // That claim was never checked, and the mutation harness said so: with the guard mutated,
+      // this file reported `2 passed | 33 skipped (35)` — the invariant was not exercised at all
+      // on the one configuration CI tests. Emptying PATH cannot break the Linux ladder, because
+      // it probes each backend by name and espeak-ng answers.
+      //
+      // So the ladder is pointed at a candidate that cannot exist. Same three assertions as the
+      // darwin arm below: it must throw, it must stay cold, and the reason must survive.
+      const lp = new OsSynthProvider({
+        timeoutMs: 5_000,
+        linuxBackendCandidates: ['definitely-not-a-real-backend' as unknown as LinuxBackend]
+      })
+      let linuxThrew: unknown = null
+      await lp.prepare().catch((e: unknown) => { linuxThrew = e })
+      expect(linuxThrew, 'prepare() reported success with no resolvable backend').not.toBeNull()
+      expect(lp.isWarm, 'a provider that cannot speak must never report itself warm').toBe(false)
+      expect(lp.unavailableReason, 'the reason must survive where a caller can read it').toBeTruthy()
+      return
+    }
     const p = new OsSynthProvider({ timeoutMs: 5_000 })
     const realPath = process.env['PATH']
     let thrown: unknown = null
