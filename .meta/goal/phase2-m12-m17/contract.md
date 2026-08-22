@@ -50,7 +50,7 @@ Cap 3-4 concurrent agents. v1 decisions reopenable with evidence.
       `file:line` if it is not. **Do not repeat the old conclusion without re-deriving it.**
 
 - [ ] **G8 — the suite is honest.** `mutation-check` **37/37**: no SURVIVED, no drifted
-      targets. Today it is 33/37 — three routed live holes plus two drifted, including
+      targets. Today it is **34/37** at `6049c26`, load 11.01 `[measured-here]` — I wrote 33 in an earlier revision and in three agent briefs; 34 is what the script actually reports. The survivors are
       `skip-reported-as-failure`, where a control the listener pressed is reported as an
       engine failure and its own test cannot notice.
 

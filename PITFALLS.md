@@ -6,6 +6,28 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P41 — `mutation-check` edits source in place, so it cannot share a worktree
+**Symptom:** mid-run, `packages/plugin/src/adapter/index.ts` read
+`registeredCommands: () => 1` in the SHARED tree — the `register-always-succeeds` mutant, live,
+in a file three other agents could have been editing that second.
+**Cause:** the script mutates a source file, runs the suite, and restores it in a `finally`.
+That is correct for one agent and unsafe for several. A peer editing a mutant target during a
+run either **loses their edit to the restore**, or has their edit **committed inside the mutant
+window** — a commit that contains deliberately broken code with an innocent message. It is
+P34's shape with a new cause, and staging explicit paths does **not** help, because the damage
+happens in the working tree before anyone stages anything.
+**Compounding:** it runs the whole suite once per mutant. Two overlapping runs took load from
+11 to 29.65, and by P40 no count taken there means anything.
+**What to do instead:** run it in a **detached worktree**, never the shared tree.
+
+    git worktree add --detach /tmp/<job>-base
+    cd /tmp/<job>-base && pnpm install --frozen-lockfile
+    node scripts/mutation-check.mjs
+
+Develop there, then copy finished files back for a single short `git commit -- <paths>` window.
+Costs one install; removes the whole class. Found by an agent that noticed a mutant in a file
+it did not put there, rather than by anything failing.
+
 ## P40 — A test that arranges its precondition by out-running the system fails for reasons unrelated to the code, and the misdiagnosis is worse than the flake
 **Symptom:** two agents took clean readings in clean detached worktrees minutes apart and got
 **657/658** and **653/658**. Same commit, same command, different answer. Measured here at load
