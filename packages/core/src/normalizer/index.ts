@@ -8,8 +8,8 @@
  * Stage order is load-bearing. Block constructs (fences, headings, lists, tables) are handled
  * while line structure still exists; whitespace is collapsed last.
  *
- * `normalize()` composes SIXTEEN stages, and the banner comments below number them by CALL order,
- * which is not this file's physical order — `speakKeyGlyphs` (11) and `tidyPunctuation` (16) sit
+ * `normalize()` composes SEVENTEEN stages, and the banner comments below number them by CALL order,
+ * which is not this file's physical order — `speakKeyGlyphs` (12) and `tidyPunctuation` (17) sit
  * beside the number helpers because that is where they were written. The call list in
  * `normalize()` is the authority; `scripts/voice-lab.mjs` re-derives the ladder from these bytes
  * and refuses to start if the two disagree.
@@ -47,10 +47,10 @@ export interface NormalizeOptions {
    *
    * SEPARATE FROM `expandNumbers`, and that separation is the whole point of this field
    * (006 NM12 / section 22 SC-8). Until J26 these two stages shared one flag, so the Voice Lab
-   * control `num.expandIntegers` — which declares stage 14, `expandNumbers` — also switched off
-   * stage 13, `expandUnits`. A listener turning off "whether numbers become words" silently
+   * control `num.expandIntegers` — which declares stage 15, `expandNumbers` — also switched off
+   * stage 14, `expandUnits`. A listener turning off "whether numbers become words" silently
    * re-broke "52 ms", which is the exact defect they had asked to have fixed, and the Lab showed
-   * them a stage-13 row that moved for a reason no control on screen explained.
+   * them a stage-14 row that moved for a reason no control on screen explained.
    *
    * A control that claims a stage it does not govern is a lie told to the person tuning by ear,
    * and tuning by ear is what the Voice Lab is for.
@@ -175,6 +175,7 @@ export function normalize(md: string, opts: NormalizeOptions = {}): string {
 
   let s = stripFencedCode(md, codeBlocks)
   s = stripHtmlComments(s)
+  s = diagramsToLabels(s)
   s = stripInlineCode(s)
   s = expandMarkdownLinks(s)
   s = stripUrls(s)
@@ -185,7 +186,7 @@ export function normalize(md: string, opts: NormalizeOptions = {}): string {
   s = stripMarkdownMarkers(s)
   s = speakKeyGlyphs(s)
   s = stripEmoji(s)
-  // One `if` per stage, because one `if` for two stages is what SC-8 was. Stage 13 then stage 14:
+  // One `if` per stage, because one `if` for two stages is what SC-8 was. Stage 14 then stage 15:
   // units must be words BEFORE the numeral becomes one, or "52 ms" is "fifty two m s".
   if (doUnits) s = expandUnits(s)
   if (doNumbers) s = expandNumbers(s)
@@ -206,6 +207,70 @@ export function normalize(md: string, opts: NormalizeOptions = {}): string {
   return hasSpeakableGlyph(s) ? s : ''
 }
 
+/**
+ * M14b — the agent-cooperating half of the spoken channel. NOT A STAGE, and deliberately not one.
+ *
+ * `normalize()` answers "how does this markdown SOUND". This answers "which PART of this reply did
+ * the agent mean to be heard", which is a different question with a different owner: the choice
+ * between the marker and the prose is a listener POLICY (D002 Q5 — `spoken-only`,
+ * `spoken-then-prose`, `prose-only`, `agent-decides`) and belongs to whoever holds that setting,
+ * not to a text transform. Wiring it into a stage would hard-code one of the four policies into
+ * the pipeline and make the other three unreachable.
+ *
+ * It lives in this file rather than beside the transcript decoders for one reason: it must be pure
+ * and import nothing, exactly like everything else here, so the Voice Lab can compile these bytes
+ * as a standalone module (SC-13) and so the same function runs in a worker, a panel and a test.
+ *
+ * THE LOAD-BEARING PROPERTY, and the one to pin with a test — D002's own sentence:
+ *
+ *   > The extractor's absence-case must be the IDENTITY FUNCTION, and its presence-case must be
+ *   > the only behaviour change.
+ *
+ * A reply with no marker — which is very nearly all of them, and will stay that way (D002
+ * "Adoption reality") — must come out of here BYTE-IDENTICAL. `rest` is `md` itself in that case,
+ * not a rebuilt copy that happens to match.
+ */
+export interface SpeakFence {
+  /** The fence body, trimmed. `null` when the reply carries no usable `speak` fence. */
+  readonly spoken: string | null
+  /** The reply with that fence removed — and byte-identical to the input when there was none. */
+  readonly rest: string
+}
+
+/**
+ * Find the first ```speak fence and lift it out.
+ *
+ * FIRST, not last, and fences that are not ours are SKIPPED WHOLE rather than scanned through: a
+ * reply that shows somebody how to write a `speak` block puts ` ```speak ` inside an outer fence,
+ * and a scanner that did not track nesting would extract the example and speak it instead of the
+ * answer. That is the "identifier carried in text" failure D002 warns about, one level down.
+ *
+ * An EMPTY fence is treated as absent, `rest` included: an agent that opened a marker and put
+ * nothing in it has not asked for anything, and removing it would break the identity property for
+ * no gain.
+ */
+export function extractSpeakFence(md: string): SpeakFence {
+  const lines = md.split('\n')
+  let open = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (!isFence(lines[i] as string)) continue
+    if (isSpeakFence(lines[i] as string)) { open = i; break }
+    let j = i + 1
+    while (j < lines.length && !isFence(lines[j] as string)) j++
+    i = j
+  }
+  if (open === -1) return { spoken: null, rest: md }
+
+  let close = open + 1
+  while (close < lines.length && !isFence(lines[close] as string)) close++
+  const body = lines.slice(open + 1, close).join('\n').trim()
+  if (body.length === 0) return { spoken: null, rest: md }
+  return {
+    spoken: body,
+    rest: [...lines.slice(0, open), ...lines.slice(Math.min(close + 1, lines.length))].join('\n')
+  }
+}
+
 /* ---------------------------------------------------------------- stage 1 */
 
 function isFence(line: string): boolean {
@@ -213,15 +278,45 @@ function isFence(line: string): boolean {
   return t.startsWith('```') || t.startsWith('~~~')
 }
 
+/** The info string of a fence line: ` ```speak also ` -> `'speak also'`. Never called on prose. */
+function fenceInfo(line: string): string {
+  const t = line.trimStart()
+  return t.slice(3).trim().toLowerCase()
+}
+
+/**
+ * M14b. A fence whose info string is `speak` is the agent SPEAKING, not the agent showing code.
+ *
+ * The immediate correctness fix D002 calls for, independent of the ladder above it: with the
+ * default `codeBlocks: 'announce'`, an agent that cooperated with our own convention would have
+ * been answered with *"Here, a code block is omitted."* — the disqualifying failure mode arriving
+ * through the front door. So the info string is honoured UNCONDITIONALLY, whatever the policy: a
+ * `speak` fence is never announced and its body is kept as ordinary prose.
+ *
+ * `speak also` / `speak replace` are accepted here too. This stage does not read the annotation —
+ * choosing between the marker and the prose is the listener's policy and belongs above the
+ * normalizer (D002 Q5) — but it must not mistake an annotated fence for a code block.
+ */
+function isSpeakFence(line: string): boolean {
+  const info = fenceInfo(line)
+  return info === 'speak' || info.startsWith('speak ')
+}
+
 function stripFencedCode(src: string, policy: CodeBlockPolicy): string {
   const out: string[] = []
   const lines = src.split('\n')
   let inFence = false
+  let inSpeak = false
   let announced = false
 
   for (const line of lines) {
     if (isFence(line)) {
+      if (inSpeak) { inSpeak = false; continue }
       if (!inFence) {
+        // An UNCLOSED speak fence keeps everything to the end of the reply, so there is nothing
+        // to announce: D002 Q6 asked for "announced as truncated, never dropped", and keeping it
+        // is strictly better than either — nothing was truncated.
+        if (isSpeakFence(line)) { inSpeak = true; continue }
         inFence = true
         announced = false
         if (policy === 'announce') { out.push(CODE_PLACEHOLDER); announced = true }
@@ -230,6 +325,7 @@ function stripFencedCode(src: string, policy: CodeBlockPolicy): string {
       }
       continue
     }
+    if (inSpeak) { out.push(line); continue }
     if (!inFence) out.push(line)
   }
   // Site 48: `void announced` — the fact was computed and discarded. An unclosed fence means the
@@ -266,7 +362,7 @@ function stripFencedCode(src: string, policy: CodeBlockPolicy): string {
  *     would consume the fence's own closing ``` and merge the code block with the prose after it.
  *     Ordering does the work here that a special case would otherwise have to.
  *
- *  2. **Before `stripMarkdownMarkers` (now stage 10) and before the chunker.** `--` inside a
+ *  2. **Before `stripMarkdownMarkers` (now stage 11) and before the chunker.** `--` inside a
  *     comment must never be offered to the marker stripper, and `<!` must never reach the
  *     chunker — that pair is what produced the two-character first utterance.
  *
@@ -274,9 +370,9 @@ function stripFencedCode(src: string, policy: CodeBlockPolicy): string {
  *  for a delete-everything stage: every later stage gets to assume comments are already gone.
  *
  *  ONE CLAIM DELIBERATELY NOT MADE. It is tempting to argue this must also precede
- *  `stripInlineCode` (stage 3), because `fixtures/code-heavy.md` writes backticks inside its
- *  opening comment and stage 3 pairs backticks positionally. That argument is WRONG and is
- *  recorded here so nobody re-derives it: stage 3 UNWRAPS, it never deletes — a mispaired span
+ *  `stripInlineCode` (stage 4), because `fixtures/code-heavy.md` writes backticks inside its
+ *  opening comment and stage 4 pairs backticks positionally. That argument is WRONG and is
+ *  recorded here so nobody re-derives it: stage 4 UNWRAPS, it never deletes — a mispaired span
  *  still emits its content, and its unclosed branch emits the remainder verbatim. Both orders were
  *  run against the six fixtures and against probes built to break them, and they produce identical
  *  text. `normalize.test.ts` keeps a labelled CONTROL for that, not a proof.
@@ -296,7 +392,7 @@ function stripFencedCode(src: string, policy: CodeBlockPolicy): string {
  * the listener LOST, not about characters that were never content.
  *
  * Removal preserves the comment's LINE COUNT — a multi-line comment becomes its own newlines, a
- * single-line comment becomes one space. Stages 6, 7 and 8 (`headingsToPauses`,
+ * single-line comment becomes one space. Stages 7, 8 and 9 (`headingsToPauses`,
  * `listItemsToSentences`, `tablesToRows`) are line-oriented and run after this one, so collapsing
  * `text <!-- c\n--> ## Heading` to one line would silently destroy a heading. A space, not the
  * empty string, for the single-line case: `a<!--x-->b` must not become the word `ab`.
@@ -319,6 +415,204 @@ function stripHtmlComments(src: string): string {
 
 /* ---------------------------------------------------------------- stage 3 */
 
+/**
+ * A box-drawing diagram is replaced by ONE sentence that NAMES WHAT IT WAS ABOUT.
+ *
+ * Design 002's motivating case, and the worst listening experience this product produces. Today
+ * `fixtures/hostile.md`'s pipeline diagram reaches the engine intact and the listener hears a few
+ * hundred box characters where the explanation should be — measured before this stage existed:
+ *
+ *   "...look at: ┌──────────────┐ ┌───────────────┐ ... │ transcript │ ──▶ │ normalizer │ ..."
+ *
+ * DROPPING IT IS THE EASY HALF. P30 is the hard half: a loss the listener cannot see must be named
+ * IN THE AUDIO, and "a diagram was skipped" is nearly useless while reading forty cells aloud is
+ * the harm it was supposed to prevent. So the split this stage makes is:
+ *
+ *   the box characters are the diagram's GEOMETRY — unspeakable, and dropped;
+ *   the text inside the boxes is its NOUNS — speakable, and kept.
+ *
+ * A linear audio stream cannot carry geometry at all, so nothing is lost by dropping it that could
+ * have been delivered. The nouns are the only part that survives linearisation, they cost one
+ * sentence, and they are what tells the listener whether the picture was worth asking about. On
+ * the motivating fixture that is:
+ *
+ *   "Here, a diagram is omitted. It is labelled: transcript watcher, normalizer (17 stages),
+ *    synthesizer (Piper), barge-in."
+ *
+ * Four judgements, each of which could have gone the other way:
+ *
+ *  1. **The frame is CODE_PLACEHOLDER's frame** — " . Here, a X is omitted. ", its own sentence so
+ *     the engine pauses either side. The listener has already learned that cue for a loss; a
+ *     second grammar would make this loss LESS recognisable, not more.
+ *  2. **The kind is named** ("a diagram"), so the listener knows which SHAPE of information went —
+ *     relationships and layout — rather than only that something did.
+ *  3. **The labels are BOUNDED at six, and the cap is announced** ("and 9 more"). The listening
+ *     report already records four-column table rows as punishing; six short noun phrases is about
+ *     one breath. An announcement that buries the reply is the failure it exists to prevent, and
+ *     one that hides its own truncation is the failure buzz's "... message truncated" fixes.
+ *  4. **Labels are merged DOWN COLUMNS, not read line by line.** A box is two lines of one label;
+ *     read line-wise the fixture says "transcript, normalizer, synthesizer, watcher, 17 stages,
+ *     Piper", which scrambles three boxes into six fragments. Merging by overlapping column span
+ *     recovers "transcript watcher" as one thing, which is what it is.
+ *
+ * WHY POSITION 3 — after `stripHtmlComments`, before `stripInlineCode`. Four constraints pin it:
+ *
+ *  1. **After stage 1.** A fenced block may legitimately CONTAIN a diagram as its subject; stage 1
+ *     has already replaced that fence, so its box characters no longer exist. Running earlier
+ *     would reach inside a fence and announce a diagram the listener was never going to hear.
+ *  2. **After stage 2.** A diagram inside an HTML comment is not content — stage 2's whole
+ *     argument — and announcing it would be narration about markup addressed to a reader of the
+ *     source. Announcing beats silence only for things the listener LOST.
+ *  3. **Before every line-oriented stage (6, 7, 8) and before `collapseWhitespace` (16).** This
+ *     stage reads COLUMNS. Once whitespace collapses there are no columns, and once
+ *     `listItemsToSentences` has run a diagram line beginning `- ` has grown a full stop.
+ *  4. **Before `speakKeyGlyphs` (12).** `↑ ↓ ← →` are spoken as words there. Inside a diagram they
+ *     are plumbing, not content, and turning them into words first would leave "right" scattered
+ *     through the labels.
+ *
+ * It cannot be `tablesToRows`' job: that stage reads `|` pipe tables, this one reads none, and a
+ * Voice Lab row that ran two transforms would be a control map that lies (SC-8).
+ */
+
+/**
+ * Box drawing (U+2500-257F) and block elements (U+2580-259F): the marks a diagram is DRAWN with.
+ * Deliberately narrow. This set decides whether a line is art at all, and every glyph in it is one
+ * a human writes only to draw with.
+ */
+const LINE_ART = /[\u2500-\u259f]/gu
+
+/**
+ * What separates one label from the next INSIDE a run already judged to be art. Wider than
+ * `LINE_ART` on purpose: geometric shapes (U+25A0-25FF — the `▶` of `──▶`) and arrows
+ * (U+2190-21FF) are far too common in prose to make a line a diagram, but once a run IS one they
+ * are its plumbing and never part of a label.
+ */
+const ART_SEPARATOR = /[\u2500-\u25ff\u2190-\u21ff]/u
+
+/**
+ * Two, not one. One box glyph is a sentence ABOUT box glyphs — "the `└` character" — and a rule
+ * that ate that line would be worse than the defect. Every line of the motivating diagram, down to
+ * the two lone `│` of its barge-in arm, carries at least two.
+ */
+const ART_LINE_MIN_GLYPHS = 2
+
+/**
+ * Six labels, then a count. Taste, and therefore the listener's (Q47) — but the EXISTENCE of a cap
+ * is correctness, so the number lives here until Voice Lab gives it a control.
+ */
+const MAX_SPOKEN_LABELS = 6
+
+const DIAGRAM_UNLABELLED = ' . Here, a diagram is omitted. It has no labels to read. '
+
+function artGlyphCount(line: string): number {
+  return (line.match(LINE_ART) ?? []).length
+}
+
+function wordGlyphCount(line: string): number {
+  return (line.match(/[\p{L}\p{N}]/gu) ?? []).length
+}
+
+function isArtLine(line: string): boolean {
+  return artGlyphCount(line) >= ART_LINE_MIN_GLYPHS
+}
+
+/** A piece of label text and the COLUMNS it occupied, which is what lets boxes be reassembled. */
+interface ArtFragment { readonly text: string; readonly start: number; readonly end: number }
+
+/** The text between the art glyphs of one line, each with its column span. */
+function labelFragments(line: string): ArtFragment[] {
+  const out: ArtFragment[] = []
+  const push = (from: number, to: number): void => {
+    const raw = line.slice(from, to)
+    const text = raw.trim().replace(/\s+/g, ' ')
+    if (text.length === 0) return
+    out.push({
+      text,
+      start: from + (raw.length - raw.trimStart().length),
+      end: to - (raw.length - raw.trimEnd().length)
+    })
+  }
+  let start = 0
+  for (let i = 0; i < line.length; i++) {
+    if (ART_SEPARATOR.test(line[i] as string)) { push(start, i); start = i + 1 }
+  }
+  push(start, line.length)
+  return out
+}
+
+interface LabelGroup { readonly parts: string[]; start: number; end: number }
+
+/**
+ * Fragments on consecutive lines whose column spans OVERLAP are one label. That is the whole of
+ * the two-dimensional reading, and it is what turns three boxes into three names instead of six
+ * fragments. The span compared is the PREVIOUS LINE's only, never the union: a group that widened
+ * as it grew would eventually overlap everything and swallow the next box.
+ */
+function diagramLabels(run: readonly string[]): string[] {
+  const groups: LabelGroup[] = []
+  let openOnPrev: LabelGroup[] = []
+  for (const line of run) {
+    const opened: LabelGroup[] = []
+    for (const f of labelFragments(line)) {
+      const joined = openOnPrev.find((g) => f.start < g.end && g.start < f.end)
+      if (joined === undefined) {
+        const fresh: LabelGroup = { parts: [f.text], start: f.start, end: f.end }
+        groups.push(fresh)
+        opened.push(fresh)
+        continue
+      }
+      joined.parts.push(f.text)
+      if (opened.includes(joined)) {
+        joined.start = Math.min(joined.start, f.start)
+        joined.end = Math.max(joined.end, f.end)
+      } else {
+        joined.start = f.start
+        joined.end = f.end
+        opened.push(joined)
+      }
+    }
+    openOnPrev = opened
+  }
+  return groups.map((g) => g.parts.join(' '))
+}
+
+function diagramPlaceholder(labels: readonly string[]): string {
+  if (labels.length === 0) return DIAGRAM_UNLABELLED
+  const named = labels.slice(0, MAX_SPOKEN_LABELS)
+  const more = labels.length - named.length
+  // The cap says so. An announcement that is itself silently partial is the defect one level up.
+  const tail = more > 0 ? `, and ${more} more` : ''
+  return ` . Here, a diagram is omitted. It is labelled: ${named.join(', ')}${tail}. `
+}
+
+function diagramsToLabels(src: string): string {
+  const lines = src.split('\n')
+  const out: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    if (!isArtLine(lines[i] as string)) { out.push(lines[i] as string); i++; continue }
+    let j = i
+    while (j < lines.length && isArtLine(lines[j] as string)) j++
+    const run = lines.slice(i, j)
+    i = j
+
+    if (run.length === 1) {
+      const only = run[0] as string
+      // Mostly words: a sentence that MENTIONS box characters is prose, and prose is spoken.
+      if (artGlyphCount(only) < wordGlyphCount(only)) { out.push(only); continue }
+      // A lone unlabelled rule — `──────────` — is punctuation, and it is the one case removed in
+      // silence. It carries no proposition, so "a diagram is omitted" would be narration about
+      // layout: the same judgement `stripEmoji` makes for a party popper. Two or more lines with
+      // no labels IS a picture, and is announced.
+      if (diagramLabels(run).length === 0) continue
+    }
+    out.push(diagramPlaceholder(diagramLabels(run)))
+  }
+  return out.join('\n')
+}
+
+/* ---------------------------------------------------------------- stage 4 */
+
 function stripInlineCode(src: string): string {
   let out = ''
   let i = 0
@@ -337,7 +631,7 @@ function stripInlineCode(src: string): string {
   return out
 }
 
-/* ---------------------------------------------------------------- stages 4-5 */
+/* ---------------------------------------------------------------- stages 5-6 */
 
 /**
  * `[label](url)` -> `label`, plus the destination when the label does not already give it away.
@@ -420,7 +714,7 @@ function stripUrls(src: string): string {
   return out
 }
 
-/* ---------------------------------------------------------------- stages 6-8 */
+/* ---------------------------------------------------------------- stages 7-9 */
 
 const TERMINAL = new Set(['.', '!', '?'])
 
@@ -525,7 +819,7 @@ function tablesToRows(src: string): string {
   return out.join('\n')
 }
 
-/* ---------------------------------------------------------------- stage 9 */
+/* ---------------------------------------------------------------- stage 10 */
 
 const WORD_BREAK = new Set([' ', '\n', '\t'])
 
@@ -598,7 +892,7 @@ function speakFilePaths(src: string, style: PathStyle, extStyle: ExtensionStyle)
   }).join('')
 }
 
-/* ---------------------------------------------------------------- stage 10 */
+/* ---------------------------------------------------------------- stage 11 */
 
 function isBoundaryBefore(prev: string | undefined): boolean {
   return prev === undefined || WORD_BREAK.has(prev) || prev === '(' || prev === '"'
@@ -651,7 +945,7 @@ function stripMarkdownMarkers(src: string): string {
   return chars.filter((_, i) => !drop.has(i)).join('')
 }
 
-/* ---------------------------------------------------------------- stage 12 */
+/* ---------------------------------------------------------------- stage 13 */
 
 function isEmoji(cp: number): boolean {
   return (
@@ -674,7 +968,7 @@ function stripEmoji(src: string): string {
   return out
 }
 
-/* ---------------------------------------------------------------- stages 13-14 */
+/* ---------------------------------------------------------------- stages 14-15 */
 
 const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
   'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
@@ -953,7 +1247,7 @@ function expandUnits(src: string): string {
   return out
 }
 
-/* ---------------------------------------------------------------- stage 11 */
+/* ---------------------------------------------------------------- stage 12 */
 
 /** `⌘⇧S` -> `command shift S`. Otherwise the glyphs reach the engine as garbage. */
 function speakKeyGlyphs(src: string): string {
@@ -965,7 +1259,7 @@ function speakKeyGlyphs(src: string): string {
   return out
 }
 
-/* ---------------------------------------------------------------- stage 16 */
+/* ---------------------------------------------------------------- stage 17 */
 
 /**
  * The lead-in placeholders start with a sentence break so the engine pauses before them. When the
@@ -983,7 +1277,7 @@ function tidyPunctuation(src: string): string {
   return out.trim()
 }
 
-/* ---------------------------------------------------------------- stage 15 */
+/* ---------------------------------------------------------------- stage 16 */
 
 function collapseWhitespace(src: string): string {
   let out = ''

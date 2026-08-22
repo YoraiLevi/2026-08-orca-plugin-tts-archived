@@ -715,7 +715,7 @@ are measurements, and that is the honest state of this project's most load-beari
 
 | # | Segment | Cost | Label |
 |---|---|---|---|
-| 1 | normalize (16 stages) + chunk, pure functions, no I/O | < 5 ms | **`[claimed]`** |
+| 1 | normalize (17 stages) + chunk, pure functions, no I/O | < 5 ms | **`[claimed]`** |
 | 2 | `mkdtemp` for the synthesis temp dir (`os-synth/index.ts:326`) | ~1 ms | **`[claimed]`** |
 | 3 | **`spawn('say', …)` — process start, before one phoneme** | **414 ms min / 418 ms median, 5 runs** | **`[measured-here]`** (P10) |
 | 4 | actual synthesis of a real sentence, on top of segment 3 | **~640–750 ms** — segments 2–5 together measure p50 1,054–1,163 ms (F4) and segment 3 is 414 of it | **`[derived]`** from `[measured-here]` |

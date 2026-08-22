@@ -84,9 +84,10 @@ export function assertSourceModule (moduleUrl, label = 'module') {
   return path
 }
 
-/* ================================================================= the 16 stages
+/* ================================================================= the 17 stages
  *
- * `normalize()` composes 16 transforms — J21 added `stripHtmlComments` at 2. 004
+ * `normalize()` composes 17 transforms — J21 added `stripHtmlComments` at 2, M14a added
+ * `diagramsToLabels` at 3. 004
  * section 4 corrects three documents that disagreed; the count below was taken from the source,
  * and `assertLoadedModuleIsOnDiskSource()` keeps it that way.
  *
@@ -103,20 +104,24 @@ export const STAGES = [
   // J21 bug 1. No control governs it: whether an HTML comment is spoken is not taste. It is
   // source markup addressed to a reader of the FILE, and the listener is not that reader.
   { n: 2, name: 'stripHtmlComments', controlIds: [] },
-  { n: 3, name: 'stripInlineCode', controlIds: ['omit.inlineCode', 'ident.style', 'ident.parens'] },
-  { n: 4, name: 'expandMarkdownLinks', controlIds: [] },
-  { n: 5, name: 'stripUrls', controlIds: ['omit.urls', 'omit.urlPhrase'] },
-  { n: 6, name: 'headingsToPauses', controlIds: ['struct.headingCue', 'struct.headingPauseMs'] },
-  { n: 7, name: 'listItemsToSentences', controlIds: ['struct.orderedLists', 'struct.bulletMarker'] },
-  { n: 8, name: 'tablesToRows', controlIds: ['struct.tableLeadIn', 'struct.tableHeaderRepeat', 'struct.tableFirstCellHeader'] },
-  { n: 9, name: 'speakFilePaths', controlIds: ['path.style', 'path.extensionStyle', 'path.namePhrase', 'path.folderPhrase', 'path.depthPolicy', 'path.depthN', 'path.extensionWords'] },
-  { n: 10, name: 'stripMarkdownMarkers', controlIds: ['ident.style', 'ident.parens'] },
-  { n: 11, name: 'speakKeyGlyphs', controlIds: [] },
-  { n: 12, name: 'stripEmoji', controlIds: ['omit.emoji'] },
-  { n: 13, name: 'expandUnits', controlIds: ['num.expandUnits', 'num.unitWords'] },
-  { n: 14, name: 'expandNumbers', controlIds: ['num.expandIntegers', 'num.decimals'] },
-  { n: 15, name: 'collapseWhitespace', controlIds: [] },
-  { n: 16, name: 'tidyPunctuation', controlIds: [] }
+  // M14a. No control governs it YET: whether a box-drawing diagram is spoken as box characters is
+  // not taste, it is the defect. The WORDING of its announcement -- and the six-label cap -- IS
+  // taste and is D002 Q47, still owed a Panel A control beside `omit.codeBlockPhrase`.
+  { n: 3, name: 'diagramsToLabels', controlIds: [] },
+  { n: 4, name: 'stripInlineCode', controlIds: ['omit.inlineCode', 'ident.style', 'ident.parens'] },
+  { n: 5, name: 'expandMarkdownLinks', controlIds: [] },
+  { n: 6, name: 'stripUrls', controlIds: ['omit.urls', 'omit.urlPhrase'] },
+  { n: 7, name: 'headingsToPauses', controlIds: ['struct.headingCue', 'struct.headingPauseMs'] },
+  { n: 8, name: 'listItemsToSentences', controlIds: ['struct.orderedLists', 'struct.bulletMarker'] },
+  { n: 9, name: 'tablesToRows', controlIds: ['struct.tableLeadIn', 'struct.tableHeaderRepeat', 'struct.tableFirstCellHeader'] },
+  { n: 10, name: 'speakFilePaths', controlIds: ['path.style', 'path.extensionStyle', 'path.namePhrase', 'path.folderPhrase', 'path.depthPolicy', 'path.depthN', 'path.extensionWords'] },
+  { n: 11, name: 'stripMarkdownMarkers', controlIds: ['ident.style', 'ident.parens'] },
+  { n: 12, name: 'speakKeyGlyphs', controlIds: [] },
+  { n: 13, name: 'stripEmoji', controlIds: ['omit.emoji'] },
+  { n: 14, name: 'expandUnits', controlIds: ['num.expandUnits', 'num.unitWords'] },
+  { n: 15, name: 'expandNumbers', controlIds: ['num.expandIntegers', 'num.decimals'] },
+  { n: 16, name: 'collapseWhitespace', controlIds: [] },
+  { n: 17, name: 'tidyPunctuation', controlIds: [] }
 ]
 
 const STAGE_EXPORT = `
@@ -140,7 +145,7 @@ export async function stageFns () {
 }
 
 /**
- * Run the 16 transforms incrementally and record what each one produced.
+ * Run the 17 transforms incrementally and record what each one produced.
  *
  * A stage the options switch off is still a row — it reports `applied: false` and unchanged text,
  * because a ladder that silently shortens is a ladder whose numbers stop meaning anything.
@@ -159,6 +164,7 @@ export async function computeStages (md, opts = {}) {
   const apply = [
     (s) => fn.stripFencedCode(s, codeBlocks),
     (s) => fn.stripHtmlComments(s),
+    (s) => fn.diagramsToLabels(s),
     (s) => fn.stripInlineCode(s),
     (s) => fn.expandMarkdownLinks(s),
     (s) => fn.stripUrls(s),

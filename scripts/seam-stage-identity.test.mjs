@@ -56,6 +56,7 @@ function expectedPipeline (fn) {
   return [
     ['stripFencedCode', (s) => fn.stripFencedCode(s, 'announce')],
     ['stripHtmlComments', (s) => fn.stripHtmlComments(s)],
+    ['diagramsToLabels', (s) => fn.diagramsToLabels(s)],
     ['stripInlineCode', (s) => fn.stripInlineCode(s)],
     ['expandMarkdownLinks', (s) => fn.expandMarkdownLinks(s)],
     ['stripUrls', (s) => fn.stripUrls(s)],
@@ -90,6 +91,11 @@ function probes () {
     '| a | b |',
     '| - | - |',
     '| 1 | 2 |',
+    '',
+    // M14a. Two consecutive box-drawing lines, so `diagramsToLabels` is not an inert row.
+    '\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2510',
+    '\u2502 node \u2502',
+    '\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2518',
     '',
     'See [the PR](https://github.com/stablyai/orca/pull/15640) and https://example.com .',
     '',

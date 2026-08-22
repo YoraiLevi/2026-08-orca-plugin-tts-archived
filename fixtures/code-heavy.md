@@ -42,8 +42,9 @@ There is one more case worth calling out:
 The tests pass. Nine files changed.
 ```
 
-That fence is the agent asking to be *spoken*, not to be omitted. Today it is announced as an
-omission like any other block, which is the disqualifying failure arriving through the front door.
+That fence is the agent asking to be *spoken*, not to be omitted. It used to be announced as an
+omission like any other block, which was the disqualifying failure arriving through the front door;
+since M14a the info string is honoured whatever the code-block policy says.
 
 Two small things while I was in there. `normalize()` is pure and imports nothing, so it stays
 testable in the panel as well as the worker. And I left `__dunder__` handling alone on purpose —

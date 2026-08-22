@@ -205,7 +205,7 @@ and would rather hear it than read it.
    (T102). The honest substitute is the clipboard. `[shipped]`
 2. He clicks outside any terminal, then presses `Mod+Shift+S`.
 3. **SYSTEM:** reads the clipboard per OS (`pbpaste` / `Get-Clipboard` / `wl-paste`→`xclip`→`xsel`),
-   normalizes it through 16 stages, chunks it — first chunk is the earliest sentence end, so audio
+   normalizes it through 17 stages, chunks it — first chunk is the earliest sentence end, so audio
    starts before the rest is synthesized — and plays.
 4. He presses `Mod+Shift+S` again. **SYSTEM:** stops within a measured 50 ms (Gate M6). `[shipped]`
 
@@ -1161,7 +1161,7 @@ can do for him, and it is a larger prize than anything else in `003` section 4.
 3. **Normalizer offset provenance.** A word boundary is an offset into **the string handed to the
    synthesizer** — the *normalized* string, not the reply. `packages/core/src/normalizer/` becomes
    *"in folder packages core src normalizer"*: a different length at a different offset. A cursor
-   over the written reply therefore needs a source→spoken offset map composed across all 16 stages,
+   over the written reply therefore needs a source→spoken offset map composed across all 17 stages,
    which is **larger than the display work it enables**.
 
 **M13's obligation is exactly two things, and both are approximately free at design time:** ship the

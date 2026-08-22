@@ -32,6 +32,101 @@ describe('T021a fenced code blocks', () => {
   ])
 })
 
+describe('T140a diagrams and line art (M14a)', () => {
+  run([
+    /**
+     * The deliverable. Box characters are the diagram's GEOMETRY and cannot be linearised into
+     * audio at all; the text inside the boxes is its NOUNS and is the only part that survives.
+     * Labels are merged DOWN COLUMNS, so a two-line box is one name rather than two fragments.
+     */
+    { name: 'a box diagram is announced by its own labels, boxes reassembled down columns',
+      input: 'Before\n\u250c\u2500\u2500\u2500\u2500\u2510\n\u2502 web \u2502\n\u2502 tier \u2502\n\u2514\u2500\u2500\u2500\u2500\u2518\nAfter',
+      expect: 'Before. Here, a diagram is omitted. It is labelled: web tier. After' },
+
+    /**
+     * The cap, and it says so. Reading forty cells aloud is the harm the announcement exists to
+     * prevent, and an announcement that is silently partial is that harm one level up.
+     */
+    { name: 'more than six labels are capped, and the cap is announced',
+      input: '\u2502a\u2502b\u2502c\u2502d\u2502e\u2502f\u2502g\u2502h\u2502',
+      expect: 'Here, a diagram is omitted. It is labelled: a, b, c, d, e, f, and two more.' },
+
+    // Two or more lines with nothing readable in them IS a picture, and the listener is told.
+    { name: 'unlabelled art is still announced, because something really was withheld',
+      input: 'Before\n\u259b\u2580\u2580\u259c\n\u2599\u2584\u2584\u259f\nAfter',
+      expect: 'Before. Here, a diagram is omitted. It has no labels to read. After' },
+
+    /**
+     * The ONE silent removal this stage makes, and the judgement behind it: a lone rule carries no
+     * proposition, so "a diagram is omitted" would be narration about layout — the same call
+     * `stripEmoji` makes for a party popper.
+     */
+    { name: 'a lone unlabelled rule is layout, and goes in silence',
+      input: 'Before\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nAfter',
+      expect: 'Before After' },
+
+    /**
+     * The guard that keeps this stage from eating prose. One box character is a sentence ABOUT box
+     * characters; a line needs two before it can be art at all.
+     */
+    { name: 'a sentence that MENTIONS a box character is prose, and is spoken',
+      input: 'The \u2514 character is a corner.',
+      expect: 'The \u2514 character is a corner.' },
+
+    /**
+     * The TWO-glyph threshold, pinned where it is the only thing deciding. A WRAPPED sentence
+     * about box characters is two consecutive lines that each contain one; at a threshold of one
+     * they would form a run of two and be announced as a diagram, and the ratio guard below never
+     * sees a multi-line run. Without this row the constant is unfalsifiable — measured: setting
+     * it to 1 left all 167 tests green `[measured-here]`.
+     */
+    { name: 'a WRAPPED sentence about box characters is prose, not a two-line diagram',
+      input: 'The \u2514 corner and\nthe \u2518 corner are different.',
+      expect: 'The \u2514 corner and the \u2518 corner are different.' },
+
+    /**
+     * The ratio guard, pinned where IT is the only thing deciding: one line, two box glyphs — so
+     * it clears the threshold — but far more letters than glyphs, which makes it a sentence.
+     */
+    { name: 'one line with two box glyphs and mostly words is still prose',
+      input: 'The \u2514 and \u2518 characters are the bottom corners of a box.',
+      expect: 'The \u2514 and \u2518 characters are the bottom corners of a box.' },
+
+    // Arrows are far too common in prose to make a line art, so they stay words (stage 12).
+    { name: 'arrows in prose are still spoken as words',
+      input: 'Go from A \u2192 B \u2192 C now.', expect: 'Go from A right B right C now.' },
+
+    // Position, proved by effect. Stage 1 reached the fence first, so this is a code block.
+    { name: 'a diagram INSIDE a fence is a code block, announced once and as code',
+      input: 'Before\n```\n\u250c\u2500\u2500\u2510\n\u2502x \u2502\n\u2514\u2500\u2500\u2518\n```\nAfter',
+      expect: 'Before. Here, a code block is omitted. After' },
+
+    // ...and stage 2 reached the comment first, so this is not content and is not announced.
+    { name: 'a diagram inside an HTML comment is not content, and is not announced',
+      input: 'Before\n<!--\n\u250c\u2500\u2500\u2510\n\u2502x \u2502\n\u2514\u2500\u2500\u2518\n-->\nAfter',
+      expect: 'Before After' }
+  ])
+})
+
+describe('T140b the spoken channel (M14b)', () => {
+  run([
+    { name: 'a speak fence is the agent speaking, so its body is kept and never announced',
+      input: 'Before.\n```speak\nJust this sentence.\n```\nAfter.',
+      expect: 'Before. Just this sentence. After.' },
+    { name: 'an annotated speak fence is still a speak fence',
+      input: 'Before.\n```speak also\nJust this sentence.\n```\nAfter.',
+      expect: 'Before. Just this sentence. After.' },
+    // CONTROL: any other info string is still a code block.
+    { name: 'a fence tagged speaker is NOT a speak fence',
+      input: 'Before.\n```speaker\nnot us\n```\nAfter.',
+      expect: 'Before. Here, a code block is omitted. After.' },
+    // D002 Q6: an unterminated marker keeps the rest of the reply rather than swallowing it.
+    { name: 'an unclosed speak fence keeps everything after it',
+      input: 'Before.\n```speak\nJust this sentence.\nAnd this one.',
+      expect: 'Before. Just this sentence. And this one.' }
+  ])
+})
+
 describe('T021b inline code', () => {
   run([
     { name: 'backticks stripped, content kept', input: 'Call `foo()` now', expect: 'Call foo() now' },

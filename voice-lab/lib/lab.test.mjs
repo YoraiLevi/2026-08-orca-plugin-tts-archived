@@ -105,16 +105,17 @@ describe('the control inventory, counted against 004 section 6', () => {
 
 describe('the stage ladder agrees with the normalizer source', () => {
   // 004 section 4: "There are 15 transforms in normalize(), not 12. Three different counts exist in
-  // the repo." J21 made it SIXTEEN by adding `stripHtmlComments` at stage 2.
-  // the repo." Counting them here, from the source, is the only version of this check that can fail.
-  it('lists the same sixteen transforms normalize() actually calls, in order', async () => {
+  // the repo." J21 made it SIXTEEN by adding `stripHtmlComments` at stage 2, and M14a made it
+  // SEVENTEEN by adding `diagramsToLabels` at stage 3.
+  // Counting them here, from the source, is the only version of this check that can fail.
+  it('lists the same seventeen transforms normalize() actually calls, in order', async () => {
     const src = await readFile(join(REPO, 'packages/core/src/normalizer/index.ts'), 'utf8')
     const body = src.slice(src.indexOf('export function normalize'))
     const called = [...body.slice(0, body.indexOf('\n}')).matchAll(/\bs = ([a-zA-Z]+)\(/g)]
       .map((m) => m[1])
     const unique = called.filter((n, i) => called.indexOf(n) === i)
     expect(unique).toEqual(STAGES)
-    expect(STAGES.length).toBe(16)
+    expect(STAGES.length).toBe(17)
   })
 
   it('marks the stages with no control as fixed by design, and no others', () => {
@@ -123,7 +124,7 @@ describe('the stage ladder agrees with the normalizer source', () => {
   })
 
   it('gives every stage that has a control at least one that governs it', () => {
-    for (let n = 1; n <= 16; n++) {
+    for (let n = 1; n <= 17; n++) {
       if (FIXED_BY_DESIGN_STAGES.includes(n)) continue
       expect(controlsForStage(n).length).toBeGreaterThan(0)
     }
@@ -136,7 +137,7 @@ describe('the page and the server agree about which control governs which stage'
   // nothing anywhere goes red. So the two are compared directly.
   it('matches scripts/voice-lab.mjs STAGES controlIds, stage for stage', async () => {
     const { STAGES: SERVER_STAGES } = await import(join(REPO, 'scripts/voice-lab.mjs'))
-    expect(SERVER_STAGES).toHaveLength(16)
+    expect(SERVER_STAGES).toHaveLength(17)
     for (const stage of SERVER_STAGES) {
       expect(STAGES[stage.n - 1], `stage ${stage.n} name`).toBe(stage.name)
       const mine = controlsForStage(stage.n).map((c) => c.id).sort()
@@ -178,8 +179,8 @@ describe('the word diff', () => {
     const source = 'see packages/core/index.ts now'
     const stages = [
       { n: 1, name: 'stripFencedCode', text: source },
-      { n: 8, name: 'speakFilePaths', text: 'see file named index, typescript, in folder packages core now' },
-      { n: 16, name: 'tidyPunctuation', text: 'see file named index, typescript, in folder packages core now' }
+      { n: 10, name: 'speakFilePaths', text: 'see file named index, typescript, in folder packages core now' },
+      { n: 17, name: 'tidyPunctuation', text: 'see file named index, typescript, in folder packages core now' }
     ]
     const { spoken, removed } = attribute(source, stages)
     const byWord = Object.fromEntries(spoken.map((t) => [t.text, t.stage]))
@@ -187,12 +188,12 @@ describe('the word diff', () => {
     expect(byWord.see).toBe(0)
     expect(byWord.now).toBe(0)
     // Words the path stage invented name that stage, so the page can name its control.
-    expect(byWord.file).toBe(8)
-    expect(byWord['typescript,']).toBe(8)
+    expect(byWord.file).toBe(10)
+    expect(byWord['typescript,']).toBe(10)
     expect(spoken.find((t) => t.text === 'file').stageName).toBe('speakFilePaths')
     // The raw path was dropped, by that same stage.
     expect(removed.map((t) => t.text)).toEqual(['packages/core/index.ts'])
-    expect(removed[0].stage).toBe(8)
+    expect(removed[0].stage).toBe(10)
   })
 
   it('NEGATIVE CONTROL: a pipeline that changes nothing attributes nothing', () => {
@@ -201,7 +202,7 @@ describe('the word diff', () => {
     const source = 'see index now'
     const { spoken, removed } = attribute(source, [
       { n: 1, name: 'stripFencedCode', text: source },
-      { n: 16, name: 'tidyPunctuation', text: source }
+      { n: 17, name: 'tidyPunctuation', text: source }
     ])
     expect(spoken.every((t) => t.stage === 0)).toBe(true)
     expect(removed).toEqual([])
@@ -210,7 +211,7 @@ describe('the word diff', () => {
   it('keeps character offsets into the SPOKEN string, which is what a word cursor will need later', () => {
     const source = 'a b'
     const spokenText = 'a b c'
-    const { spoken } = attribute(source, [{ n: 13, name: 'expandNumbers', text: spokenText }])
+    const { spoken } = attribute(source, [{ n: 15, name: 'expandNumbers', text: spokenText }])
     for (const t of spoken) expect(spokenText.slice(t.start, t.end)).toBe(t.text)
   })
 })

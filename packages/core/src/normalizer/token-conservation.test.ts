@@ -220,10 +220,17 @@ const POLICY: Record<string, string> = {
     'blocks and URLs on purpose: it is a judgement, not an oversight. A glyph that carries a ' +
     'VERDICT is not decorative and is handled by glyph:spoken-word above, which is checked FIRST.',
   'glyph:passthrough':
-    'A non-ASCII mark the pipeline does not touch — em dash, box drawing, arrows in a diagram — ' +
-    'reaches the engine unchanged. Asserted rather than assumed: if a future stage starts ' +
-    'stripping box drawing (design 002 wants exactly that), this rule goes red and forces the ' +
-    'announcement to be designed rather than defaulted.',
+    'A non-ASCII mark the pipeline does not touch — an em dash, a lone box character inside a ' +
+    'sentence ABOUT box characters — reaches the engine unchanged. Asserted rather than assumed. ' +
+    'This rule did exactly the job it was written for: when stage 3 landed, it went red on seven ' +
+    'glyphs of hostile.md and forced announced:diagram to be designed rather than defaulted.',
+  'announced:diagram':
+    'A box-drawing run is replaced by a spoken lead-in that NAMES ITS LABELS ("Here, a diagram ' +
+    'is omitted. It is labelled: transcript watcher, ..."). The geometry cannot be linearised ' +
+    'into audio at all, so nothing deliverable is lost by dropping it; the label text is the ' +
+    'diagram\'s only speakable content and is CONSERVED BY THE ANNOUNCEMENT — which is why the ' +
+    'word-conservation half of this file stayed green when the glyph half went red. The rule ' +
+    'checks the lead-in really arrived, so a diagram that vanishes silently still fails.',
   'removed:html-comment':
     'The token is inside an HTML comment and every one of its occurrences is. A comment is markup ' +
     'the author wrote for a reader of the SOURCE, and the listener is not that reader; speaking it ' +
@@ -237,8 +244,8 @@ const POLICY: Record<string, string> = {
 
 /** Frozen. Growing this list is a review, not an edit. */
 const REVIEWED_POLICY_IDS = [
-  'allow-list', 'announced:code-block', 'announced:url', 'glyph:passthrough', 'glyph:removed',
-  'glyph:spoken-word', 'removed:html-comment', 'spoken', 'transformed:extension',
+  'allow-list', 'announced:code-block', 'announced:diagram', 'announced:url', 'glyph:passthrough',
+  'glyph:removed', 'glyph:spoken-word', 'removed:html-comment', 'spoken', 'transformed:extension',
   'transformed:number', 'transformed:unit'
 ]
 
@@ -268,6 +275,18 @@ const GLYPH_WORD: Record<string, string> = {
   '\u2713': 'yes', '\u2714': 'yes', '\u2705': 'yes',
   '\u2717': 'no', '\u2718': 'no', '\u274c': 'no', '\u274e': 'no',
   '\u26a0': 'warning', '\u2757': 'important', '\u2755': 'important'
+}
+
+/**
+ * The glyphs a diagram is DRAWN with, restated here rather than imported from `index.ts` for this
+ * file's standing reason: a predicate imported from the code under test agrees with it by
+ * construction. Wider than the stage's DETECTION set on purpose — this asks "could stage 3 have
+ * eaten this?", which includes the geometric shapes and arrows it removes once a run is judged
+ * art, not the narrower set it uses to judge.
+ */
+function isDiagramGlyph(ch: string): boolean {
+  const cp = ch.codePointAt(0) ?? 0
+  return (cp >= 0x2500 && cp <= 0x25ff) || (cp >= 0x2190 && cp <= 0x21ff)
 }
 
 function isEmojiCodePoint(cp: number): boolean {
@@ -314,9 +333,15 @@ function accountGlyph(ch: string, count: number, raw: string, out: string): Glyp
       ? { rule: 'glyph:passthrough', ok: true }
       : { rule: 'glyph:removed', ok: true }
   }
-  return out.includes(ch)
-    ? { rule: 'glyph:passthrough', ok: true }
-    : { rule: 'glyph:passthrough', ok: false, why: 'a mark no rule removes vanished anyway' }
+  if (out.includes(ch)) return { rule: 'glyph:passthrough', ok: true }
+  // CHECKED LAST, and only for a glyph that is really gone. A box character inside ordinary prose
+  // still passes through above, so this rule can only be reached by one that stage 3 consumed.
+  if (isDiagramGlyph(ch)) {
+    return out.includes('a diagram is omitted')
+      ? { rule: 'announced:diagram', ok: true }
+      : { rule: 'announced:diagram', ok: false, why: 'line art vanished with no lead-in spoken' }
+  }
+  return { rule: 'glyph:passthrough', ok: false, why: 'a mark no rule removes vanished anyway' }
 }
 
 /* ------------------------------------------------------------------ the check */

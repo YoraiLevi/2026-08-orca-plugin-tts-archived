@@ -23,18 +23,18 @@ const NORMALIZER = join(REPO_ROOT, 'packages/core/src/normalizer/index.ts')
 
 /* ------------------------------------------------------------------ the stage ladder */
 
-describe('the 16-stage ladder is the pipeline, not a description of it', () => {
-  it('has exactly 16 stages, in the order normalize() calls them', () => {
+describe('the 17-stage ladder is the pipeline, not a description of it', () => {
+  it('has exactly 17 stages, in the order normalize() calls them', () => {
     // 004 section 4 corrects three documents that disagreed. The source was counted:
     // packages/core/src/normalizer/index.ts:96-109.
-    expect(STAGES).toHaveLength(16)
+    expect(STAGES).toHaveLength(17)
     expect(STAGES.map((s) => s.name)).toEqual([
-      'stripFencedCode', 'stripHtmlComments', 'stripInlineCode', 'expandMarkdownLinks', 'stripUrls',
-      'headingsToPauses', 'listItemsToSentences', 'tablesToRows', 'speakFilePaths',
-      'stripMarkdownMarkers', 'speakKeyGlyphs', 'stripEmoji', 'expandUnits',
-      'expandNumbers', 'collapseWhitespace', 'tidyPunctuation'
+      'stripFencedCode', 'stripHtmlComments', 'diagramsToLabels', 'stripInlineCode',
+      'expandMarkdownLinks', 'stripUrls', 'headingsToPauses', 'listItemsToSentences',
+      'tablesToRows', 'speakFilePaths', 'stripMarkdownMarkers', 'speakKeyGlyphs', 'stripEmoji',
+      'expandUnits', 'expandNumbers', 'collapseWhitespace', 'tidyPunctuation'
     ])
-    expect(STAGES.map((s) => s.n)).toEqual([...Array(16)].map((_, i) => i + 1))
+    expect(STAGES.map((s) => s.n)).toEqual([...Array(17)].map((_, i) => i + 1))
   })
 
   it('the incremental ladder reproduces normalize() on every committed fixture', async () => {
@@ -57,16 +57,16 @@ describe('the 16-stage ladder is the pipeline, not a description of it', () => {
     expect(paths.text).toContain('typescript')
     expect(paths.controlIds).toContain('path.style')
     // The stage BEFORE it must still hold the raw path — otherwise the ladder is not incremental.
-    expect(stages[6].text).toContain('normalizer/index.ts')
+    expect(stages[7].text).toContain('normalizer/index.ts')
   })
 
-  it('keeps 16 rows when a stage is switched off, and marks it not-applied', async () => {
+  it('keeps 17 rows when a stage is switched off, and marks it not-applied', async () => {
     // `expandUnits: false` is now its OWN switch (SC-8 / 006 NM12) — before J26 one flag turned
-    // off both stage 13 and stage 14, which is the defect. Both are named here so a future merge
+    // off both stage 14 and stage 15, which is the defect. Both are named here so a future merge
     // of the two flags fails this row rather than quietly passing it.
     const { stages } = await computeStages('a/b/c.ts\n',
       { pathStyle: 'verbatim', expandNumbers: false, expandUnits: false })
-    expect(stages).toHaveLength(16)
+    expect(stages).toHaveLength(17)
     expect(stages.find((s) => s.name === 'speakFilePaths').applied).toBe(false)
     expect(stages.find((s) => s.name === 'expandUnits').applied).toBe(false)
     expect(stages.find((s) => s.name === 'expandNumbers').applied).toBe(false)
@@ -74,10 +74,10 @@ describe('the 16-stage ladder is the pipeline, not a description of it', () => {
     // ...and one flag must not move the other stage. This is the row that would have caught NM12.
     const numbersOnly = await computeStages('it took 52 ms\n', { expandNumbers: false })
     expect(numbersOnly.stages.find((s) => s.name === 'expandUnits').applied,
-      'expandNumbers: false must not switch off stage 13').toBe(true)
+      'expandNumbers: false must not switch off stage 14').toBe(true)
     const unitsOnly = await computeStages('it took 52 ms\n', { expandUnits: false })
     expect(unitsOnly.stages.find((s) => s.name === 'expandNumbers').applied,
-      'expandUnits: false must not switch off stage 14').toBe(true)
+      'expandUnits: false must not switch off stage 15').toBe(true)
     // A stage that did not run must not claim it changed anything.
     expect(stages.find((s) => s.name === 'speakFilePaths').changed).toBe(false)
   })
