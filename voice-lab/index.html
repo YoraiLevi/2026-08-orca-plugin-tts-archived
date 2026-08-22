@@ -84,6 +84,10 @@
   .row .field select, .row .field input[type="text"] { max-width: 100%; }
   .row .help { margin: 0; font-size: .8rem; color: var(--dim); }
   .row[data-focused="true"] { outline: 2px solid Highlight; outline-offset: 2px; }
+  .voice-actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .45rem; }
+  .voice-status { margin: .4rem 0 0; font-size: .82rem; color: var(--dim); }
+  .voice-download-confirm { border-left: 3px solid var(--rule); padding-left: .6rem; }
+  .voice-progress { display: block; width: 100%; margin-top: .35rem; }
   .switch { display: inline-flex; align-items: center; gap: .4rem; }
   .slider { display: flex; align-items: center; gap: .5rem; }
   .slider input[type="range"] { flex: 1 1 auto; min-width: 6rem; }
@@ -239,6 +243,7 @@
 <footer>
   <span id="status">Ready. Nothing has played. Press <span class="kbd">Space</span>.</span>
   <span class="grow"></span>
+  <span id="provenance">Nothing has played yet.</span>
   <span id="timing">&mdash;</span>
   <button id="btn-save">Save to plugin</button>
   <button id="btn-export">Export a copy</button>
@@ -1167,6 +1172,14 @@ function schedule (id) {
 
 const $ = (id) => document.getElementById(id)
 
+// Complete first-use payload: eight model files plus twelve reference clips. This is the current
+// `INSTALL_TOTAL_BYTES` from pocket-synth/models.ts, not the older 166 MB model-only number.
+// `/voices` does not expose the byte count yet, so keep the exact value here and report that
+// server-contract gap rather than understating the download (PV-041 / R037).
+const POCKET_INSTALL_BYTES = 173_764_082
+const VOICE_AUDITION =
+  'Hello. I will read your work, file names, and numbers like forty-two milliseconds.'
+
 const state = {
   fixtures: [],
   fixture: null,
@@ -1183,6 +1196,12 @@ const state = {
   platform: null,
   provider: null,
   voiceListHash: null,
+  lastProvenance: null,
+  provenanceFor: new Map(),
+  download: {
+    phase: 'idle', received: 0, totalBytes: POCKET_INSTALL_BYTES,
+    file: null, fileIndex: 0, fileCount: 0, error: null
+  },
   playedElsewhere: null,    // { backend, hint } when the OS daemon owns the audio
   lastSpeakError: null,
   serverDown: null,
@@ -1396,6 +1415,130 @@ async function streamSpeak (body, signal, onRecord) {
   return { status: res.status, ok: true, json: null, text: '', streamed: true }
 }
 
+async function streamDownload (onRecord) {
+  const res = await fetch('/model/download', { method: 'POST' })
+  const type = res.headers.get('content-type') || ''
+  if (!res.ok || !type.includes('ndjson')) {
+    const text = await res.text()
+    let body = null
+    try { body = text ? JSON.parse(text) : null } catch { /* the response text remains the reason */ }
+    throw new Error(body?.message ?? text ?? `HTTP ${res.status}`)
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let nl
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+      if (line.trim()) await onRecord(JSON.parse(line))
+    }
+  }
+  if (buf.trim()) await onRecord(JSON.parse(buf))
+}
+
+function resolveVoiceSelection (raw) {
+  let key = null
+  if (typeof raw === 'string' && raw.includes(':')) {
+    key = state.voices.some((voice) => voice.key === raw) ? raw : null
+  } else if (typeof raw === 'string') {
+    key = state.voices.find((voice) => voice.backend === 'os' && voice.displayName === raw)?.key ?? null
+  } else if (Number.isInteger(raw)) {
+    key = state.voices.filter((voice) => voice.backend === 'os')[raw]?.key ?? null
+  }
+  key ??= state.voices.find((voice) => voice.backend === 'os')?.key ?? state.voices[0]?.key ?? null
+  return key
+}
+
+function adoptVoiceSelection (raw = values()['voice.id']) {
+  const key = resolveVoiceSelection(raw)
+  values()['voice.id'] = key
+  return key
+}
+
+async function loadVoices () {
+  const response = await api('/voices')
+  if (!response.ok || !response.json || !Array.isArray(response.json.voices)) {
+    throw new Error(response.text || 'GET /voices returned no voice list')
+  }
+  const malformed = response.json.voices.find((entry) => entry == null || typeof entry !== 'object' ||
+    typeof entry.key !== 'string' || typeof entry.displayName !== 'string' ||
+    (entry.backend !== 'os' && entry.backend !== 'pocket'))
+  if (malformed !== undefined) {
+    throw new Error('GET /voices returned an entry without key, displayName, and backend')
+  }
+  state.voices = response.json.voices.map((entry) => ({
+    key: entry.key,
+    displayName: entry.displayName,
+    backend: entry.backend,
+    available: entry.available !== false,
+    reason: typeof entry.reason === 'string' ? entry.reason : null,
+    locale: typeof entry.locale === 'string' ? entry.locale : null
+  }))
+  state.platform = response.json.platform ?? null
+  state.provider = response.json.provider ?? null
+  state.voiceListHash = state.voices.length
+    ? 'fnv:' + hash(state.voices.map((voice) => voice.key).join('\n'))
+    : null
+  for (const set of Object.values(state.sets)) {
+    set['voice.id'] = resolveVoiceSelection(set['voice.id'])
+  }
+  return state.voices
+}
+
+async function downloadVoices () {
+  state.download = {
+    phase: 'downloading', received: 0, totalBytes: state.download.totalBytes,
+    file: null, fileIndex: 0, fileCount: 0, error: null
+  }
+  refreshVoiceRow()
+  setStatus('Downloading neural voices. Progress is shown beside Which voice.')
+
+  try {
+    await streamDownload(async (record) => {
+      if (record.kind === 'start') {
+        state.download.totalBytes = Number(record.totalBytes) || state.download.totalBytes
+        state.download.fileCount = Number(record.fileCount) || 0
+      } else if (record.kind === 'progress') {
+        state.download.received += Number(record.received) || 0
+        state.download.file = record.file ?? null
+        state.download.fileIndex = (Number(record.fileIndex) || 0) + 1
+        state.download.fileCount = Number(record.fileCount) || state.download.fileCount
+      } else if (record.kind === 'error') {
+        throw Object.assign(new Error(record.message ?? record.cause ?? 'the download stopped'), {
+          file: record.file ?? null
+        })
+      } else if (record.kind === 'complete') {
+        state.download.received = Number(record.totalBytes) || state.download.totalBytes
+      }
+      refreshVoiceRow()
+    })
+    const chosen = values()['voice.id']
+    await loadVoices()
+    adoptVoiceSelection(chosen)
+    if (state.voices.some((voice) => voice.backend === 'pocket' && !voice.available)) {
+      throw new Error('the download ended, but GET /voices still says the neural voices are unavailable')
+    }
+    state.download.phase = 'idle'
+    refreshVoiceRow()
+    setStatus('Neural voices downloaded. The selected voice is ready without reloading the page.')
+    announce('Neural voices downloaded. The selected voice is ready.')
+  } catch (err) {
+    state.download.phase = 'failed'
+    state.download.file = err?.file ?? state.download.file
+    state.download.error = err instanceof Error ? err.message : String(err)
+    refreshVoiceRow()
+    const where = state.download.file ? ` at ${state.download.file}` : ''
+    const sentence = `The neural voice download stopped${where}: ${state.download.error}. Your system voices still work.`
+    setStatus(sentence)
+    announce(sentence)
+  }
+}
+
 function serverIsDown (err) {
   state.serverDown = err
   $('banner-server').hidden = false
@@ -1432,11 +1575,28 @@ function chunkOptions () {
   return { maxUnits: v['pace.chunkMaxUnits'], isolateFirstSentence: v['pace.isolateFirstSentence'] }
 }
 
-/** The voice travels to the provider as a NAME and is persisted as an INDEX (P28, 005 section 9). */
+function selectedVoice () {
+  const key = values()['voice.id']
+  return state.voices.find((voice) => voice.key === key) ?? null
+}
+
+function backendName (backend) {
+  if (backend === 'pocket') return 'Pocket TTS'
+  if (backend === 'os') return "this machine's system voice"
+  return backend || 'an unknown backend'
+}
+
+function voiceName (backend, voice) {
+  if (voice == null || voice === '') return 'system default'
+  const key = `${backend}:${voice}`
+  return state.voices.find((entry) => entry.key === key)?.displayName ?? voice
+}
+
+/** The full backend-qualified key is both the request identity and part of FR-023's cache key. */
 function synthOptions () {
   const v = values()
-  const chosen = state.voices.find((x) => x.index === v['voice.id'])
-  return { voice: chosen ? chosen.name : undefined, rate: v['voice.rate'] }
+  const chosen = selectedVoice()
+  return { voice: chosen?.key, rate: v['voice.rate'] }
 }
 
 /**
@@ -1452,10 +1612,19 @@ function synthOptions () {
  * A dead control is exactly a control that moves neither of these, which is what thirty-six of
  * them did while looking identical to the ten that worked.
  */
-window.__labEffect = () => ({ spoken: state.spokenText, speak: speakOptions() })
+window.__labEffect = () => ({
+  spoken: state.spokenText,
+  speak: speakOptions(),
+  provenance: {
+    footer: $('provenance').textContent,
+    // This is the same value save() and exportCopy() hand to toSettingsFile(). The probe reads it
+    // without opening a tab or writing a settings file.
+    tunedWith: tunedWith()
+  }
+})
 
-function speakOptions () {
-  return { normalize: normalizeOptions(), chunk: chunkOptions(), synthesize: synthOptions() }
+function speakOptions (synthesize = synthOptions()) {
+  return { normalize: normalizeOptions(), chunk: chunkOptions(), synthesize }
 }
 
 /* ── Normalize: re-render written vs spoken ─────────────────────────────────── */
@@ -1735,6 +1904,7 @@ function renderRow (c) {
   const field = document.createElement('div')
   field.className = 'field'
   field.append(inputFor(c, value))
+  if (c.kind === 'voice') field.append(renderVoiceActions())
   row.append(field)
 
   const help = document.createElement('p')
@@ -1742,6 +1912,113 @@ function renderRow (c) {
   help.textContent = c.help
   row.append(help)
   return row
+}
+
+function formatBytes (bytes) {
+  return `${(bytes / 1_000_000).toFixed(1)} MB`
+}
+
+function pocketNeedsDownload () {
+  return state.voices.some((voice) => voice.backend === 'pocket' && !voice.available &&
+    /model|download|missing file|stale/i.test(voice.reason ?? ''))
+}
+
+function voiceOptionText (voice) {
+  const base = voice.locale ? `${voice.displayName} — ${voice.locale}` : voice.displayName
+  if (voice.backend !== 'pocket' || voice.available) return base
+  if (pocketNeedsDownload()) {
+    return `${base} — download needed (${formatBytes(state.download.totalBytes)})`
+  }
+  return `${base} — unavailable`
+}
+
+function voiceStatusSentence () {
+  const voice = selectedVoice()
+  if (voice === null) return 'Choose a voice to hear it.'
+  if (state.download.phase === 'downloading') {
+    const pct = state.download.totalBytes > 0
+      ? Math.min(100, Math.round(state.download.received / state.download.totalBytes * 100))
+      : 0
+    const file = state.download.file
+      ? ` File ${state.download.fileIndex} of ${state.download.fileCount}: ${state.download.file}.`
+      : ''
+    return `Downloading neural voices — ${formatBytes(state.download.received)} of ` +
+      `${formatBytes(state.download.totalBytes)} (${pct}%).${file}`
+  }
+  if (state.download.phase === 'failed') {
+    return `The neural voice download stopped${state.download.file ? ` at ${state.download.file}` : ''}: ${state.download.error}. Your system voices still work.`
+  }
+  if (voice.available) {
+    return voice.backend === 'pocket'
+      ? `${voice.displayName} is selected. Pocket TTS is ready offline.`
+      : `${voice.displayName} is selected. This machine's system voice is ready.`
+  }
+  return `${voice.displayName} is selected. ${voice.reason ?? 'That voice cannot speak yet.'}`
+}
+
+function renderVoiceActions () {
+  const wrap = document.createElement('div')
+  wrap.className = 'voice-actions'
+
+  const hear = document.createElement('button')
+  hear.type = 'button'
+  hear.id = 'btn-hear-voice'
+  hear.textContent = 'Hear this voice'
+  hear.addEventListener('click', () => void auditionVoice())
+  wrap.append(hear)
+
+  if (pocketNeedsDownload()) {
+    if (state.download.phase === 'confirm') {
+      const confirm = document.createElement('div')
+      confirm.className = 'voice-download-confirm'
+      const question = document.createElement('span')
+      question.textContent =
+        `Download neural voices? This uses ${formatBytes(state.download.totalBytes)} of network data. ` +
+        'Afterward, speech stays on this machine. '
+      const yes = document.createElement('button')
+      yes.type = 'button'
+      yes.id = 'btn-confirm-download'
+      yes.textContent = `Download ${formatBytes(state.download.totalBytes)}`
+      yes.addEventListener('click', () => void downloadVoices())
+      const no = document.createElement('button')
+      no.type = 'button'
+      no.id = 'btn-cancel-download'
+      no.textContent = 'Not now'
+      no.addEventListener('click', () => {
+        state.download.phase = 'idle'
+        refreshVoiceRow()
+      })
+      confirm.append(question, yes, no)
+      wrap.append(confirm)
+    } else if (state.download.phase === 'downloading') {
+      const progress = document.createElement('progress')
+      progress.className = 'voice-progress'
+      progress.max = Math.max(1, state.download.totalBytes)
+      progress.value = Math.min(progress.max, state.download.received)
+      progress.setAttribute('aria-label', 'Neural voice download progress')
+      wrap.append(progress)
+    } else {
+      const download = document.createElement('button')
+      download.type = 'button'
+      download.id = 'btn-download-voices'
+      download.textContent = state.download.phase === 'failed'
+        ? 'Try the neural-voice download again'
+        : `Download the neural voices (${formatBytes(state.download.totalBytes)})`
+      download.addEventListener('click', () => {
+        state.download.phase = 'confirm'
+        refreshVoiceRow()
+      })
+      wrap.append(download)
+    }
+  }
+
+  const status = document.createElement('p')
+  status.id = 'voice-status'
+  status.className = 'voice-status'
+  status.setAttribute('aria-live', 'polite')
+  status.textContent = voiceStatusSentence()
+  wrap.append(status)
+  return wrap
 }
 
 /** The element itself, chosen by kind. Every one of these changes the audio on the next press. */
@@ -1781,21 +2058,32 @@ function inputFor (c, value) {
   if (c.kind === 'voice') {
     const s = document.createElement('select')
     s.id = id
+    s.setAttribute('aria-describedby', 'voice-status')
     if (state.voices.length === 0) {
       const o = document.createElement('option')
-      o.textContent = 'No voices found on this machine'
+      o.textContent = 'The voice list is not available'
       s.append(o)
       s.disabled = true
       return s
     }
+
+    const machineGroup = document.createElement('optgroup')
+    machineGroup.label = "This machine's voices"
+    const pocketGroup = document.createElement('optgroup')
+    pocketGroup.label = 'Pocket TTS (neural)'
     for (const v of state.voices) {
       const o = document.createElement('option')
-      o.value = String(v.index)
-      o.textContent = v.locale ? `${v.name} — ${v.locale}` : v.name
-      o.selected = v.index === value
-      s.append(o)
+      o.value = v.key
+      o.textContent = voiceOptionText(v)
+      o.selected = v.key === value
+      // PV-041: known Pocket voices remain selectable while absent. Selection is the path to the
+      // explanation and download action; disabling them would hide the remedy behind a dead row.
+      o.disabled = false
+      if (v.backend === 'pocket') pocketGroup.append(o)
+      else if (v.backend === 'os') machineGroup.append(o)
     }
-    s.addEventListener('change', () => setControl(c, Number(s.value)))
+    s.append(machineGroup, pocketGroup)
+    s.addEventListener('change', () => setControl(c, s.value))
     return s
   }
 
@@ -1852,7 +2140,12 @@ function focusRow (speak) {
   const el = document.querySelector(`.row[data-control="${CSS.escape(c.id)}"] select, ` +
     `.row[data-control="${CSS.escape(c.id)}"] input`)
   if (el) el.focus({ preventScroll: false })
-  if (speak) speakConfirmation(`${c.label}, ${speakValue(c, values()[c.id])}.`)
+  if (speak) {
+    const current = c.kind === 'voice'
+      ? `${selectedVoice()?.displayName ?? 'no voice'}, ${backendName(selectedVoice()?.backend)}`
+      : speakValue(c, values()[c.id])
+    speakConfirmation(`${c.label}, ${current}.`)
+  }
 }
 
 /**
@@ -1875,19 +2168,64 @@ function refreshRow (c) {
   if (range) { range.value = String(v); row.querySelector('output').textContent = speakValue(c, v) }
 }
 
+/** Rebuild only the voice row when availability or download progress changes, preserving focus. */
+function refreshVoiceRow () {
+  const c = controlById('voice.id')
+  const row = document.querySelector('.row[data-control="voice.id"]')
+  if (!c || !row) return
+  const hadFocus = row.contains(document.activeElement)
+  const next = renderRow(c)
+  row.replaceWith(next)
+  if (hadFocus) next.querySelector('select')?.focus({ preventScroll: true })
+  markFocus()
+}
+
+function updateReplayButton () {
+  $('btn-replay').disabled = state.lastPlayed === null
+}
+
+function osSynthOptions () {
+  const fallback = state.voices.find((voice) => voice.backend === 'os' && voice.available)
+  return { voice: fallback?.key, rate: values()['voice.rate'] }
+}
+
+function voiceChangeSentence () {
+  const voice = selectedVoice()
+  if (voice === null) return 'Choose a voice.'
+  if (voice.available) return `${voice.displayName}, ${backendName(voice.backend)}, selected.`
+  if (pocketNeedsDownload()) {
+    return `${voice.displayName} selected. It needs the ${formatBytes(state.download.totalBytes)} neural voice download.`
+  }
+  return `${voice.displayName} selected. ${voice.reason ?? 'That voice cannot speak yet.'}`
+}
+
 function setControl (c, next) {
   const before = values()[c.id]
   if (before === next) return
+
+  if (c.kind === 'voice') {
+    // PV-043 / FR-023: voice is part of `keyFor`, and Replay's current pointer must be invalidated
+    // immediately. Correct cached entries may remain; no other qualified key can reach them.
+    stopAudio()
+    speakAbort?.abort()
+    speakAbort = null
+    void api('/stop', {}).catch(() => {})
+    state.lastPlayed = null
+    updateReplayButton()
+  }
   values()[c.id] = next
   persist()
   refreshRow(c)
+  if (c.kind === 'voice') refreshVoiceRow()
   markFocus()
   if (c.warnAbove !== undefined && Number(next) > c.warnAbove && !state.hexWarned) {
     state.hexWarned = true
     speakConfirmation(c.warning, { force: true })
   } else {
     // "path depth, last two folders" — control name, then value, nothing else.
-    speakConfirmation(changeSentence(c, next))
+    const unavailable = c.kind === 'voice' && selectedVoice()?.available === false
+    speakConfirmation(c.kind === 'voice' ? voiceChangeSentence() : changeSentence(c, next),
+      unavailable ? { synthesize: osSynthOptions() } : {})
   }
   renormalize()
 }
@@ -1898,18 +2236,59 @@ function setControl (c, next) {
    sample of the voice and rate under test and never a second speech implementation that can drift.
    Muted automatically while a fixture is playing. */
 let confirmTimer = null
-function speakConfirmation (text, { force = false } = {}) {
+function speakConfirmation (text, { force = false, synthesize } = {}) {
   announce(text)
   if (!state.speakOnChange && !force) return
   if (playing && !force) return
   if (state.playedElsewhere) return   // the daemon owns the audio; do not talk over the fixture
   clearTimeout(confirmTimer)
-  confirmTimer = setTimeout(() => { void speak(text, { confirmation: true }) }, 250)
+  confirmTimer = setTimeout(() => { void speak(text, { confirmation: true, synthesize }) }, 250)
 }
 
 function announce (text) { $('live').textContent = text }
 
 function setStatus (text) { $('status').textContent = text }
+
+function splitVoiceKey (key) {
+  if (typeof key !== 'string') return { backend: null, voice: null }
+  const colon = key.indexOf(':')
+  return colon < 0
+    ? { backend: null, voice: key }
+    : { backend: key.slice(0, colon), voice: key.slice(colon + 1) || null }
+}
+
+/** The server is authoritative: selection is a request, while the completed head says what spoke. */
+function provenanceFromHead (head, synth) {
+  if (typeof head?.backend !== 'string' || head.backend.length === 0) return null
+  const requested = splitVoiceKey(synth.voice)
+  return {
+    backend: head.backend,
+    voice: typeof head.voice === 'string' && head.voice.length > 0 ? head.voice : null,
+    requestedBackend: head.degradation?.requestedBackend ?? requested.backend,
+    requestedVoice: head.degradation?.requestedVoice ?? requested.voice,
+    reason: head.degradation?.reason ?? null
+  }
+}
+
+function tunedWith () {
+  const p = state.lastProvenance
+  if (p === null) return 'nothing-played-yet'
+  return p.voice ? `${p.backend}:${p.voice}` : p.backend
+}
+
+function setActualProvenance (provenance) {
+  state.lastProvenance = provenance
+  const actual = `${backendName(provenance.backend)} — ${voiceName(provenance.backend, provenance.voice)}`
+  if (provenance.reason) {
+    const requested = `${backendName(provenance.requestedBackend)} — ` +
+      `${voiceName(provenance.requestedBackend, provenance.requestedVoice)}`
+    $('provenance').textContent = `Requested ${requested}; played by ${actual}, because ${provenance.reason}`
+    return
+  }
+  $('provenance').textContent = provenance.backend === 'pocket'
+    ? `Played by ${actual} — local and offline.`
+    : `Played by ${actual}.`
+}
 
 /* ── Play, replay, stop ──────────────────────────────────────────────────────
    Replay is a cache hit. The bytes for `hash(chunkText + voice + rate)` are decoded exactly once,
@@ -1917,9 +2296,9 @@ function setStatus (text) { $('status').textContent = text }
    server would re-pay 414 ms of spawn and p50 1,054-1,163 ms of synthesis, every press, and the
    two-second gate would be lost on the one action the listener repeats most. */
 
-async function speak (text, { confirmation = false } = {}) {
+async function speak (text, { confirmation = false, synthesize } = {}) {
   if (!text || !text.trim()) return
-  const synth = synthOptions()
+  const synth = synthesize ?? synthOptions()
   const t0 = performance.now()
 
   // ONE QUEUE, ONE STOP — 020 defect 4, in the author's words: "pressing 'play this stage' in
@@ -1946,7 +2325,10 @@ async function speak (text, { confirmation = false } = {}) {
   if (cachedKeys && cachedKeys.every((k) => buffers.has(k))) {
     if (!confirmation) earcon('control.play')
     const bufs = cachedKeys.map((k) => buffers.get(k))
-    state.lastPlayed = { text, synth, keys: cachedKeys }
+    const provenance = state.provenanceFor.get(keyFor(text, synth)) ?? null
+    state.lastPlayed = { text, synth, keys: cachedKeys, provenance }
+    updateReplayButton()
+    if (provenance !== null) setActualProvenance(provenance)
     scheduleBuffers(bufs, values()['pace.simulateChunkGapMs'], () => onPlaybackEnd())
     setTiming('warm', performance.now() - t0)
     markUtterance({ text, complete: true, delivered: bufs.length, lost: 0, aborted: false, path: 'warm' })
@@ -1973,7 +2355,7 @@ async function speak (text, { confirmation = false } = {}) {
   let r
 
   try {
-    r = await streamSpeak({ text, options: speakOptions() }, ac.signal, async (rec) => {
+    r = await streamSpeak({ text, options: speakOptions(synth) }, ac.signal, async (rec) => {
       if (rec.kind === 'head') { head = rec; return }
       if (rec.kind === 'chunk-error') { chunkErrors.push(rec); return }
       if (rec.kind === 'end') { end = rec; return }
@@ -2045,8 +2427,15 @@ async function speak (text, { confirmation = false } = {}) {
 
   finishSchedule(sched, () => onPlaybackEnd())
   state.chunkKeysFor ??= new Map()
-  state.chunkKeysFor.set(keyFor(text, synth), keys)   // FR-023: same key discipline as the lookup
-  state.lastPlayed = { text, synth, keys }
+  const utteranceKey = keyFor(text, synth)
+  state.chunkKeysFor.set(utteranceKey, keys)   // FR-023: same key discipline as the lookup
+  const provenance = provenanceFromHead(head, synth)
+  if (provenance !== null) {
+    state.provenanceFor.set(utteranceKey, provenance)
+    setActualProvenance(provenance)
+  }
+  state.lastPlayed = { text, synth, keys, provenance }
+  updateReplayButton()
   markUtterance({ complete: true, delivered: sched.count, lost: end ? end.lost : 0 })
 
   // A loss is never silent and never merely logged (PITFALLS P30). The SERVER already spoke it —
@@ -2110,10 +2499,29 @@ function replay () {
   setStatus('Replaying, from the cache.')
 }
 
+async function speakUnavailableVoiceStatus () {
+  const voice = selectedVoice()
+  if (voice === null) return
+  const why = pocketNeedsDownload()
+    ? `${voice.displayName} is not installed. Download the neural voices, or choose a system voice.`
+    : `${voice.displayName} cannot speak. ${voice.reason ?? 'Choose another ready voice.'}`
+  setStatus(why)
+  announce(why)
+  await speak(why, { confirmation: true, synthesize: osSynthOptions() })
+}
+
+async function auditionVoice () {
+  const voice = selectedVoice()
+  if (voice === null) { speakConfirmation('Choose a voice first.'); return }
+  if (!voice.available) { await speakUnavailableVoiceStatus(); return }
+  await speak(VOICE_AUDITION)
+}
+
 function playFixture () {
   if (!state.fixture) return
   if (playing && !paused) { pauseResume(); return }
   if (paused) { pauseResume(); return }
+  if (selectedVoice()?.available === false) { void speakUnavailableVoiceStatus(); return }
   stopAudio()
   void speak(state.spokenText || state.fixture.text)
 }
@@ -2438,7 +2846,7 @@ async function save () {
   const file = toSettingsFile(values(), {
     revision: decision.nextRevision,
     provenance: {
-      tunedWith: state.provider ?? 'os-synth',
+      tunedWith: tunedWith(),
       platform: state.platform ?? 'unknown',
       voiceListHash: state.voiceListHash,
       tunedAt: new Date().toISOString()
@@ -2473,7 +2881,7 @@ function exportCopy () {
     revision: state.settingsRevision,
     writtenBy: `voice-lab/${LAB_VERSION} (export)`,
     provenance: {
-      tunedWith: state.provider ?? 'os-synth',
+      tunedWith: tunedWith(),
       platform: state.platform ?? 'unknown',
       voiceListHash: state.voiceListHash,
       tunedAt: new Date().toISOString()
@@ -2556,9 +2964,9 @@ function stepFocused (direction) {
   }
   if (c.kind === 'voice') {
     if (state.voices.length === 0) { speakConfirmation('No voices are available on this machine.'); return }
-    const i = state.voices.findIndex((v) => v.index === values()[c.id])
+    const i = state.voices.findIndex((v) => v.key === values()[c.id])
     const next = Math.min(state.voices.length - 1, Math.max(0, (i < 0 ? 0 : i) + direction))
-    setControl(c, state.voices[next].index)
+    setControl(c, state.voices[next].key)
     return
   }
   setControl(c, stepValue(c, values()[c.id], direction))
@@ -2567,7 +2975,10 @@ function stepFocused (direction) {
 function describeFocused () {
   const c = focused()
   if (!c) return
-  const line = `${c.label}. ${c.help} Currently ${speakValue(c, values()[c.id])}.`
+  const current = c.kind === 'voice'
+    ? `${selectedVoice()?.displayName ?? 'no voice'}, ${backendName(selectedVoice()?.backend)}`
+    : speakValue(c, values()[c.id])
+  const line = `${c.label}. ${c.help} Currently ${current}.`
   $('attribution').textContent = line
   speakConfirmation(line, { force: true })
 }
@@ -2640,7 +3051,15 @@ $('btn-export').addEventListener('click', exportCopy)
 // behaviour; the difference is that it is visible and it says which one you are on without being
 // read.
 $('ab-set').addEventListener('change', (e) => {
+  const beforeVoice = values()['voice.id']
   state.active = e.target.value === 'B' ? 'B' : 'A'
+  adoptVoiceSelection()
+  if (values()['voice.id'] !== beforeVoice) {
+    stopAudio()
+    speakAbort?.abort()
+    state.lastPlayed = null
+    updateReplayButton()
+  }
   renderControls()
   renormalize()
   speakConfirmation(`Editing set ${state.active}.`, { force: true })
@@ -2668,6 +3087,7 @@ async function loadFixture (name) {
   buffers.clear()
   state.chunkKeysFor = new Map()
   state.lastPlayed = null
+  updateReplayButton()
   $('example-text').value = state.fixture.text
   exampleStatus('')
   await renormalize()
@@ -2693,6 +3113,7 @@ $('example-text').addEventListener('input', () => {
   buffers.clear()
   state.chunkKeysFor = new Map()
   state.lastPlayed = null
+  updateReplayButton()
   exampleStatus('edited, not saved')
   clearTimeout(exampleTimer)
   // 300 ms: long enough that a typed word is one round trip, short enough to feel immediate.
@@ -2792,21 +3213,12 @@ async function start () {
   if (first) { sel.value = first; await loadFixture(first) }
 
   try {
-    const v = await api('/voices')
-    if (v.ok && v.json) {
-      // The list is the ONLY source of a voice: never free text. `say` accepts an unknown name,
-      // exits 0, writes a full-length WAV and silently substitutes the default (P18's shape).
-      state.voices = (v.json.voices ?? []).map((entry, index) => ({
-        index, name: typeof entry === 'string' ? entry : (entry.name ?? entry.id ?? String(index))
-      }))
-      state.platform = v.json.platform ?? null
-      state.provider = v.json.provider ?? null
-      // The list itself is the checksum 011 and 004 both want in provenance.
-      state.voiceListHash = state.voices.length
-        ? 'fnv:' + hash(state.voices.map((x) => x.name).join('\n'))
-        : null
-    }
-  } catch { /* voices are optional; the fixture still normalizes */ }
+    // The list is the ONLY source of a voice: never free text. `say` accepts an unknown name,
+    // exits 0, writes a full-length WAV and silently substitutes the default (P18's shape).
+    await loadVoices()
+  } catch (err) {
+    showSpeakBanner('The voice list could not be read.', String(err?.message ?? err))
+  }
 
   try {
     const s = await api('/settings')
@@ -2820,6 +3232,8 @@ async function start () {
       state.settingsRevision = parsed.revision
       state.sets.A = parsed.values
       state.sets.B = { ...parsed.values }
+      adoptVoiceSelection(state.sets.A['voice.id'])
+      state.sets.B['voice.id'] = state.sets.A['voice.id']
       if (parsed.rejected.length || parsed.unknown.length) {
         showSpeakBanner('Some settings did not load.',
           `${parsed.rejected.length} value${parsed.rejected.length === 1 ? '' : 's'} fell back to the default` +
@@ -2834,6 +3248,7 @@ async function start () {
     '<p>Focus a changed word in the spoken pane and press <span class="kbd">Enter</span> to jump to the control that governs it.</p>'
 
   renderControls()
+  updateReplayButton()
   await renormalize()
   focusRow(false)
   setStatus('Ready. Nothing has played yet — this page makes no sound until you press something.')

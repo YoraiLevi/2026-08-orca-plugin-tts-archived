@@ -17,8 +17,13 @@
  *   U2  changing a dropdown changes the spoken text — with a control that restores it
  *   U3  editing the example changes the spoken text — with a no-op control
  *   U4  two plays in succession never overlap: at most one audio source is live at a time
+ *   U5  one transform is one continuous, labelled mark
+ *   U6  the voice picker exposes both backends, and switching backend changes synthesis
+ *   U7  an absent Pocket model downloads and becomes ready without navigation
+ *   U8  switching backend cannot replay cached bytes from the preceding voice
+ *   U9  provenance follows the backend that completed speech, including fallback
  *
- * EACH CHECK CAN FAIL, and `--prove` demonstrates it: it re-runs U1, U2 and U4 against a
+ * EACH CHECK CAN FAIL, and `--prove` demonstrates it: it re-runs every provable check against a
  * deliberately broken copy of the page and requires them to go red. A check that could not have
  * failed is not a check.
  *
@@ -27,7 +32,7 @@
  * every source and the destination. Four mechanisms, same as `bench-lab-gate.mjs`.
  *
  * Usage:
- *   node scripts/ui-probe.mjs            # run the four checks
+ *   node scripts/ui-probe.mjs            # run all checks
  *   node scripts/ui-probe.mjs --prove    # also prove each one can go red
  */
 
@@ -99,8 +104,55 @@ class Cdp {
  */
 const PROBE = String.raw`
 (() => {
-  const p = { live: 0, maxLive: 0, started: 0, errors: [] };
+  const nativeFetch = window.fetch.bind(window);
+  const p = {
+    live: 0, maxLive: 0, started: 0, errors: [], requests: [],
+    stubDownload: false, downloadComplete: false
+  };
   window.__ui = p;
+
+  // PV-042's independent control. The real endpoint is a 173.8 MB network action, so the probe
+  // must never press it. When explicitly armed by U7/U8, this substitutes a tiny NDJSON download
+  // and makes the NEXT /voices response report the same twelve entries as ready. Normal page runs
+  // and every other endpoint still reach the real 127.0.0.1 server.
+  window.fetch = async function (input, init = {}) {
+    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+    p.requests.push({ url: url.pathname, method: init.method || 'GET', body: init.body || null });
+
+    if (p.stubDownload && url.pathname === '/model/download') {
+      const enc = new TextEncoder();
+      const records = [
+        { kind: 'start', backend: 'pocket', fileCount: 20, totalBytes: 173764082 },
+        { kind: 'progress', backend: 'pocket', file: 'bundle.json', received: 24381, total: 24381, fileIndex: 0, fileCount: 20 },
+        { kind: 'complete', ok: true, backend: 'pocket', fileCount: 20, totalBytes: 173764082 }
+      ];
+      const body = new ReadableStream({
+        start (controller) {
+          controller.enqueue(enc.encode(JSON.stringify(records[0]) + String.fromCharCode(10)));
+          setTimeout(() => controller.enqueue(enc.encode(JSON.stringify(records[1]) + String.fromCharCode(10))), 120);
+          setTimeout(() => {
+            p.downloadComplete = true;
+            controller.enqueue(enc.encode(JSON.stringify(records[2]) + String.fromCharCode(10)));
+            controller.close();
+          }, 520);
+        }
+      });
+      return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+    }
+
+    const response = await nativeFetch(input, init);
+    if (p.stubDownload && p.downloadComplete && url.pathname === '/voices') {
+      const json = await response.json();
+      json.voices = (json.voices || []).map((voice) => voice.backend === 'pocket'
+        ? { ...voice, available: true, reason: null }
+        : voice);
+      return new Response(JSON.stringify(json), {
+        status: response.status,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    return response;
+  };
 
   const AC = window.AudioContext || window.webkitAudioContext;
   const origConnect = AudioNode.prototype.connect;
@@ -417,13 +469,13 @@ async function u4 (cdp) {
   // Now the pair, warm and fast — exactly the succession he described.
   await click()
   await waitUntil(cdp, 'window.__ui.started', (n) => Number(n) >= 1, 30000)
-  const midway = await cdp.evaluate('JSON.stringify({ ui: window.__ui, timing: document.getElementById("timing").textContent, status: document.getElementById("status").textContent })')
+  const midway = await cdp.evaluate('JSON.stringify({ ui: { live: window.__ui.live, maxLive: window.__ui.maxLive, started: window.__ui.started, errors: window.__ui.errors }, timing: document.getElementById("timing").textContent, status: document.getElementById("status").textContent })')
   await click()
-  const after = await cdp.evaluate('JSON.stringify({ ui: window.__ui, timing: document.getElementById("timing").textContent, status: document.getElementById("status").textContent })')
+  const after = await cdp.evaluate('JSON.stringify({ ui: { live: window.__ui.live, maxLive: window.__ui.maxLive, started: window.__ui.started, errors: window.__ui.errors }, timing: document.getElementById("timing").textContent, status: document.getElementById("status").textContent })')
 
   await waitUntil(cdp, 'window.__ui.started', (n) => Number(n) >= 2, 30000)
   await sleep(1200)
-  const p = JSON.parse(await cdp.evaluate('JSON.stringify(window.__ui)'))
+  const p = JSON.parse(await cdp.evaluate('JSON.stringify({ live: window.__ui.live, maxLive: window.__ui.maxLive, started: window.__ui.started, errors: window.__ui.errors })'))
   await cdp.evaluate('document.getElementById("ladder-close").click()')
 
   if (p.started < 2) {
@@ -496,6 +548,236 @@ async function u5 (cdp) {
   }
 }
 
+/**
+ * U6 — one voice picker, both backends, and a backend switch that reaches synthesis.
+ *
+ * Counting optgroups alone would repeat U1's first mistake: a correctly shaped picker whose
+ * options all send the same voice is still dead. This check therefore requires BOTH the grouping
+ * contract and the effect: selecting an `os:*` option and then a `pocket:*` option must put those
+ * exact qualified keys into the options bound for the synthesizer.
+ */
+async function u6 (cdp) {
+  const shape = await cdp.evaluate(`(() => {
+    const select = document.getElementById('ctl-voice.id');
+    if (!select) return { error: 'there is no Which voice control' };
+    const groups = [...select.querySelectorAll(':scope > optgroup')].map((g) => ({
+      label: g.label,
+      options: [...g.querySelectorAll(':scope > option')].map((o) => ({
+        value: o.value, disabled: o.disabled, text: o.textContent.trim()
+      }))
+    }));
+    return { groups };
+  })()`)
+  if (shape.error) return { pass: false, detail: shape.error }
+
+  const machine = shape.groups.find((g) => g.label === "This machine's voices")
+  const pocket = shape.groups.find((g) => g.label === 'Pocket TTS (neural)')
+  const problems = []
+  if (shape.groups.length !== 2) problems.push(`expected exactly 2 optgroups, found ${shape.groups.length}`)
+  if (!machine) problems.push(`missing optgroup "This machine's voices"`)
+  if (!pocket) problems.push('missing optgroup "Pocket TTS (neural)"')
+  if (machine && !machine.options.some((o) => o.value.startsWith('os:'))) {
+    problems.push('the machine group has no backend-qualified os:* value')
+  }
+  if (pocket && !pocket.options.some((o) => o.value.startsWith('pocket:'))) {
+    problems.push('the Pocket group has no backend-qualified pocket:* value')
+  }
+  if (pocket && pocket.options.some((o) => o.disabled)) {
+    problems.push('at least one Pocket option is disabled instead of selectable')
+  }
+  if (problems.length > 0) return { pass: false, detail: problems.join('; ') }
+
+  const osKey = machine.options.find((o) => o.value.startsWith('os:')).value
+  const pocketKey = pocket.options.find((o) => o.value.startsWith('pocket:')).value
+  const select = (value) => cdp.evaluate(`(() => {
+    const s = document.getElementById('ctl-voice.id');
+    s.value = ${JSON.stringify(value)};
+    s.dispatchEvent(new Event('change', { bubbles: true }));
+    return s.value;
+  })()`)
+
+  const osApplied = await select(osKey)
+  const osEffect = await waitUntil(
+    cdp,
+    'window.__labEffect().speak.synthesize.voice ?? null',
+    (v) => v === osKey
+  )
+  const pocketApplied = await select(pocketKey)
+  const pocketEffect = await waitUntil(
+    cdp,
+    'window.__labEffect().speak.synthesize.voice ?? null',
+    (v) => v === pocketKey
+  )
+
+  const moved = osApplied === osKey && pocketApplied === pocketKey &&
+    osEffect === osKey && pocketEffect === pocketKey && osEffect !== pocketEffect
+  return {
+    pass: moved,
+    detail: moved
+      ? `one picker lists ${machine.options.length} machine and ${pocket.options.length} Pocket voices; synthesis moved ${osEffect} -> ${pocketEffect}`
+      : `the picker moved in the DOM but synthesis did not follow: os=${osEffect}, pocket=${pocketEffect}`
+  }
+}
+
+async function ensurePocketReady (cdp) {
+  const already = await cdp.evaluate(`(() => {
+    const select = document.getElementById('ctl-voice.id');
+    const options = [...select.querySelectorAll('optgroup[label="Pocket TTS (neural)"] option')];
+    return options.length === 12 && options.every((o) => !/download needed/i.test(o.textContent));
+  })()`)
+  if (already) return { progressSeen: true }
+
+  await cdp.evaluate(`(() => {
+    window.__ui.stubDownload = true;
+    document.getElementById('btn-download-voices').click();
+    return !!document.getElementById('btn-confirm-download');
+  })()`)
+  const confirmed = await cdp.evaluate(`(() => {
+    const button = document.getElementById('btn-confirm-download');
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`)
+  if (!confirmed) return { error: 'the download confirmation never appeared' }
+
+  const progressSeen = await waitUntil(cdp, `(() => {
+    const p = document.querySelector('#controls progress');
+    const status = document.getElementById('voice-status')?.textContent || '';
+    return !!p && Number(p.value) > 0 && /File 1 of 20: bundle\\.json/.test(status);
+  })()`, (v) => v === true, 5000)
+  const ready = await waitUntil(cdp, `(() => {
+    const select = document.getElementById('ctl-voice.id');
+    const options = [...select.querySelectorAll('optgroup[label="Pocket TTS (neural)"] option')];
+    return options.length === 12 && options.every((o) => !/download needed/i.test(o.textContent)) &&
+      !document.getElementById('btn-download-voices') && !document.getElementById('btn-confirm-download');
+  })()`, (v) => v === true, 10000)
+  return { progressSeen, ready }
+}
+
+/** U7 — absent voices stay selectable, then a stubbed download makes them ready without reload. */
+async function u7 (cdp) {
+  const before = await cdp.evaluate(`(() => {
+    const group = document.getElementById('ctl-voice.id')
+      .querySelector('optgroup[label="Pocket TTS (neural)"]');
+    const options = group ? [...group.querySelectorAll('option')] : [];
+    return {
+      count: options.length,
+      disabled: options.filter((o) => o.disabled).length,
+      sized: options.filter((o) => /173\\.8 MB/.test(o.textContent)).length,
+      button: document.getElementById('btn-download-voices')?.textContent || '',
+      selected: document.getElementById('ctl-voice.id')?.value || null,
+      navigations: performance.getEntriesByType('navigation').length
+    };
+  })()`)
+  const problems = []
+  if (before.count !== 12) problems.push(`expected 12 Pocket voices, found ${before.count}`)
+  if (before.disabled !== 0) problems.push(`${before.disabled} Pocket voices were disabled`)
+  if (before.sized !== 12) problems.push(`${before.sized} of 12 Pocket labels showed the honest 173.8 MB size`)
+  if (!/Download the neural voices \(173\.8 MB\)/.test(before.button)) {
+    problems.push('the 173.8 MB download button was missing')
+  }
+  if (problems.length > 0) return { pass: false, detail: problems.join('; ') }
+
+  const result = await ensurePocketReady(cdp)
+  const after = await cdp.evaluate(`(() => ({
+    selected: document.getElementById('ctl-voice.id')?.value || null,
+    navigations: performance.getEntriesByType('navigation').length,
+    ready: [...document.getElementById('ctl-voice.id')
+      .querySelectorAll('optgroup[label="Pocket TTS (neural)"] option')]
+      .filter((o) => !/download needed/i.test(o.textContent)).length
+  }))()`)
+  if (result.error) return { pass: false, detail: result.error }
+  const pass = result.progressSeen === true && result.ready === true && after.ready === 12 &&
+    after.navigations === before.navigations && after.selected === before.selected
+  return {
+    pass,
+    detail: pass
+      ? '12 selectable absent voices showed 173.8 MB; progress named its file; all 12 became ready with the same selection and no navigation'
+      : `download transition failed: ${JSON.stringify({ before, result, after })}`
+  }
+}
+
+/** U8 — changing backend cannot reach the old voice's cached bytes. */
+async function u8 (cdp) {
+  const ready = await ensurePocketReady(cdp)
+  if (ready.error || ready.ready === false) return { pass: false, detail: ready.error ?? 'Pocket voices never became ready' }
+
+  // Turn automatic confirmations off, then wait out the one forced sentence that says it is off.
+  const muteText = await cdp.evaluate(`document.getElementById('btn-mute').textContent`)
+  if (/on/i.test(muteText)) {
+    const beforeMute = await cdp.evaluate('window.__lab.utterances.length')
+    await cdp.evaluate(`document.getElementById('btn-mute').click()`)
+    await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforeMute, 120000)
+    await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 30000)
+  }
+
+  await cdp.evaluate(`(() => {
+    const input = document.getElementById('example-text');
+    input.value = 'Cache identity must include the selected backend and voice.';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`)
+  await sleep(900)
+
+  const osKey = await cdp.evaluate(`document.getElementById('ctl-voice.id').querySelector('optgroup[label="This machine\\'s voices"] option').value`)
+  const pocketKey = await cdp.evaluate(`document.getElementById('ctl-voice.id').querySelector('optgroup[label="Pocket TTS (neural)"] option').value`)
+  const choose = (key) => cdp.evaluate(`(() => {
+    const select = document.getElementById('ctl-voice.id');
+    select.value = ${JSON.stringify(key)};
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`)
+
+  await choose(osKey)
+  await cdp.evaluate('window.__ui.requests = []')
+  const beforePrime = await cdp.evaluate('window.__lab.utterances.length')
+  await cdp.evaluate(`document.getElementById('btn-play').click()`)
+  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforePrime, 120000)
+  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 120000)
+  const prime = await cdp.evaluate(`window.__ui.requests.filter((r) => r.url === '/speak').map((r) => r.body)`)
+  if (prime.length === 0) return { pass: false, detail: 'the OS prime made no /speak request' }
+
+  await cdp.evaluate('window.__ui.requests = []')
+  await choose(pocketKey)
+  const replayDisabled = await cdp.evaluate(`document.getElementById('btn-replay').disabled`)
+  const beforePocket = await cdp.evaluate('window.__lab.utterances.length')
+  await cdp.evaluate(`document.getElementById('btn-play').click()`)
+  const requested = await waitUntil(cdp,
+    `window.__ui.requests.filter((r) => r.url === '/speak').map((r) => r.body)`,
+    (bodies) => bodies.length > 0,
+    30000)
+  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforePocket, 120000)
+  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 120000)
+
+  const osBody = JSON.parse(prime.at(-1))
+  const pocketBody = requested.length ? JSON.parse(requested.at(-1)) : null
+  const pass = replayDisabled === true && pocketBody !== null &&
+    osBody.text === pocketBody.text &&
+    osBody.options?.synthesize?.voice === osKey &&
+    pocketBody.options?.synthesize?.voice === pocketKey
+  return {
+    pass,
+    detail: pass
+      ? `same text made a new /speak request after ${osKey} -> ${pocketKey}; Replay was invalidated`
+      : `cache invalidation failed: ${JSON.stringify({ replayDisabled, osBody, pocketBody })}`
+  }
+}
+
+/** U9 — fallback provenance follows the completed response, not the selected Pocket option. */
+async function u9 (cdp) {
+  const effect = await cdp.evaluate('window.__labEffect().provenance')
+  const selected = await cdp.evaluate(`document.getElementById('ctl-voice.id').value`)
+  const selectedPocket = selected.startsWith('pocket:')
+  const saysRequestedPocket = /Requested Pocket TTS/i.test(effect.footer)
+  const saysActualOs = /played by this machine's system voice/i.test(effect.footer)
+  const exportedActual = /^os(?::|$)/.test(effect.tunedWith)
+  const pass = selectedPocket && saysRequestedPocket && saysActualOs && exportedActual
+  return {
+    pass,
+    detail: pass
+      ? `selected ${selected}; footer names the OS fallback and exported tunedWith is ${effect.tunedWith}`
+      : `provenance followed selection instead of completed speech: ${JSON.stringify({ selected, effect })}`
+  }
+}
+
 /* ---------------------------------------------------------------------------------- the runner */
 
 const CHECKS = [
@@ -503,7 +785,11 @@ const CHECKS = [
   { id: 'U2', what: 'a dropdown changes what is spoken', fn: u2, provable: true },
   { id: 'U3', what: 'editing the example changes what is spoken', fn: u3, provable: false },
   { id: 'U4', what: 'two plays never overlap', fn: u4, provable: true },
-  { id: 'U5', what: 'one transform is one mark, and the mark is labelled', fn: u5, provable: true }
+  { id: 'U5', what: 'one transform is one mark, and the mark is labelled', fn: u5, provable: true },
+  { id: 'U6', what: 'the voice picker lists both backends and switches synthesis', fn: u6, provable: true },
+  { id: 'U7', what: 'the neural voice download completes in place', fn: u7, provable: true },
+  { id: 'U8', what: 'a backend switch cannot replay old voice bytes', fn: u8, provable: true },
+  { id: 'U9', what: 'provenance names what actually spoke', fn: u9, provable: true }
 ]
 
 /**
@@ -534,6 +820,30 @@ const BREAKAGES = {
     apply: (html) => html.replace(
       '  stopAudio()\n\n  // The warm path first',
       '  /* stopAudio() removed by --prove */\n\n  // The warm path first')
+  },
+  U6: {
+    what: 'drop the optgroup wiring from the voice picker',
+    apply: (html) => html.replace(
+      's.append(machineGroup, pocketGroup)',
+      's.append(...machineGroup.children, ...pocketGroup.children)')
+  },
+  U7: {
+    what: 'skip the no-reload voice refresh after download',
+    apply: (html) => html.replace(
+      '    await loadVoices()\n    adoptVoiceSelection(chosen)',
+      '    /* loadVoices() removed by --prove */\n    adoptVoiceSelection(chosen)')
+  },
+  U8: {
+    what: 'remove voice from the audio cache key',
+    apply: (html) => html.replace(
+      "const KEYED_FIELDS = ['voice', 'rate', 'pitch', 'volume']",
+      "const KEYED_FIELDS = ['rate', 'pitch', 'volume']")
+  },
+  U9: {
+    what: 'disconnect exported provenance from completed speech',
+    apply: (html) => html.replace(
+      '  state.lastProvenance = provenance',
+      '  state.lastProvenance = null')
   }
 }
 
