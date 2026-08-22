@@ -6,6 +6,41 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P46 — A test harness that picks its own port walks into the stale-server trap it was written to prevent
+**Symptom:** `scripts/ui-probe.mjs`, on its very first run, reported all four UI checks failing
+against a page that did not match the source on disk. The rows it described -- an accordion, `<
+announced >` readouts, "not yet wired" badges -- belonged to the design that had just been
+replaced. Nothing in the output suggested the probe had reached a different program.
+**Cause:** the probe asked for a fixed port, spawned a lab, and then polled `/fixtures` until
+something answered 200. Something did: **a Voice Lab left running since 5:16 PM the previous
+evening.** The probe's own child died `EADDRINUSE` and was never checked; the stranger replied to
+every request. This is exactly the failure that cost the author a session (`voice-lab.mjs`'s
+EADDRINUSE message exists because of it) -- reproduced, hours later, by the script written to
+catch regressions.
+**What to do instead:** **a harness must never share a namespace with a process it did not
+start.** Bind port 0 and read the port back from your OWN child's stdout, so there is no fixed
+port for a stranger to be squatting on. And if you do pick a port, treat the child's exit code as
+load-bearing: a server that died is not a server that is serving. Generally: *waiting until
+something answers* is not *waiting until my thing answers*, and the difference is invisible in
+every log until the answers start being wrong.
+
+## P47 — A UI check that asserts SHAPE cannot see a control that does nothing
+**Symptom:** the Voice Lab shipped 46 controls of which **36 changed nothing at all**, and the
+first check written to catch that went **GREEN** when handed a page rendering all 46. Thirteen
+rounds of adversarial review had also passed it.
+**Cause:** the check counted rows and asked whether each held a `<select>` or an `<input>`. After
+the rewrite every control renders as a real form element, dead ones included -- so the property it
+measured ("is this a form control") is orthogonal to the property that matters ("does moving this
+change anything"). Every other test in the repo had the same blind spot from the other side: they
+all asserted what the page WOULD SAY, and none asserted that a person could change it.
+**What to do instead:** for a control surface, **the assertion is a consequence, not a widget**.
+Move every control and demand that something downstream differs -- the rendered output, or the
+options bound for the engine. The Lab exposes `window.__labEffect()` for exactly this, returning
+the spoken text and the synthesizer options and nothing else. Rewritten that way the check names
+all 36 dead controls by id. The general form: *if you cannot state what result would have proved
+you wrong, you have written a description, not a check* -- and a control's description is the last
+thing to notice that it is inert.
+
 ## P43 — Under load, `mutation-check` reports SURVIVED on a mutant that is properly guarded, and the next agent goes and "fixes" a test that was never broken
 **Symptom:** a clean detached worktree at `713ddf2`, load average **45.07**, reported
 `half-written-line-concluded-on` **SURVIVED** — "nothing in huddle.test.ts noticed". The same
