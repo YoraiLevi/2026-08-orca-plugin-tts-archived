@@ -56,7 +56,10 @@ Pinned detached worktree at `f029e6f`, after `pnpm install --frozen-lockfile`:
 - Full `pnpm test` — **RED for one unrelated G5/M16 failure**, at load average **7.77**
   `[measured-here]`: `packages/plugin/src/huddle/presence.test.ts` says unmute replayed
   `must never be heard`. G2 itself passed in that run. This worker did not change M16-owned code;
-  the exact pinned failure was escalated to the coordinator.
+  the exact pinned failure was escalated to the coordinator. After its owner corrected the test's
+  watcher race, a second fresh detached worktree at integrated SHA `119c063` (again installed with
+  `pnpm install --frozen-lockfile`) ran **779/779 tests in 35 files**, load average **3.70** at start
+  and **4.77** at end `[measured-here]`; G2 passed there in 325 ms.
 - `node scripts/mutation-check.mjs` — **40/40 behaved as declared**, including all three new G2
   mutants, at load average **15.12 → 7.06** `[measured-here]`. This is **+3 declarations and +6
   behaving declarations versus the contract baseline 34/37 at `6049c26`, load 11.01**: the three
