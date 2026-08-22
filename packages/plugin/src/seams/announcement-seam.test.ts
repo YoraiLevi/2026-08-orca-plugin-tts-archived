@@ -42,11 +42,42 @@ import type {
  * measurement: on a quiet machine this returns almost immediately, and on a loaded one it still
  * returns the right answer instead of a faster wrong one.
  */
-const until = async (done: () => boolean, ceilingTicks = 600): Promise<void> => {
+/**
+ * Wait for a condition, and FAIL NAMING IT if it never arrives.
+ *
+ * This used to return silently after the ceiling. A condition that never became true then produced
+ * no error here — only a confusing assertion two lines later about a value that was never going to
+ * be set, or a bare "Test timed out" with nothing about which wait was stuck.
+ *
+ * That is what Windows is hitting: CI run 32550849182 timed out at 30,000 ms, and a 30 s timeout
+ * is a HANG, not a slow machine — the budget was raised from 5 s specifically so that firing would
+ * mean this. A silent give-up turned a diagnosable stall into an anonymous one.
+ */
+const until = async (done: () => boolean, what = 'an unnamed condition', ceilingTicks = 600): Promise<void> => {
   for (let i = 0; i < ceilingTicks; i++) {
     if (done()) return
     await new Promise((r) => setTimeout(r, 5))
   }
+  throw new Error(
+    `gave up after ${ceilingTicks * 5} ms waiting for: ${what}. `
+    + 'This is a stall, not slowness — the wait is a condition and the ceiling is a hang detector.'
+  )
+}
+
+/**
+ * Wait for a window in which a bad thing WOULD have happened, and return whether it did.
+ *
+ * The inverse of `until`, and it needs its own name. Both were spelled `until(...)` before, so a
+ * wait-for-success and a watch-for-runaway were indistinguishable at the call site — and making
+ * `until` fail on timeout (correctly, for the success case) broke the runaway row, which is
+ * SUPPOSED to time out. Two opposite intentions must not share one spelling.
+ */
+const watchFor = async (bad: () => boolean, ceilingTicks = 600): Promise<boolean> => {
+  for (let i = 0; i < ceilingTicks; i++) {
+    if (bad()) return true
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  return false
 }
 
 /** Only for the rows that assert something did NOT happen; there is no condition to wait on. */
@@ -184,7 +215,11 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
     p.failOn = 'z'
     const s = service(p)
     s.announce('zzz')
-    await until(() => p.said.length >= 10)   // the runaway this row exists to detect
+    // `watchFor`, not `until`: this row WANTS the wait to expire. Reaching the ceiling means the
+    // runaway never happened, which is the pass condition.
+    const ranAway = await watchFor(() => p.said.length >= 10)
+    expect(ranAway, 'the announcement channel fed itself — it announced its own failure in a loop')
+      .toBe(false)
     expect(p.said.length, 'the announcement channel fed itself').toBeLessThan(10)
   })
 })
