@@ -54,15 +54,37 @@ describe('T042d cancel latency is measured, not assumed', () => {
   it(`cancel stops the child process within ${CANCEL_BUDGET_MS} ms and yields no audio`, async () => {
     const p = new OsSynthProvider()
     await p.prepare()
-    const iter = p.generate('This is a long sentence. '.repeat(30))[Symbol.asyncIterator]()
+    // 200, and the number is bounded on BOTH sides. The interrupt must land while the engine is
+    // still rendering, or the assertion below tests nothing — and the input must not be so large
+    // that the provider's own 60 s timeout fires, because a rejection is not a fast render.
+    // Measured `[measured-here]`, n=1 per size:
+    //
+    //     sentences   espeak-ng (node:24-bookworm)   say (macOS 26.5)
+    //     30           24 ms                          7.4 s
+    //     200         124 ms                         48.3 s
+    //     400         245 ms                         60.0 s -> KILLED, "did not finish"
+    //
+    // At 30 the Linux render finished before the 50 ms wait elapsed. At 400 `say` blew its own
+    // timeout. 200 clears the interrupt on the fast engine and stays inside the budget on the
+    // slow one; cancel kills the child long before 48 s in the real run.
+    const iter = p.generate('This is a long sentence. '.repeat(200))[Symbol.asyncIterator]()
     const pending = iter.next()
     // Did the engine finish BEFORE we interrupted? On `say` (~1,100 ms) it never has; espeak-ng
     // renders this in under 50 ms, so on Linux the chunk exists already and cancelling cannot
     // un-produce it. Racing the engine and asserting the outcome is the same mistake as waiting
     // out a queue drain — the precondition has to be observed, not assumed.
+    // Fulfilment only. An earlier revision also flagged REJECTION, so the provider's 60 s timeout
+    // firing was indistinguishable from a render that finished early — an error wearing the
+    // costume of the condition being measured. A rejection here is a real failure and must reach
+    // the `await` below rather than be absorbed.
     let settledBeforeCancel = false
-    void pending.then(() => { settledBeforeCancel = true }, () => { settledBeforeCancel = true })
+    void pending.then(() => { settledBeforeCancel = true }, () => {})
     await new Promise((r) => setTimeout(r, 50))
+    // Snapshot BEFORE the interrupt. `settledBeforeCancel` is set by a `.then` that also runs when
+    // cancel resolves the promise, so reading the live flag after `await pending` is always true
+    // and the guard would fire on every platform — a check that cannot pass, which is the twin of
+    // the check that cannot fail.
+    const renderWasStillRunning = !settledBeforeCancel
     const t0 = Date.now()
     p.cancel()
     const first = await pending
@@ -80,12 +102,15 @@ describe('T042d cancel latency is measured, not assumed', () => {
     // already complete when the listener pressed Stop is not an escape — it is audio that existed
     // before the interrupt. Asserting `first.done` unconditionally made this fail on Linux for
     // being FAST, which is not the property under test. CI run 32506050161 `[measured-here]`.
-    if (settledBeforeCancel) {
-      console.info('[measured] the engine completed before the interrupt — no escape is possible; '
-        + 'the post-cancel assertion does not apply on this engine')
-    } else {
-      expect(first.done, 'cancel returned promptly but still produced audio').toBe(true)
-    }
+    // The precondition is ASSERTED, never used to skip. An earlier revision made the check below
+    // conditional on this flag, and on Linux the flag is always true, so the assertion never ran
+    // and the mutants `cancel-late-kill` and `cancel-never-kill` both SURVIVED — a test that
+    // could not fail for the property it exists to guard. If a future engine ever outruns the
+    // wait, this must go red and the input must grow, not quietly stop testing.
+    expect(renderWasStillRunning,
+      'the engine finished before cancel() was called, so this test proves nothing about '
+      + 'barge-in — grow the input until the interrupt lands mid-render').toBe(true)
+    expect(first.done, 'cancel returned promptly but still produced audio').toBe(true)
   }, 120_000)
 })
 
