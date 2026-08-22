@@ -14,7 +14,7 @@ Cap 3-4 concurrent agents. v1 decisions reopenable with evidence.
 
 ## Done when — every box mechanically checkable
 
-- [ ] **G1 — M12 settings.** A value exported from the Voice Lab, placed in ORCA settings,
+- [x] **G1 — M12 settings.** ✅ **MET** at `9079f27`. Verified independently by the architect in a pinned detached worktree: **349/349** across `packages/plugin` and `packages/core/src/settings`, load 12 `[measured-here]`. The oracle is `g1-roundtrip.test.ts`, 20 tests, two genuinely independent paths — the LAB path lifts the projections from `voice-lab/index.html`'s own bytes and runs a real HTTP server; the PLUGIN path writes a real file to a real inbox and reads it through `activate()`. A value exported from the Voice Lab, placed in ORCA settings,
       produces **byte-identical** speech to the lab's own output.
       *Oracle:* a test whose expected value comes from the lab's captured output, compared
       against the plugin's read path — two independent paths to one string.

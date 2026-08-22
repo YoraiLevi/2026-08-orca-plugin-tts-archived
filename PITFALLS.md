@@ -72,8 +72,12 @@ happens in the working tree before anyone stages anything.
 **What to do instead:** run it in a **detached worktree**, never the shared tree.
 
     git worktree add --detach /tmp/<job>-base
-    cd /tmp/<job>-base && pnpm install --frozen-lockfile
+    cd /tmp/<job>-base && pnpm install --frozen-lockfile   # REQUIRED, and easy to skip
     node scripts/mutation-check.mjs
+
+A fresh worktree has no `node_modules`. Without the install, `mutation-check` fails on the very
+first mutant for a reason that has nothing to do with the mutant, and reads as a broken script.
+Four seconds; reported by the agent who hit it.
 
 Develop there, then copy finished files back for a single short `git commit -- <paths>` window.
 Costs one install; removes the whole class. Found by an agent that noticed a mutant in a file
