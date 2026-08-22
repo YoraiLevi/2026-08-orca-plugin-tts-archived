@@ -596,9 +596,29 @@ async function runAgainst (pageDir, only) {
     cdp.close()
     chrome.child.kill('SIGKILL')
     lab.child.kill('SIGKILL')
-    await rm(chromeDir, { recursive: true, force: true })
+    await removeWhenReleased(chromeDir)
   }
   return results
+}
+
+/**
+ * Delete a directory a just-killed process may still be holding.
+ *
+ * On Windows, SIGKILL returns before the OS has released the process's file handles, so removing
+ * Chrome's profile immediately fails `EBUSY` on `first_party_sets.db` — which took down the whole
+ * CI job over a temp file nobody cares about. Retry briefly, then give up QUIETLY: a leftover
+ * profile in the runner's temp directory is not a reason to fail a run about the UI.
+ */
+async function removeWhenReleased (dir, attempts = 10) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await rm(dir, { recursive: true, force: true })
+      return
+    } catch (err) {
+      if (err?.code !== 'EBUSY' && err?.code !== 'ENOTEMPTY' && err?.code !== 'EPERM') return
+      await sleep(200)
+    }
+  }
 }
 
 /** Copy `voice-lab/` to a temp dir, applying one breakage to index.html. */
@@ -641,7 +661,7 @@ async function main () {
         console.log(`         ${r?.detail ?? '(no result)'}`)
         if (!wentRed) failures++
       } finally {
-        await rm(dir, { recursive: true, force: true })
+        await removeWhenReleased(dir)
       }
     }
   }
