@@ -381,3 +381,47 @@ verdict unreadable: a round that comes back clean because the machine was quiet 
 comes back clean because nothing was really checked **are the same observable**, which is the
 confusion `006` section 0 ranks worst. **A dry verdict on a deterministic suite would mean something
 for the first time in this protocol.** J28 owns the flakes; SC-17 is the row.
+
+---
+
+## Close of round 13 — both unopened inventories, and a live defect in each
+
+Round 10 called the protocol's state **"sampled, not surveyed"**: of five seam inventories, three
+were surveyed and **two had never been opened**. Round 13 opened both — the transcript **tailer**
+(`006` section 1) and the **adapter** (section 8), the seam whose far side is code we do not
+control. Run by the architect, because ORCA dispatch failed three times on a codex updater prompt;
+that is recorded in `.meta/goal/phase2-m12-m17/checkpoint.md` rather than left as a gap.
+
+**5 items clear the bar.**
+
+| Item | Clause | |
+|---|---|---|
+| **R13-01** | 3 | **SC-19, tailer.** `006` TT4 (severity **S1**) — a record with no `uuid` got an id that changed on every read, so dedup never matched and *the same paragraph was read aloud again on every file touch*. The defect is FIXED, by a content hash — and it shipped with **no test at all**; `grep stableId` over the huddle tests returned nothing. TT4 named its own instrument two days ago and nobody wrote it down. |
+| **R13-02** | 3, 5 | **SC-20, adapter — a LIVE defect on the seam's first probe.** ORCA's schema is `z.string().min(1).max(120)`, **both** bounds. The adapter clamped max and nothing handled min, so `notify('', body)` sent `title=""`, zod **rejected the call**, and the announcement reached nobody while the plugin reported success. Fixed; the constraints are restated from ORCA's source, never imported (P36). |
+| **R13-03** | 5 | **G8 was ticked from one platform.** `mutation-check` reads **37/37 on macOS and 35/37 on Linux**. `prepare-warm-on-broken-say` is *unreachable* there (`#prepare` returns at `os-synth/index.ts:363` before the mutated guard) — new `equivalentOn` says so. `half-written-line-concluded-on` is a **real gap** and is left failing rather than scoped. |
+| **R13-04** | 3 | **Three Windows failures, only ONE a product defect.** `check-citations` printed `relative()` raw, emitting `docs\note.md:1` where the citation is written `docs/note.md:1` — a report that cannot be matched against the thing it describes. The other two were bad expectations: `safeJoin` compared against `join` where the code correctly uses `resolve`, and the unreadable-root probe used `chmod(0o000)`, which Node maps to nothing on Windows, so **the precondition could not be established**. |
+| **R13-05** | 3 | **P41's restore is a `finally`, and a killed process has none.** A run stopped mid-flight left two live mutants in the shared tree: `decoders.ts` without its thinking/`tool_use` guards, so **the model's reasoning would have been spoken aloud**, and `os-synth` without its `SIGKILL`, so barge-in was dead. Committing either would have shipped a severe defect under an innocent message. |
+
+**Excluded and named, so the count can be checked:** the ORCA-dispatch failure and the stale usage
+meter are operational findings recorded in the goal checkpoint, not review items — they say nothing
+about the product. Neither is counted.
+
+**Dry counter: 0 of 3. Thirteen rounds, never started.**
+
+### What round 13 says about the protocol
+
+**Both newly-opened inventories yielded on their first look**, which is the fourth consecutive
+round where that has been true of an unopened inventory. Round 10 predicted exactly this and it is
+now measured rather than argued.
+
+**The sharper result is about the reviewer, not the code.** Three of the five items are checks that
+could not fail — TT4's fix with no test, G8 certified from one platform, and two Windows
+"failures" that were the tests' own broken preconditions. **And the first draft of SC-19 was itself
+vacuous**: it decoded twice in a row, and restoring TT4's exact `Date.now()` defect left it GREEN
+because both calls landed in the same millisecond. It was caught by mutation, not by reading — in a
+test written specifically to close that class.
+
+That is the finding to carry into round 14: **the protocol is now better at finding broken
+instruments than broken code**, which is what a converging codebase should look like — and it is
+also why the counter has not started. An instrument that cannot fail is invisible to every method
+except deliberately breaking it.
