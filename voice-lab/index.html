@@ -18,252 +18,235 @@
 -->
 
 <style>
+  /* Browser defaults, deliberately.
+     The author asked for "the normal browser defaults sans fonts", and he is right: this is an
+     instrument, not a brand. The previous stylesheet imposed a serif face and a dark palette that
+     had nothing to do with the job and made every native control look hand-made -- which was part
+     of why real dropdowns read as decorative readouts. So: system sans-serif, the browser's own
+     form-control rendering, and only the layout and the attribution colours are ours. */
   :root {
-    --bg: #12110f;
-    --panel: #1b1a17;
-    --panel-focus: #232120;
-    --ink: #f3efe7;
-    --ink-dim: #a8a196;
-    --rule: #3a3733;
-    --accent: #f0b429;
-    --added: #7bd88f;
-    --removed: #e2725b;
-    --focus: #7cc7ff;
-    --row-min: 64px;
+    --rule: #ccc;
+    --dim: #555;
+    --added: #0a6b2a;
+    --removed: #a3341f;
+    --sidebar: 22rem;
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #faf7f0; --panel: #fff; --panel-focus: #fffdf6; --ink: #1a1815; --ink-dim: #57534c;
-      --rule: #d9d2c6; --added: #17692f; --removed: #a3341f; --focus: #0b5fa5;
-    }
+  @media (prefers-color-scheme: dark) {
+    :root { --rule: #444; --dim: #aaa; --added: #7bd88f; --removed: #e2725b; }
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink); }
   body {
-    font: 400 19px/1.6 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-    padding-bottom: 5rem;
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
   }
-  /* Respect the listener's motion setting; nothing here needs to move. */
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
-  :focus-visible, [data-focused="true"] {
-    outline: 3px solid var(--focus);
-    outline-offset: 2px;
-  }
-
+  /* ── The top bar ──────────────────────────────────────────────────────────────
+     EVERYTHING that acts on the whole session lives here, in view. Half of it used to sit in a
+     paragraph below the controls, where the author never saw it: "controls shouldn't be
+     effectively hidden from the user by making them not in the users view." */
   header {
-    position: sticky; top: 0; z-index: 5; background: var(--bg);
-    border-bottom: 2px solid var(--rule); padding: .9rem 1.2rem;
-    display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;
+    position: sticky; top: 0; z-index: 5; background: Canvas;
+    border-bottom: 1px solid var(--rule); padding: .5rem .8rem;
+    display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center;
   }
-  header h1 { font-size: 1.05rem; letter-spacing: .18em; text-transform: uppercase; margin: 0; }
+  header h1 { font-size: 1rem; margin: 0 .6rem 0 0; }
+  header .sep { width: 1px; align-self: stretch; background: var(--rule); margin: 0 .3rem; }
   .grow { flex: 1 1 auto; }
-  button, select, input[type="text"] {
-    font: inherit; font-size: .95rem; color: var(--ink); background: var(--panel);
-    border: 2px solid var(--rule); border-radius: 8px; padding: .55rem .9rem; min-height: 48px;
-    cursor: pointer;
+  .kbd { font-family: ui-monospace, Menlo, monospace; font-size: .82em; color: var(--dim); }
+
+  /* ── Two columns: controls on the left, the text under test on the right ────── */
+  .shell { display: flex; align-items: flex-start; }
+  #controls {
+    width: var(--sidebar); flex: 0 0 var(--sidebar);
+    position: sticky; top: 3.2rem; max-height: calc(100vh - 3.2rem); overflow-y: auto;
+    border-right: 1px solid var(--rule); padding: .5rem .8rem 4rem;
   }
-  button[disabled] { opacity: .55; cursor: not-allowed; }
-  .kbd {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8em;
-    border: 1px solid var(--rule); border-bottom-width: 3px; border-radius: 5px;
-    padding: .05em .4em; color: var(--ink-dim);
+  main { flex: 1 1 auto; min-width: 0; padding: .8rem 1rem 4rem; }
+  @media (max-width: 60rem) {
+    .shell { display: block; }
+    #controls { width: auto; flex: none; position: static; max-height: none; border-right: 0;
+                border-bottom: 1px solid var(--rule); }
   }
 
-  main { max-width: 68rem; margin: 0 auto; padding: 1.2rem; }
-
-  /* ── Written vs spoken ─────────────────────────────────────────────────────── */
-  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
-  @media (max-width: 60rem) { .panes { grid-template-columns: 1fr; } }
-  .pane {
-    background: var(--panel); border: 2px solid var(--rule); border-radius: 12px;
-    padding: 1.1rem 1.3rem; min-height: 12rem;
-  }
-  .pane h2 {
-    font-size: .78rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ink-dim);
-    margin: 0 0 .7rem;
-  }
-  .pane .body { white-space: pre-wrap; line-height: 1.85; }
-  /* Colour is never the sole carrier: a changed span is underlined and keyboard-reachable. */
-  .w {
-    border-radius: 3px; padding: 0 1px;
-  }
-  .w.added { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px;
-    text-decoration-color: var(--added); }
-  .w.removed { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--ink-dim); }
-  .w[tabindex] { cursor: pointer; }
-  .attribution {
-    margin-top: .9rem; padding-top: .8rem; border-top: 1px dashed var(--rule);
-    font-size: .92rem; color: var(--ink-dim); min-height: 3.4rem;
-  }
-  .attribution strong { color: var(--ink); }
-
-  /* ── Control surface ───────────────────────────────────────────────────────────
-     One column, one control per row, the input on the same line as its name. Every row here can
-     be moved and changes the audio on the next press (020): the thirty-six that could not are in
-     `.unbuilt` at the bottom, as prose. */
-  .panel {
-    border: 2px solid var(--rule); border-radius: 12px; background: var(--panel);
-    margin: 1.2rem 0; overflow: hidden;
-  }
+  /* ── Controls ─────────────────────────────────────────────────────────────────
+     One per row, name above input, help below. Native form controls, unstyled. */
   .group-head {
-    margin: 0; padding: .75rem 1.2rem; font-size: .78rem; letter-spacing: .18em;
-    text-transform: uppercase; color: var(--ink-dim); border-bottom: 2px solid var(--rule);
+    margin: 1rem 0 .3rem; font-size: .75rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim);
   }
-  .row {
-    display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(16rem, 1.1fr);
-    gap: .4rem 1.2rem; align-items: center; padding: .9rem 1.2rem;
-    border-bottom: 1px solid var(--rule);
-  }
+  .panel:first-child .group-head { margin-top: .3rem; }
+  .row { padding: .5rem 0; border-bottom: 1px solid var(--rule); }
   .row:last-child { border-bottom: 0; }
-  @media (max-width: 46rem) { .row { grid-template-columns: 1fr; } }
-  .row .label { font-size: 1.02rem; cursor: pointer; }
-  .row .field { display: flex; align-items: center; gap: .7rem; }
-  .row .field select { width: 100%; }
-  .row .help {
-    grid-column: 1 / -1; margin: 0; font-size: .86rem; color: var(--ink-dim); line-height: 1.45;
-  }
-  .row[data-focused="true"] { background: rgba(124,199,255,.12); }
-  .switch { display: flex; align-items: center; gap: .6rem; min-height: 48px; cursor: pointer; }
-  .switch input { width: 24px; height: 24px; accent-color: var(--accent); cursor: pointer; }
-  .switch span { color: var(--accent); }
-  .slider { display: flex; align-items: center; gap: .8rem; width: 100%; }
-  .slider input[type="range"] { flex: 1 1 auto; accent-color: var(--accent); min-height: 44px; }
-  .slider output { color: var(--accent); min-width: 8.5rem; text-align: right; font-size: .95rem; }
+  .row .label { display: block; font-weight: 600; font-size: .92rem; }
+  .row .field { margin: .25rem 0; }
+  .row .field select, .row .field input[type="text"] { max-width: 100%; }
+  .row .help { margin: 0; font-size: .8rem; color: var(--dim); }
+  .row[data-focused="true"] { outline: 2px solid Highlight; outline-offset: 2px; }
+  .switch { display: inline-flex; align-items: center; gap: .4rem; }
+  .slider { display: flex; align-items: center; gap: .5rem; }
+  .slider input[type="range"] { flex: 1 1 auto; min-width: 6rem; }
+  .slider output { color: var(--dim); font-size: .85rem; white-space: nowrap; }
+  .unbuilt { margin: 1.5rem 0; color: var(--dim); font-size: .85rem; }
+  .unbuilt summary { cursor: pointer; }
+  .unbuilt li { margin: .35rem 0; }
 
-  /* The designed-but-unbuilt list. Deliberately NOT styled as controls. */
-  .unbuilt {
-    border: 2px dashed var(--rule); border-radius: 12px; padding: .5rem 1.2rem; margin: 1.6rem 0;
-    color: var(--ink-dim);
-  }
-  .unbuilt summary { cursor: pointer; padding: .7rem 0; font-size: .95rem; }
-  .unbuilt li { margin: .5rem 0; font-size: .9rem; }
-  .unbuilt strong { color: var(--ink); font-weight: 600; }
+  /* ── Written vs spoken ────────────────────────────────────────────────────── */
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 70rem) { .panes { grid-template-columns: 1fr; } }
+  .pane { border: 1px solid var(--rule); padding: .6rem .8rem; min-height: 10rem; }
+  .pane h2 { font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+             margin: 0 0 .5rem; }
+  .pane .body { white-space: pre-wrap; line-height: 2.4; }
 
-  /* ── The example editor ────────────────────────────────────────────────────────
-     "don't scatter me around to edit config files locally" — so the text under test is editable
-     here, saved here, and created here. */
-  .example {
-    border: 2px solid var(--rule); border-radius: 12px; background: var(--panel);
-    margin: 1.2rem 0; padding: 1rem 1.2rem;
+  /* ── Attribution ──────────────────────────────────────────────────────────────
+     A RUN, not a token. Consecutive words produced by the same stage are one element, so the
+     underline is continuous across the spaces between them instead of breaking at every gap --
+     which read as many small changes rather than one. And each run carries its stage number
+     ABOVE it, visible without hovering: "make it indicative which one with a upper [phase/rule
+     number] applies to that line not just when hovered." */
+  /* skip-ink off on every marked run: without it the browser lifts the line under each descender,
+     which is the same visual break the run-grouping exists to remove, arriving by another route. */
+  .run { position: relative; text-decoration-skip-ink: none; }
+  .run.added {
+    text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px;
+    text-decoration-color: var(--added);
   }
+  .run.removed { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--dim); }
+  .run[tabindex] { cursor: pointer; }
+  .run:focus-visible { outline: 2px solid Highlight; outline-offset: 1px; }
+  .tag {
+    font-family: ui-monospace, Menlo, monospace; font-size: .62rem; line-height: 1;
+    color: var(--added); vertical-align: super; margin-right: .15em; white-space: nowrap;
+    text-decoration: none; display: inline-block;
+  }
+  .run.removed .tag { color: var(--removed); }
+  .attribution {
+    margin-top: .7rem; padding-top: .5rem; border-top: 1px solid var(--rule);
+    font-size: .85rem; color: var(--dim); min-height: 2.8rem;
+  }
+  .legend { font-size: .8rem; color: var(--dim); margin: .5rem 0 0; }
+  .legend code { font-family: ui-monospace, Menlo, monospace; }
+
+  /* ── The example editor ───────────────────────────────────────────────────── */
+  .example { margin: 0 0 1rem; }
   .example textarea {
-    font: inherit; font-size: .95rem; width: 100%; min-height: 9rem; resize: vertical;
-    color: var(--ink); background: var(--bg); border: 2px solid var(--rule); border-radius: 8px;
-    padding: .7rem .9rem; line-height: 1.6;
+    font-family: inherit; font-size: .95rem; width: 100%; min-height: 7rem; resize: vertical;
+    line-height: 1.5;
   }
-  .example .actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .7rem; align-items: center; }
-  .example .note { font-size: .86rem; color: var(--ink-dim); margin: .5rem 0 0; }
+  .example .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .3rem; }
+  .example .note { font-size: .8rem; color: var(--dim); margin: .3rem 0 0; }
 
-  /* ── Overlays ──────────────────────────────────────────────────────────────── */
-  .overlay {
-    position: fixed; inset: 0; background: var(--bg); overflow: auto; padding: 1.5rem; z-index: 20;
-  }
+  /* ── Overlays, banners, status ────────────────────────────────────────────── */
+  .overlay { position: fixed; inset: 0; background: Canvas; overflow: auto; padding: 1rem; z-index: 20; }
   .overlay[hidden] { display: none; }
-  .ladder-row { border-bottom: 1px solid var(--rule); padding: .8rem 0; }
-  .ladder-row .n { font-family: ui-monospace, monospace; color: var(--ink-dim); }
-  .ladder-row .fixed { color: var(--ink-dim); font-style: italic; }
-  .ladder-row .out { display: block; margin: .4rem 0 .4rem 2.4rem; }
-
-  /* ── Status bar ────────────────────────────────────────────────────────────── */
+  .ladder-row { border-bottom: 1px solid var(--rule); padding: .5rem 0; }
+  .ladder-row .n { font-family: ui-monospace, Menlo, monospace; color: var(--dim); }
+  .ladder-row .fixed { color: var(--dim); font-style: italic; }
+  .ladder-row .out { display: block; margin: .3rem 0 .3rem 2rem; }
   footer {
-    position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
-    border-top: 2px solid var(--rule); padding: .7rem 1.2rem;
-    display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; font-size: .9rem;
+    position: fixed; bottom: 0; left: 0; right: 0; background: Canvas;
+    border-top: 1px solid var(--rule); padding: .4rem .8rem;
+    display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; font-size: .85rem;
   }
-  .banner {
-    border: 2px solid var(--removed); border-left-width: 8px; border-radius: 10px;
-    padding: 1rem 1.2rem; margin: 1.2rem 0; background: var(--panel);
-  }
+  .banner { border: 1px solid var(--removed); border-left-width: 6px; padding: .6rem .8rem; margin: 0 0 1rem; }
   .banner[hidden] { display: none; }
-  .banner h3 { margin: 0 0 .4rem; font-size: 1rem; }
-  .sr-only {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
+  .banner h3 { margin: 0 0 .3rem; font-size: .95rem; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+             white-space: nowrap; }
 </style>
 
 <header>
   <h1>Voice Lab</h1>
-  <label>Example
-    <select id="fixture" aria-label="Example to read"></select>
-  </label>
-  <span class="grow"></span>
+  <label>Example <select id="fixture" aria-label="Example to read"></select></label>
   <button id="btn-play"><span class="kbd">Space</span> Play</button>
   <button id="btn-stop"><span class="kbd">s</span> Stop</button>
   <button id="btn-replay"><span class="kbd">R</span> Replay</button>
+
+  <span class="sep"></span>
+
+  <!-- The A/B set, in view. This block used to be a paragraph BELOW the controls, so in practice
+       it did not exist: "controls shouldn't be effectively hidden from the user by making them not
+       in the users view." -->
+  <label>Tuning set
+    <select id="ab-set" aria-label="Which tuning set you are editing">
+      <option value="A">A</option>
+      <option value="B">B</option>
+    </select>
+  </label>
+  <button id="btn-copy-ab" title="Overwrite the other set with the one you are editing now.">Copy to the other set</button>
   <button id="btn-compare" title="Play set A, then set B, and pick the one that sounded better."><span class="kbd">C</span> Compare A and B</button>
-  <button id="btn-blind3" title="The same two sets three times in a random order, without telling you which is which, so your ears decide and not your expectations.">Blind test × 3</button>
+  <button id="btn-blind3" title="The same two sets three times in a random order, without telling you which is which, so your ears decide and not your expectations.">Blind test &times; 3</button>
+
+  <span class="sep"></span>
+
+  <button id="btn-snapshot" title="Keep the current set so you can come back to it."><span class="kbd">K</span> Keep a snapshot</button>
+  <button id="btn-restore" title="Go back to the last snapshot you kept."><span class="kbd">L</span> Restore</button>
   <button id="btn-explain" title="Show every transform in the pipeline, what it changed, and which control governs it."><span class="kbd">E</span> Show every step</button>
+  <button id="btn-describe" title="Say the focused control's name, what it does, and its current value."><span class="kbd">?</span> Describe this control</button>
   <button id="btn-mute" aria-pressed="false" title="After you change a control, hear the difference immediately without pressing Play."><span class="kbd">m</span> Speak each change: on</button>
 </header>
 
-<main>
-  <div id="banner-server" class="banner" hidden>
-    <h3>The lab server is not answering.</h3>
-    <p id="banner-server-body"></p>
-  </div>
-  <div id="banner-speak" class="banner" hidden>
-    <h3 id="banner-speak-title"></h3>
-    <p id="banner-speak-body"></p>
-  </div>
-
-  <section class="panes">
-    <div class="pane">
-      <h2>Written</h2>
-      <div class="body" id="pane-written"></div>
-    </div>
-    <div class="pane">
-      <h2>Spoken</h2>
-      <div class="body" id="pane-spoken"></div>
-      <div class="attribution" id="attribution">
-        Underlined words were added by the pipeline; struck-through words were removed.
-        Focus one with <span class="kbd">Tab</span> to hear which transform made it and which
-        control governs it, then <span class="kbd">Enter</span> to jump to that control.
-      </div>
-    </div>
-  </section>
-
-  <!-- The text under test, editable in place. The author asked not to be sent to a file on
-       disk to change what he is listening to, and he was right: the sentences worth keeping are
-       the ones that surprised you, and you find them by typing. -->
-  <section class="example">
-    <h2 class="group-head" style="border:0;padding-left:0">The words being read</h2>
-    <textarea id="example-text" aria-label="The text being read aloud"
-      spellcheck="false" placeholder="Type anything here and press Play."></textarea>
-    <div class="actions">
-      <button id="btn-example-save">Save this example</button>
-      <button id="btn-example-saveas">Save as a new example…</button>
-      <button id="btn-example-delete">Delete this example</button>
-      <span class="grow"></span>
-      <span id="example-status" class="note"></span>
-    </div>
-    <p class="note">Edits are read aloud straight away — you do not have to save first. Saving
-      keeps the example for next time.</p>
-  </section>
-
+<div class="shell">
   <div id="controls"></div>
 
-  <p style="color:var(--ink-dim);font-size:.9rem">
-    Comparing set <strong id="ab-set">A</strong> ·
-    <button id="btn-swap">Switch to the other set</button>
-    <button id="btn-copy-ab">Copy this set to the other</button>
-    <span class="kbd">K</span> snapshot · <span class="kbd">L</span> restore ·
-    <span class="kbd">?</span> describe the focused control
-  </p>
-</main>
+  <main>
+    <div id="banner-server" class="banner" hidden>
+      <h3>The lab server is not answering.</h3>
+      <p id="banner-server-body"></p>
+    </div>
+    <div id="banner-speak" class="banner" hidden>
+      <h3 id="banner-speak-title"></h3>
+      <p id="banner-speak-body"></p>
+    </div>
+
+    <!-- The text under test, editable in place. -->
+    <section class="example">
+      <h2 class="group-head" style="margin-top:0">The words being read</h2>
+      <textarea id="example-text" aria-label="The text being read aloud"
+        spellcheck="false" placeholder="Type anything here and press Play."></textarea>
+      <div class="actions">
+        <button id="btn-example-save">Save this example</button>
+        <button id="btn-example-saveas">Save as a new example&hellip;</button>
+        <button id="btn-example-delete">Delete this example</button>
+        <span class="grow"></span>
+        <span id="example-status" class="note"></span>
+      </div>
+      <p class="note">Edits are read aloud straight away &mdash; you do not have to save first.</p>
+    </section>
+
+    <section class="panes">
+      <div class="pane">
+        <h2>Written</h2>
+        <div class="body" id="pane-written"></div>
+      </div>
+      <div class="pane">
+        <h2>Spoken</h2>
+        <div class="body" id="pane-spoken"></div>
+        <div class="attribution" id="attribution">
+          Underlined words were added by the pipeline; struck-through words were removed. The small
+          number above each one is the pipeline step that did it. Click or focus a run to hear which
+          transform made it, and press <span class="kbd">Enter</span> to jump to the control that
+          governs it.
+        </div>
+        <p class="legend" id="legend"></p>
+      </div>
+    </section>
+  </main>
+</div>
 
 <footer>
   <span id="status">Ready. Nothing has played. Press <span class="kbd">Space</span>.</span>
   <span class="grow"></span>
-  <span id="timing">—</span>
+  <span id="timing">&mdash;</span>
   <button id="btn-save">Save to plugin</button>
   <button id="btn-export">Export a copy</button>
   <span id="count"></span>
 </footer>
 
 <div class="overlay" id="ladder" hidden aria-label="stage ladder">
-  <p><strong>Stage ladder</strong> — <span id="ladder-fixture"></span>
+  <p><strong>Stage ladder</strong> &mdash; <span id="ladder-fixture"></span>
     <button id="ladder-close"><span class="kbd">Esc</span> close</button></p>
   <div id="ladder-body"></div>
 </div>
@@ -1190,8 +1173,8 @@ const state = {
   sets: { A: defaultValues(), B: defaultValues() },
   active: 'A',
   focusIndex: 0,
-  openPanel: 'C',           // 004's wireframe opens on names and paths; the rest are collapsed.
-  morePanels: new Set(),
+  // No accordion any more: every built control is on screen in the sidebar, so there is nothing
+  // to open and nothing to hide behind a "more" tier.
   speakOnChange: true,
   stages: [],
   spokenText: '',
@@ -1492,58 +1475,120 @@ async function renormalize () {
   }
 }
 
+/**
+ * Written and spoken, side by side, with attribution drawn as RUNS rather than tokens.
+ *
+ * Two things the author asked for, and both come from the same change:
+ *
+ *   "make the underline continous for things that are processed from the same phase instead of it
+ *    breaking"
+ *   "make it indicative which one with a upper [phase/rule number] applies to that line not just
+ *    when hovered"
+ *
+ * The old pane emitted one `<span>` per word with a bare text space between them, so a phrase that
+ * one stage produced whole -- "file named session handler, python, in folder src core" -- was
+ * drawn as eight separate underlines. Eight marks read as eight changes. Grouping consecutive
+ * tokens that share a stage into ONE element puts the spaces inside the underline, so one
+ * transform is one mark, and gives the run somewhere to hang its own label.
+ *
+ * `text-decoration-skip-ink: none` matters here: without it the browser breaks the line under
+ * every descender, which is the same visual noise arriving by a different route.
+ *
+ * The label is the stage number, superscript, before the run. It is in the document rather than in
+ * a tooltip because a tooltip is invisible to the person deciding whether to look -- and on a
+ * touch or keyboard path it may never appear at all. `#legend` names the numbers underneath, so
+ * the digit is a reference and not a riddle.
+ */
 function renderPanes () {
   const written = $('pane-written')
   const spoken = $('pane-spoken')
   written.textContent = ''
   spoken.textContent = ''
 
-  // Written pane: source tokens, with the ones no stage carried forward struck through.
   const removedByStart = new Map(state.attribution.removed.map((t) => [t.start, t]))
-  for (const tok of tokenize(state.fixture.text)) {
+  const writtenToks = tokenize(state.fixture.text).map((tok) => {
     const rem = removedByStart.get(tok.start)
-    const el = document.createElement('span')
-    el.className = 'w' + (rem ? ' removed' : '')
-    el.textContent = tok.text
-    if (rem) {
-      el.tabIndex = 0
-      el.dataset.stage = String(rem.stage)
-      el.dataset.start = String(tok.start)
-      el.dataset.end = String(tok.end)
-      el.dataset.kind = 'removed'
-    }
-    written.append(el, ' ')
+    return { ...tok, stage: rem ? rem.stage : 0, kind: rem ? 'removed' : null }
+  })
+  const stagesSeen = new Set()
+
+  for (const run of runsOf(writtenToks)) {
+    written.append(renderRun(run, 'removed', stagesSeen), ' ')
+  }
+  for (const run of runsOf(state.attribution.spoken.map((t) => ({ ...t, kind: t.stage > 0 ? 'added' : null })))) {
+    spoken.append(renderRun(run, 'added', stagesSeen), ' ')
   }
 
-  // Spoken pane. EVERY span carries data-start / data-end into the spoken string — not merely a
-  // diff class. That is 004 section 6a's cheap non-foreclosure: a live word cursor later becomes
-  // "add a class to the span whose range contains the callback offset", not a rewrite of the pane.
-  for (const tok of state.attribution.spoken) {
-    const el = document.createElement('span')
-    el.className = 'w' + (tok.stage > 0 ? ' added' : '')
-    el.textContent = tok.text
-    el.dataset.start = String(tok.start)
-    el.dataset.end = String(tok.end)
-    el.dataset.stage = String(tok.stage)
-    if (tok.stage > 0) {
-      el.tabIndex = 0
-      el.dataset.kind = 'added'
-      el.addEventListener('focus', () => describeSpan(el))
-      el.addEventListener('mouseenter', () => describeSpan(el))
-      el.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); jumpToControlFor(Number(el.dataset.stage)) }
-      })
-      el.addEventListener('click', () => { describeSpan(el); jumpToControlFor(Number(el.dataset.stage)) })
-    }
-    spoken.append(el, ' ')
+  renderLegend(stagesSeen)
+}
+
+/**
+ * Group consecutive tokens into runs of one stage.
+ *
+ * A run breaks when the stage changes -- and ONLY then. Untouched text (stage 0) forms runs too,
+ * so the pane is a flat list of runs rather than a mix of runs and loose words.
+ */
+function runsOf (tokens) {
+  const runs = []
+  for (const tok of tokens) {
+    const last = runs[runs.length - 1]
+    if (last && last.stage === tok.stage && last.kind === tok.kind) { last.tokens.push(tok); continue }
+    runs.push({ stage: tok.stage, kind: tok.kind, tokens: [tok] })
   }
-  for (const el of $('pane-written').querySelectorAll('[data-kind="removed"]')) {
+  return runs
+}
+
+function renderRun (run, klass, stagesSeen) {
+  const el = document.createElement('span')
+  const first = run.tokens[0]
+  const last = run.tokens[run.tokens.length - 1]
+  el.className = 'run' + (run.kind ? ' ' + klass : '')
+  el.dataset.start = String(first.start)
+  el.dataset.end = String(last.end)
+  el.dataset.stage = String(run.stage)
+
+  if (run.kind) {
+    stagesSeen.add(run.stage)
+    // The label first, so the number sits above the START of what it governs rather than floating
+    // at the end of it. Marked aria-hidden: the run's own aria-label already says it in words, and
+    // a screen reader announcing "10" before every phrase is noise.
+    const tag = document.createElement('span')
+    tag.className = 'tag'
+    tag.textContent = `[${run.stage}]`
+    tag.setAttribute('aria-hidden', 'true')
+    el.append(tag)
+  }
+
+  const words = run.tokens.map((t) => t.text).join(' ')
+  // Kept on the element because `textContent` now includes the "[10]" label, and quoting the label
+  // back at the listener as if it were part of their text would be a small lie told constantly.
+  el.dataset.words = words
+  el.append(document.createTextNode(words))
+
+  if (run.kind) {
+    const name = STAGES[run.stage - 1] ?? 'unknown stage'
+    el.tabIndex = 0
+    el.dataset.kind = run.kind
+    el.title = `Step ${run.stage}, ${name}`
+    el.setAttribute('aria-label',
+      `${run.kind === 'added' ? 'added' : 'removed'} by step ${run.stage}, ${name}: ` +
+      run.tokens.map((t) => t.text).join(' '))
     el.addEventListener('focus', () => describeSpan(el))
     el.addEventListener('mouseenter', () => describeSpan(el))
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); jumpToControlFor(Number(el.dataset.stage)) }
     })
+    el.addEventListener('click', () => { describeSpan(el); jumpToControlFor(Number(el.dataset.stage)) })
   }
+  return el
+}
+
+/** What the numbers in the panes mean, spelled out under them rather than left as digits. */
+function renderLegend (stagesSeen) {
+  const el = $('legend')
+  if (stagesSeen.size === 0) { el.textContent = 'Nothing was changed on the way to speech.'; return }
+  el.textContent = 'Steps in play: ' + [...stagesSeen].sort((a, b) => a - b)
+    .map((n) => `[${n}] ${STAGES[n - 1] ?? '?'}`).join(' · ')
 }
 
 function describeSpan (el) {
@@ -1553,10 +1598,10 @@ function describeSpan (el) {
   const verb = el.dataset.kind === 'removed' ? 'removed by' : 'produced by'
   let text
   if (FIXED_BY_DESIGN_STAGES.includes(n) || governing.length === 0) {
-    text = `“${el.textContent}” — ${verb} stage ${n}, ${stageName} — fixed by design. There is no control for this.`
+    text = `“${el.dataset.words ?? el.textContent}” — ${verb} step ${n}, ${stageName} — fixed by design. There is no control for this.`
   } else {
     const names = governing.map((c) => c.label).join(' · ')
-    text = `“${el.textContent}” — ${verb} stage ${n}, ${stageName}. Governed by: ${names}. Press Enter to jump to it.`
+    text = `“${el.dataset.words ?? el.textContent}” — ${verb} step ${n}, ${stageName}. Governed by: ${names}. Press Enter to jump to it.`
   }
   $('attribution').textContent = text
   announce(text)
@@ -2204,7 +2249,7 @@ function adoptSet (which) {
   state.sets.A = { ...chosen }
   state.sets.B = { ...chosen }
   state.active = 'A'
-  $('ab-set').textContent = 'A'
+  $('ab-set').value = 'A'
   persist()
   renderControls()
   renormalize()
@@ -2591,13 +2636,18 @@ $('ladder-close').addEventListener('click', closeOverlays)
 $('help-close').addEventListener('click', closeOverlays)
 $('btn-save').addEventListener('click', () => void save())
 $('btn-export').addEventListener('click', exportCopy)
-$('btn-swap').addEventListener('click', () => {
-  state.active = state.active === 'A' ? 'B' : 'A'
-  $('ab-set').textContent = state.active
+// The set is a dropdown in the top bar now, not a swap button below the fold. Same two sets, same
+// behaviour; the difference is that it is visible and it says which one you are on without being
+// read.
+$('ab-set').addEventListener('change', (e) => {
+  state.active = e.target.value === 'B' ? 'B' : 'A'
   renderControls()
   renormalize()
-  speakConfirmation(`Set ${state.active}.`, { force: true })
+  speakConfirmation(`Editing set ${state.active}.`, { force: true })
 })
+$('btn-snapshot').addEventListener('click', snapshot)
+$('btn-restore').addEventListener('click', restoreSnapshot)
+$('btn-describe').addEventListener('click', describeFocused)
 $('btn-copy-ab').addEventListener('click', () => {
   const other = state.active === 'A' ? 'B' : 'A'
   state.sets[other] = { ...values() }

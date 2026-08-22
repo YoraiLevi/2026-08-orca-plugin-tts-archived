@@ -447,13 +447,63 @@ async function u4 (cdp) {
   }
 }
 
+/**
+ * U5 — one transform is one mark, and the mark says which transform.
+ *
+ * "make the underline continous for things that are processed from the same phase instead of it
+ *  breaking" and "make it indicative which one with a upper [phase/rule number] applies to that
+ *  line not just when hovered".
+ *
+ * Two properties, both structural and both checkable without looking at pixels:
+ *   - no two ADJACENT marked runs share a stage. If they did they were one run that got split,
+ *     which is exactly the broken underline -- eight marks where the listener made one change.
+ *   - every marked run carries a visible `[N]` label IN THE DOCUMENT. A `title` tooltip does not
+ *     count: it is invisible to the person deciding whether to look, and on a keyboard or touch
+ *     path it may never appear at all.
+ */
+async function u5 (cdp) {
+  const r = await cdp.evaluate(`(() => {
+    const marked = [...document.querySelectorAll('#pane-spoken .run.added, #pane-written .run.removed')];
+    const untagged = marked.filter((el) => {
+      const t = el.querySelector('.tag');
+      return !t || !/^\\[\\d+\\]$/.test(t.textContent.trim());
+    }).length;
+    // Adjacent runs of the same stage, counted over each pane's own children in order.
+    let split = 0;
+    for (const pane of ['pane-spoken', 'pane-written']) {
+      const runs = [...document.getElementById(pane).querySelectorAll(':scope > .run')];
+      for (let i = 1; i < runs.length; i++) {
+        const a = runs[i - 1], b = runs[i];
+        if (a.dataset.stage === b.dataset.stage && a.dataset.kind && a.dataset.kind === b.dataset.kind) split++;
+      }
+    }
+    const skip = marked.length
+      ? getComputedStyle(marked[0]).getPropertyValue('text-decoration-skip-ink').trim()
+      : '';
+    return { marked: marked.length, untagged, split, skip };
+  })()`)
+
+  if (!r.marked) return { pass: false, detail: 'nothing in either pane is marked, so nothing was tested' }
+  const problems = []
+  if (r.untagged) problems.push(`${r.untagged} of ${r.marked} runs carry no visible [n] label`)
+  if (r.split) problems.push(`${r.split} pair(s) of adjacent runs share a stage — that underline is broken in two`)
+  if (r.skip && r.skip !== 'none') problems.push(`text-decoration-skip-ink is "${r.skip}", so descenders will break the line`)
+  return {
+    pass: problems.length === 0,
+    detail: problems.length === 0
+      ? `${r.marked} marked runs, each labelled, none adjacent-and-same-stage, skip-ink off`
+      : problems.join('; ')
+  }
+}
+
 /* ---------------------------------------------------------------------------------- the runner */
 
 const CHECKS = [
   { id: 'U1', what: 'every control on screen is operable', fn: u1, provable: true },
   { id: 'U2', what: 'a dropdown changes what is spoken', fn: u2, provable: true },
   { id: 'U3', what: 'editing the example changes what is spoken', fn: u3, provable: false },
-  { id: 'U4', what: 'two plays never overlap', fn: u4, provable: true }
+  { id: 'U4', what: 'two plays never overlap', fn: u4, provable: true },
+  { id: 'U5', what: 'one transform is one mark, and the mark is labelled', fn: u5, provable: true }
 ]
 
 /**
@@ -472,6 +522,12 @@ const BREAKAGES = {
     apply: (html) => html.replace(
       "s.addEventListener('change', () => setControl(c, s.value))",
       "s.addEventListener('change', () => {})")
+  },
+  U5: {
+    what: 'go back to one span per word instead of one per run',
+    apply: (html) => html.replace(
+      'if (last && last.stage === tok.stage && last.kind === tok.kind) { last.tokens.push(tok); continue }',
+      '// merging disabled by --prove')
   },
   U4: {
     what: 'remove the stopAudio() that makes play barge in',
