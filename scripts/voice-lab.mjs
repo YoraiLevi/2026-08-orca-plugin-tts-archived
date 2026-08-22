@@ -891,7 +891,34 @@ export async function main (argv = process.argv.slice(2)) {
 
   const proof = await assertLoadedModuleIsOnDiskSource()
   const server = createLabServer()
-  await new Promise((ok) => server.listen(port, HOST, ok))
+
+  /**
+   * EADDRINUSE is not a harmless "already running" — it is a TRAP, and it cost the author a
+   * session.
+   *
+   * The port was held by a Voice Lab started ten hours earlier, running code from before three
+   * fixes. The new process died with a raw stack trace, the OLD one kept answering, and every
+   * press produced a failure that had been repaired that morning — including an Ubuntu
+   * `apt install` hint on a Mac. The stack trace said nothing about any of that.
+   *
+   * So: say what happened, say what is actually serving that port, and say how to take it back.
+   */
+  await new Promise((ok, fail) => {
+    server.once('error', (err) => {
+      if (err.code !== 'EADDRINUSE') { fail(err); return }
+      process.stderr.write(
+        `\nPort ${port} is already in use — something else is serving the Voice Lab.\n\n` +
+        '  This is worth reading rather than retrying. The process holding the port may be an\n' +
+        '  OLDER Voice Lab from an earlier session, still answering with code you have since\n' +
+        '  fixed. It will look like the fixes did not work.\n\n' +
+        `  See what it is:   lsof -i :${port}\n` +
+        `  Take the port:    lsof -ti :${port} | xargs kill\n` +
+        `  Or use another:   pnpm voice-lab -- --port ${port + 1}\n\n`
+      )
+      process.exit(1)
+    })
+    server.listen(port, HOST, ok)
+  })
 
   const inbox = settingsPathFor()
   process.stdout.write(
