@@ -264,10 +264,28 @@ const MUTANTS = [
     //
     // So "covered above" is the claim to distrust, and this mutant is the only thing saying so.
     //
-    // What would close it: the test forces failure by emptying PATH, which cannot work on the
-    // Linux ladder. It needs an INJECTED resolver seam — a provider constructed with a backend
-    // resolver that fails — rather than an environment trick. That is a real change to the
-    // provider's constructor surface and is not a wind-down job.
+    // WHAT WOULD CLOSE IT, specified so it is a short job rather than a fresh investigation.
+    //
+    // The test forces failure by emptying PATH. That cannot work against the Linux ladder, which
+    // probes each backend with `#capture(backend, ['--version'])` in `#resolveLinuxBackend`
+    // (`os-synth/index.ts:422`) — with espeak-ng installed, one of them answers.
+    //
+    // The seam that already exists is `linuxBackend?: LinuxBackend` in the options, and it is the
+    // wrong shape here: seeding it makes resolution SUCCEED, and this test needs it to FAIL.
+    //
+    // Add one optional field beside it — a candidate list, defaulting to `LINUX_BACKENDS`:
+    //
+    //     readonly linuxBackendCandidates?: readonly string[]
+    //
+    // Then the Linux arm of `006 finding 1` constructs
+    // `new OsSynthProvider({ linuxBackendCandidates: ['definitely-not-a-binary'] })`, and asserts
+    // the same three things the darwin arm does: `prepare()` rejects, `isWarm` is false, and
+    // `unavailableReason` survives where a caller can read it. Delete the
+    // `if (process.platform === 'linux') return` early return with it.
+    //
+    // Verify in a container that matches CI — `node:24-bookworm` with `apt-get install espeak-ng`
+    // — because a Linux WITHOUT a synthesizer kills this mutant for an unrelated reason and will
+    // tell you it passed. That mistake is why this entry exists.
     //
     // Two earlier annotations here were wrong and are recorded so the next reader does not repeat
     // them: `equivalentOn: ['linux']` (the mutated guard is NOT unreachable), and a claim that the
