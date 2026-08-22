@@ -122,3 +122,27 @@ call, which a monitor cannot make.
 
 All monitors die if the Claude process itself exits. Everything is pushed to GitHub
 continuously, so nothing is lost — but that single case needs one message from the author.
+
+## BLOCKER discovered 04:20 — in-process agent dispatch is dead
+
+`Agent` spawns fail with **"Could not determine current tmux pane/window"** / **"stale or
+unauthorized agent team"**. Cause: `TMUX` points at
+`/tmp/orca-claude-agent-teams/team-b52938d6-fc2f-4132-9271-05081ed8a4ea`, and **that directory
+does not exist**. Two dispatch attempts failed identically, so it is not transient.
+
+**Agents spawned BEFORE the break are unaffected** — M14-spoken and G8-mutants were created
+under the old team and still hold their own processes. Messaging them still works.
+
+**The fallback is ORCA orchestration, and it is available.** `orca orchestration run-list --json`
+returns `ok: true`; `task-list` returns `run_required`, meaning it needs a Run bound first:
+
+    orca orchestration run-create ...     # then task-create / worker-start
+
+This is the path the `orchestration` skill documents, it creates real Task/Dispatch provenance,
+and it does **not** depend on the tmux agent-team socket. Read the version-matched guide before
+using it — `orca skills get orchestration` — and do not guess subcommands; they change between
+releases.
+
+**Consequence for the 8-hour plan:** wave 2 (M13 dashboard, M16 huddle presence) cannot be
+dispatched in-process. Either bind a Run and dispatch through ORCA, or the architect does the
+work directly. Do not silently drop the milestones.
