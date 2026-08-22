@@ -25,12 +25,14 @@ Cap 3-4 concurrent agents. v1 decisions reopenable with evidence.
       *Oracle:* drive it end to end and assert the rendered text against state the test set
       independently. `terminal.sendText` is panel-callable — this is NOT blocked upstream.
 
-- [ ] **G3 — M14a, holdable with no agent cooperation.** The motivating fixture is **not**
+- [x] **G3 — M14a.** ✅ **MET** at `213ee55`, verified independently: **405/405** in `packages/core`, and the Voice Lab boots at **17 stages** with the full six-file renumber landed in one commit. The announcement reads *"Here, a diagram is omitted. It is labelled: transcript watcher, normalizer (seventeen stages), synthesizer (Piper), barge-in."* — geometry dropped because a linear audio stream cannot carry it, nouns kept because they are the only part that survives linearisation. 16 words, **5.7 %** of `hostile.md`'s spoken words `[measured-here]`, replacing 343 characters of box glyphs that previously reached the engine verbatim. The motivating fixture is **not**
       spoken as box-drawing characters, and what was skipped is announced **by name**.
       *Oracle:* the fixture through `normalize()` → chunker → provider, asserting the spoken
       string. P30: the announcement is in the audio stream, never only a log.
 
-- [ ] **G4 — M14b, the enhancement.** Given the same fixture WITH a ```speak block, the
+- [ ] **G4 — M14b. PARTIAL, deliberately not ticked.** The mechanism is green — `extractSpeakFence()` with its absence case pinned byte-identical over five marker-free fixtures, and a `speak` fence is never announced as code whatever `codeBlocks` says, with a control proving ordinary fences still are. **The wire is not in**, and the reason is not laziness: the call site needs the D002 Q5 policy (spoken-only / spoken-then-prose / prose-only / agent-decides) **as a setting that does not exist**, and D002 forbids choosing its default outside the Voice Lab. **Do not tick this without that setting.** Original text follows.
+
+- [ ] **G4 original — M14b, the enhancement.** Given the same fixture WITH a ```speak block, the
       one-sentence description is what is spoken.
 
 - [ ] **G5 — M16 huddle presence.** The surface shows who is in the room and who is talking,

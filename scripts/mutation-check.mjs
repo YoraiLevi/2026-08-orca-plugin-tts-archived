@@ -94,15 +94,19 @@ const MUTANTS = [
     id: 'stop-one-sided',
     claim: 'stop is two-sided (R014): killing the player without cancelling synthesis is the bug',
     file: 'packages/plugin/src/speech-service.ts',
-    from: '      cancelSynthesis: () => { deps.provider.cancel() }',
-    to: '      cancelSynthesis: () => { /* mutant */ }',
+    // RE-POINTED 2026-08-22: the arrow body lost its braces in a refactor. The snippet moved;
+    // the claim did not. A drifted target reports as an ERROR, which is loud and meaningless —
+    // the invariant sat UNGUARDED while the script appeared to be watching it.
+    from: '      cancelSynthesis: () => deps.provider.cancel()',
+    to: '      cancelSynthesis: () => undefined',
     test: 'packages/plugin/src/speech-service.test.ts'
   },
   {
     id: 'bargein-no-cancel',
     claim: 'PlaybackQueue.bargeIn cancels synthesis as well as flushing audio',
     file: 'packages/core/src/queue/index.ts',
-    from: '    this.#deps.cancelSynthesis()',
+    // RE-POINTED 2026-08-22: the call gained an `await` (006 C6). Same drift, same consequence.
+    from: '    await this.#deps.cancelSynthesis()',
     to: '    void 0',
     test: 'packages/core/src/queue/queue.test.ts'
   },
