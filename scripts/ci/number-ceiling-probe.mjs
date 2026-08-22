@@ -77,13 +77,26 @@ const PROVE_INCONCLUSIVE = (process.argv.find((a) => a.startsWith('--prove-incon
   .split('=')[1] ?? (process.argv.includes('--prove-inconclusive') ? 'refs' : null)
 
 /* The strings under test. `digits` is the one in question; the other two bracket it. */
-const DIGITS = '1234567'
-const DIGITS_SEP = '1,234,567'
-const WORDS = 'one million two hundred thirty four thousand five hundred sixty seven'
+/**
+ * RE-POINTED 2026-08-22 to the boundary the product ACTUALLY hands over.
+ *
+ * This probe used to test `1234567`, and on 2026-08-22 it correctly reported that SAPI spells
+ * those digits — which is why `numberToWords` was extended and that value is now SPOKEN, never
+ * handed to an engine. Left as it was, the probe would keep failing about a case the product no
+ * longer produces: a true statement about the engine, and a stale one about us.
+ *
+ * The live question is the NEW boundary. Above 1,000,000,000 the numeral is still handed over,
+ * on the judgement that "nine hundred eighty seven billion, six hundred…" is worse to listen to
+ * than digits. That judgement assumes the engine reads it as a QUANTITY. This is where that
+ * assumption now lives, so this is what must be measured.
+ */
+const DIGITS = '1234567890'
+const DIGITS_SEP = '1,234,567,890'
+const WORDS = 'one billion two hundred thirty four million five hundred sixty seven thousand eight hundred ninety'
 const ONE_AT_A_TIME = '1 2 3 4 5 6 7'
-const MILLION = '1000000'
-const MILLION_SEP = '1,000,000'
-const MILLION_WORDS = 'one million'
+const MILLION = '1000000000'
+const MILLION_SEP = '1,000,000,000'
+const MILLION_WORDS = 'one billion'
 const CONTROL = 'one million and one' /* must NOT match MILLION_WORDS, or nothing here means anything */
 
 function run(cmd, args, opts = {}) {
@@ -385,14 +398,14 @@ async function main() {
       return 4
     }
     if (position <= DEAD_BAND[0] && millionSpoken) {
-      console.log(`  VERDICT  ${engine.name} reads a bare "${DIGITS}" AS A NUMBER, not as seven digits.`)
-      console.log('           The normalizer\'s million ceiling is SAFE on this engine: handing the')
-      console.log('           numeral to the engine is the right call above 999,999.')
+      console.log(`  VERDICT  ${engine.name} reads a bare "${DIGITS}" AS A NUMBER, not digit by digit.`)
+      console.log('           The BILLION ceiling is SAFE on this engine: handing the numeral over')
+      console.log('           above 999,999,999 is the right call here.')
       return 0
     }
     console.log(`  VERDICT  ${engine.name} DOES NOT read "${DIGITS}" as a number.`)
-    console.log('           The million ceiling in packages/core/src/normalizer/index.ts is a defect')
-    console.log('           on this platform: numberToWords must be extended past 999,999, or the')
+    console.log('           The BILLION ceiling in packages/core/src/normalizer/index.ts is a defect')
+    console.log('           on this platform: numberToWords must be extended past 999,999,999, or the')
     console.log('           numeral rewritten before it reaches this engine.')
     return 1
   } finally {
