@@ -11,6 +11,30 @@
 > (`[measured-here]` with a run count, `[documented]` with a citation, `[claimed]` when nobody has run
 > it). See also PITFALLS **P32** — the inter-sentence gap is the audio device, not the process spawn.
 
+## IN PROGRESS — one task, named, per R041
+
+**`PV-011` — port the Pocket TTS engine into `packages/providers/src/pocket-synth/engine.ts`.**
+
+- **Gate:** `node scripts/pocket-e2e.mjs` — synthesize a known sentence, transcribe the result with
+  an INDEPENDENT STT model, assert the transcript equals the input text. Its control transcribes
+  the reference clip and must produce different words.
+- **Spec:** `specs/003-pocket-voices/tasks.md`. Critical path is
+  PV-010 → PV-011 → PV-021 → PV-030 → PV-040.
+- **Why this and not a milestone gate:** the author is blocked on this to review the product;
+  every other open gate is blocked on *him*. He corrected this ordering explicitly on 2026-08-22.
+- **Already proven in a scratch spike** (not yet in-repo): all five ONNX graphs load in Node,
+  synthesis runs at **0.19× realtime** (566 ms for 3.04 s of audio) `[measured-here]`, and the
+  output transcribed as exactly the input sentence with a passing control.
+
+### Running in parallel — disjoint file sets, per P34
+
+| Agent | Owns | Tasks |
+|---|---|---|
+| PV-provider | `packages/providers/src/pocket-synth/index.ts` + its test | PV-020…PV-025 |
+| PV-server | `scripts/voice-lab.mjs` | PV-030…PV-033 |
+| PV-ux | `docs/design/021-pocket-voices-ux.md` | design for PV-040…PV-044 |
+| PV-review | `docs/design/022-review-round14.md` | adversarial round 14 |
+
 ## One-paragraph status
 
 v1 is built, tested, published, and green on CI across macOS, Linux and Windows. **337 tests** (18 files,
