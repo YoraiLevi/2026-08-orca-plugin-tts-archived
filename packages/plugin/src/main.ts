@@ -8,6 +8,7 @@
  * build at install time and rejects any file escaping the plugin root (PITFALLS P17).
  */
 import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { OsSynthProvider, ProviderRegistry } from '@orca-tts/providers'
 import type { PlaybackSink, TtsProvider } from '@orca-tts/core'
 import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi } from './adapter/index.ts'
@@ -15,6 +16,7 @@ import { readClipboard, ClipboardUnavailableError } from './clipboard.ts'
 import { SpeechService } from './speech-service.ts'
 import { SubprocessSink } from './sinks/subprocess-sink.ts'
 import { HuddleController, sessionLabel } from './huddle/index.ts'
+import { SettingsRuntime, loadSettings, nativeInboxPath } from './settings/index.ts'
 
 /**
  * Test seam. ORCA calls `activate(orca)` and gets every real default; a test calls
@@ -31,6 +33,16 @@ export interface ActivateOptions {
   readonly projectsDir?: string
   /** Overflow-announcement coalescing window; see SpeechServiceDeps.announceDelayMs. */
   readonly announceDelayMs?: number
+  /**
+   * Where the settings inbox lives, overriding the platform default.
+   *
+   * A test that omitted this would read the AUTHOR'S OWN tuned settings file out of their real
+   * config directory — so every assertion about spoken text would depend on how they last tuned
+   * the plugin by ear, and would change under them without a commit. That is P40's shape (a
+   * reading that moves for reasons unrelated to the code) pointed at the one file this milestone
+   * exists to read. Tests pass a temp directory; ORCA passes nothing.
+   */
+  readonly settingsDir?: string
 }
 
 /** How many commands `orca-plugin.json` declares. Pinned by main.test.ts, not by memory. */
@@ -43,6 +55,16 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
    * the ordering is visible instead of implied.
    */
   let announce: (message: string, urgency?: 'now' | 'next') => void = () => {}
+
+  /**
+   * The listener's tuning. Constructed BEFORE the host, at schema defaults, so that every consumer
+   * below has something to read from the first millisecond — a settings load that has not finished
+   * must never be a reason for the plugin to be silent or to hold a command.
+   */
+  const settingsPath = options.settingsDir === undefined
+    ? nativeInboxPath(process.env, process.platform)
+    : `${options.settingsDir}/settings.jsonc`
+  const settings = new SettingsRuntime(settingsPath)
 
   const host = makeHost(orca, {
     // 006 section 19 rank 2: `{ delivered }` was computed by ORCA and discarded here, so a muted
@@ -62,6 +84,10 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     // and is waiting to find out whether anything happened.
     onCommandFailed: (id, reason) => {
       announce(`That control did not work: ${id.replace('read-aloud.', '')}. ${reason}`, 'now')
+    },
+    // Logged, answerable by `status`, and deliberately not spoken — see the hook's own comment.
+    onSettingsFailure: (f) => {
+      host.log(`read-aloud: settings mirror ${f.op} failed: ${f.reason}`)
     }
   })
   host.log('read-aloud: activating')
@@ -167,6 +193,10 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       sink,
       log: host.log,
       maxQueued: 8,
+      // 011 section 2.3: a GETTER, not values. The service is constructed once and lives for the
+      // session; the listener's file can change at any point inside it.
+      settings: () => settings.snapshot,
+      resolveVoice: (i) => settings.voiceName(i),
       ...(options.announceDelayMs === undefined ? {} : { announceDelayMs: options.announceDelayMs }),
       // Supplement only. The spoken sentence naming the count comes from SpeechService itself, so
       // it cannot be lost by a notification channel that is muted, denied, or simply not looked at.
@@ -181,6 +211,12 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       }
     })
     host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`)
+    // The host's voice list, asked for ONCE. `synthesize.voiceIndex` is an index into this list
+    // (P28: voice names have zero overlap across the three platforms), and with no list the index
+    // resolves to nothing and the voice is OMITTED rather than guessed.
+    void Promise.resolve(resolved.provider.listVoices())
+      .then((voices) => { settings.setVoices(voices) })
+      .catch((err: unknown) => { host.log(`read-aloud: could not list voices: ${String(err)}`) })
     // Anything that happened while the engine was still resolving now has a voice to be said in.
     for (const m of deferredAnnouncements.splice(0)) speech.announce(m, 'next')
     if (deferredDropped > 0) {
@@ -198,6 +234,42 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     host.notify('Read Aloud', `speech engine failed to start: ${engineError}`)
   })
 
+  /**
+   * 011 section 4.3a predicate 2: "a speak request has landed this session". The listener has
+   * DEMONSTRATED the audio channel, so a held settings report may now be spoken into it.
+   */
+  let speakRequestThisSession = false
+
+  /**
+   * Speak the held settings report at the head of the first utterance the listener asks for.
+   *
+   * A held report that expired silently would be P30 wearing the uniform of politeness: the whole
+   * reason it was held rather than spoken is that nobody had asked for audio yet, and the moment
+   * they do, the answer is owed. `announce` inserts ahead of queued replies, so calling this
+   * before the speak means the listener hears "Before that — ..." and then what they asked for.
+   */
+  const flushHeldReport = (s: SpeechService): boolean => {
+    const held = settings.takeHeld()
+    if (held === null) return false
+    s.announce(`Before that. ${held}`, 'next')
+    return true
+  }
+
+  /**
+   * The mode a speak request uses once a held report has been put in front of it.
+   *
+   * `'replace'` barges in — and barge-in bumps the playback generation, which supersedes the
+   * ANNOUNCEMENT that was already being spoken. Measured here while writing the G1 tests: the
+   * listener heard `"Before that. "` and then the reply, with the entire settings sentence cut
+   * mid-utterance. `#pending` protects announcements from being trimmed; nothing protected them
+   * from the generation bump.
+   *
+   * `'queue'` is correct precisely when a report was flushed: `'replace'` exists so a SECOND press
+   * cancels the first, and the flush only ever happens on the FIRST press of a session, when there
+   * is nothing to replace.
+   */
+  const modeAfter = (flushed: boolean): 'replace' | 'queue' => (flushed ? 'queue' : 'replace')
+
   /** Principle I: never fail silently. Every path either speaks or says why it did not. */
   const withSpeech = async (fn: (s: SpeechService) => Promise<void> | void): Promise<void> => {
     if (speech === null) {
@@ -208,6 +280,7 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   }
 
   host.registerCommand('read-aloud.speak-clipboard', async () => {
+    speakRequestThisSession = true
     await withSpeech(async (s) => {
       if (s.isSpeaking) { await s.stop(); return }   // second press stops (single-flight)
       try {
@@ -219,7 +292,7 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
           announce('The clipboard is empty.', 'now')
           return
         }
-        s.speak(text)
+        s.speak(text, modeAfter(flushHeldReport(s)))
         // Queued BEHIND the clipboard content, deliberately: said first it would delay the thing
         // the listener actually asked for, and said as an interruption it would cut into it. As a
         // trailing note it costs nothing and still answers "was that all of it?".
@@ -281,7 +354,61 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   // transcript" — after five idle minutes, very likely a DIFFERENT session. The lock is now
   // persisted, and the session is RE-ANNOUNCED on activation, because the listener has no way of
   // knowing a worker restarted and provenance is the one thing they cannot obtain any other way.
-  void huddle.restore().then((on) => {
+  const huddleRestored = huddle.restore()
+
+  /**
+   * THE READ PATH. Ordered exactly as 011 section 1.2a specifies: the mirror is read FIRST, then
+   * the inbox, then per-field precedence inside `parse()`.
+   *
+   * It is deliberately NOT awaited by `activate()`. A settings load that has not finished must
+   * never be a reason for a command to be unregistered or for the plugin to be silent — every
+   * consumer already has schema defaults to read, and the load replaces them when it lands.
+   */
+  void (async () => {
+    // Huddle-on is 011 section 4.3a's first evidence predicate, and it is a fact the worker
+    // already has. A rejected restore is read as OFF, which is the conservative direction: it
+    // holds the report rather than speaking into a room that never asked for audio.
+    const huddleOn = await huddleRestored.catch(() => false)
+    const outcome = await loadSettings(
+      {
+        readInbox: (path) => readFile(path, 'utf8'),
+        mirrorGet: () => host.settingsGet(),
+        log: host.log
+      },
+      settingsPath,
+      { huddleOn, speakRequestThisSession }
+    )
+    settings.adopt(outcome)
+    settings.setReport(outcome.sentence)
+    host.log(
+      `read-aloud: settings loaded from ${outcome.source} (revision ${outcome.snapshot.revision}, ` +
+      `${outcome.result.rejected.length} rejected, ${outcome.result.unknownFields.length} unknown) ` +
+      `at ${outcome.path}`
+    )
+
+    // ONLY a clean read of the inbox is mirrored. Mirroring a defaults-derived snapshot would
+    // overwrite last-known-good with defaults on the exact run where last-known-good was needed —
+    // the failure the mirror exists to prevent, committed by the code that implements it.
+    if (outcome.mirrorable) void host.settingsSet(settings.mirrorRecord())
+
+    if (outcome.sentence === null) return   // a clean load says nothing. Silence IS the report.
+    switch (outcome.destination) {
+      case 'speak-now':
+        // 'next', never 'now': nothing here is worth cutting into a sentence the listener is
+        // already following, and at activate() there is usually nothing playing anyway.
+        announce(outcome.sentence, 'next')
+        break
+      case 'hold-for-first-utterance':
+        settings.hold()
+        host.notify('Read Aloud', outcome.sentence)
+        break
+      case 'on-request-only':
+        host.notify('Read Aloud', outcome.sentence)
+        break
+    }
+  })()
+
+  void huddleRestored.then((on) => {
     host.log(`read-aloud: huddle mode restored to ${on ? 'on' : 'off'}`)
     const again = huddle.restoredAnnouncement()
     // 'next', not 'now': nothing is being read yet at activation, and if something is, it is more
@@ -312,6 +439,17 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       if (now !== null) parts.push(`Now reading ${now}.`)
       if (s.queued > 0) parts.push(`${s.queued} more waiting.`)
       else if (now === null) parts.push('Nothing is being read.')
+      // 011 section 6 / R7-32. The listener cannot see a settings pane, so `status` is the only
+      // route to "did my edit land, and where does the file live". It also carries the settings
+      // report unconditionally, which is what makes `on-request-only` a channel rather than a
+      // silence: the report is never dropped in ANY configuration.
+      parts.push(settings.statusClause(Date.now()))
+      // Destination 2 of 011 section 4.3, and the reason `on-request-only` is a CHANNEL rather
+      // than a silence: the report answers here whatever the channel setting says, and it answers
+      // again in an hour, because it is not consumed by whoever reads it first.
+      const report = settings.report
+      if (report !== null) parts.push(report)
+      settings.takeHeld()   // discharged: they have now heard it
       // C5: this command exists to answer "what is it even reading right now", and it was wired
       // to 'replace' — which cleared #pending with no onDropped call, so the answer deleted the
       // subject of the question, silently. It even says "N more waiting" while removing them.
@@ -348,12 +486,13 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   })
 
   host.registerCommand('read-aloud.speak-last-reply', async () => {
+    speakRequestThisSession = true
     await withSpeech(async (s) => {
       const text = await huddle.lastReply()
       // Same argument as the clipboard hotkey: a control that was pressed must answer in the
       // audio stream, or it is indistinguishable from a control that is not wired up.
       if (text === null) { announce('There is no agent reply to read yet.', 'now'); return }
-      s.speak(text)
+      s.speak(text, modeAfter(flushHeldReport(s)))
     })
   })
 

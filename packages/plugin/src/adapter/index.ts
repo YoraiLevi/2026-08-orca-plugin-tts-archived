@@ -47,6 +47,11 @@ export interface NotifyOptions {
  * capability missing, rate limit, host error) all arrive that way. That is how huddle mode comes
  * back OFF after a worker reap with nothing said (TT14, cascade C4 step 1).
  */
+export interface SettingsMirrorFailure {
+  readonly op: 'get' | 'set' | 'verify'
+  readonly reason: string
+}
+
 export interface StorageFailure {
   readonly op: 'get' | 'set'
   readonly key: string
@@ -71,6 +76,14 @@ export interface HostHooks {
    * keybinding gives them (006 section 19 rank 4 — "whether a control fired").
    */
   readonly onCommandFailed?: (id: string, reason: string) => void
+  /**
+   * The `settings:own` KV mirror failed. Deliberately NOT routed to the audio stream by default:
+   * the mirror is last-known-good, so losing it costs the listener nothing today and only shows up
+   * on a day their inbox is also gone. A launch-time sentence about it would be a permanently-red
+   * indicator on any host that never granted the capability, and an indicator that never changes
+   * is a broken indicator (P32's shape). It is logged and it is answerable by `status`.
+   */
+  readonly onSettingsFailure?: (failure: SettingsMirrorFailure) => void
 }
 
 export interface Host {
@@ -79,6 +92,20 @@ export interface Host {
   notify(title: string, body?: string, opts?: NotifyOptions): void
   storageGet(key: string): Promise<unknown>
   storageSet(key: string, value: unknown): Promise<void>
+  /**
+   * ORCA's `settings:own` KV — our **mirror**, never the source of truth (011 section 1.2). It is
+   * deleted on uninstall and unreachable from the Voice Lab, which is exactly why the inbox exists.
+   *
+   * **The parameter shape here is NOT verified against ORCA's source**, and P0/P18 say to state
+   * that rather than let a defensive wrapper hide it: this tree has no ORCA checkout at this
+   * commit, and the only evidence available is that thirteen host methods exist and that
+   * `settings.get`/`.set` are `panel: false` and return "plugin's own settings"
+   * (`docs/.research/orca-plugin-api.md` "Thirteen methods"). So the mirror WRITE is verified BY
+   * EFFECT instead of by belief: `settingsSet` reads back what it wrote and reports a mismatch,
+   * which is the only way a wrong param name becomes visible rather than silent.
+   */
+  settingsGet(): Promise<Readonly<Record<string, unknown>> | null>
+  settingsSet(values: Record<string, unknown>): Promise<boolean>
   onEvent(name: string, handler: (payload: unknown) => void): void
   registerCommand(id: string, handler: () => void | Promise<void>): void
   /**
@@ -152,6 +179,54 @@ export function makeHost(
         // backlog, or a lock that reverts to whichever session was touched last.
         hooks.onStorageFailure?.({ op: 'set', key, reason: String(err) })
       }
+    },
+
+    async settingsGet(): Promise<Readonly<Record<string, unknown>> | null> {
+      try {
+        const r = await orca.host.call('settings.get')
+        if (r === null || typeof r !== 'object') return null
+        // Two accepted shapes, because only one of them can be right and we cannot yet read which:
+        // the settings object itself, or an envelope carrying it. An unexpected shape returns null,
+        // which the loader reads as "no mirror" — a state it already handles honestly.
+        const env = r as Record<string, unknown>
+        const inner = env['settings'] ?? env['value']
+        const out = inner !== undefined && inner !== null && typeof inner === 'object' ? inner : env
+        return out as Record<string, unknown>
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: 'get', reason: String(err) })
+        return null
+      }
+    },
+
+    /** Returns whether the write was OBSERVED to land, not whether the call returned. */
+    async settingsSet(values: Record<string, unknown>): Promise<boolean> {
+      try {
+        await orca.host.call('settings.set', { settings: values })
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: 'set', reason: String(err) })
+        return false
+      }
+      // Verify by effect. `settings.set` exiting without throwing proves the CALL succeeded, and
+      // proves nothing about whether the values landed under a param name ORCA reads. Watch a
+      // named value move: read the mirror back and compare the one key that orders it.
+      try {
+        const back = await orca.host.call('settings.get')
+        const env = (back ?? {}) as Record<string, unknown>
+        const inner = env['settings'] ?? env['value']
+        const rec = (inner !== undefined && inner !== null && typeof inner === 'object' ? inner : env) as Record<string, unknown>
+        const key = '__revision'
+        if (rec[key] !== values[key]) {
+          hooks.onSettingsFailure?.({
+            op: 'verify',
+            reason: `wrote ${key}=${String(values[key])} and read back ${String(rec[key])} — the mirror did not take the write`
+          })
+          return false
+        }
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: 'verify', reason: String(err) })
+        return false
+      }
+      return true
     },
 
     onEvent(name: string, handler: (payload: unknown) => void): void {

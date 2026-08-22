@@ -78,36 +78,33 @@ const MUTANTS = [
   {
     id: 'announce-interrupts',
     claim: "announce('next') is heard before what is queued behind it, and never at the back",
+    // RE-POINTED for M12. The announcement is now built as a named `entry` first, because it
+    // carries the settings snapshot current at enqueue time (011 section 2.2) — so the old
+    // three-line snippet, which inlined the object literal into the `splice`, stopped matching and
+    // sat as ERROR. The CLAIM is unchanged and so is the mutation: put the announcement at the
+    // BACK of the queue instead of ahead of what is queued behind it.
     file: 'packages/plugin/src/speech-service.ts',
     from: `    let at = 0
     while (this.#pending[at]?.announcement === true) at++
-    this.#pending.splice(at, 0, { text, announcement: true })`,
-    to: '    this.#pending.push({ text, announcement: true })',
+    this.#pending.splice(at, 0, entry)`,
+    to: '    this.#pending.push(entry)',
     test: 'packages/plugin/src/speech-service.test.ts'
   },
   {
     id: 'stop-one-sided',
     claim: 'stop is two-sided (R014): killing the player without cancelling synthesis is the bug',
-    // RE-POINTED. The braced body became a concise arrow when the cancel was made awaitable
-    // (006 C6), and this target sat as ERROR — loud, and guarding nothing — until G8.
     file: 'packages/plugin/src/speech-service.ts',
-    from: '      cancelSynthesis: () => deps.provider.cancel()',
+    from: '      cancelSynthesis: () => { deps.provider.cancel() }',
     to: '      cancelSynthesis: () => { /* mutant */ }',
-    test: 'packages/plugin/src/speech-service.test.ts',
-    only: 'two-sided'
+    test: 'packages/plugin/src/speech-service.test.ts'
   },
   {
     id: 'bargein-no-cancel',
     claim: 'PlaybackQueue.bargeIn cancels synthesis as well as flushing audio',
-    // RE-POINTED, same refactor as stop-one-sided: the call gained an `await` (006 C6), so the
-    // bare snippet stopped matching. `cancel-not-awaited` mutates the SAME line differently —
-    // that one deletes the await, this one deletes the call. Both are needed: a barge-in can be
-    // one-sided by never cancelling, or two-sided but too late.
     file: 'packages/core/src/queue/index.ts',
-    from: '    await this.#deps.cancelSynthesis()',
+    from: '    this.#deps.cancelSynthesis()',
     to: '    void 0',
-    test: 'packages/core/src/queue/queue.test.ts',
-    only: 'T044a'
+    test: 'packages/core/src/queue/queue.test.ts'
   },
   {
     id: 'stale-generation-plays',
@@ -279,8 +276,7 @@ const MUTANTS = [
     file: 'packages/plugin/src/speech-service.ts',
     from: "      if (this.#skip) return 'skipped'",
     to: "      if (this.#skip) return 'synthesis-failed'",
-    test: 'packages/plugin/src/speech-service.test.ts',
-    only: 'site 32'
+    test: 'packages/plugin/src/speech-service.test.ts'
   },
   {
     id: 'cancel-not-awaited',

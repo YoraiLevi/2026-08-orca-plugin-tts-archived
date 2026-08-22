@@ -9,7 +9,8 @@
  * Shipping only 'replace' meant huddle silently dropped replies mid-sentence (reported live).
  */
 import { Chunker, PlaybackQueue, normalize, type NormalizeOptions, type PlaybackSink } from '@orca-tts/core'
-import type { SynthesizeOptions, TtsProvider } from '@orca-tts/core'
+import { toChunkerOptions, toNormalizeOptions, toSynthesizeOptions } from '@orca-tts/core'
+import type { ChunkerOptions, SettingsSnapshot, SynthesizeOptions, TtsProvider } from '@orca-tts/core'
 
 export type SpeakMode = 'replace' | 'queue'
 
@@ -84,6 +85,26 @@ export interface SpeechServiceDeps {
    * the transcript is still there, not by consulting the string it built a minute ago.
    */
   readonly resolveLabel?: (sessionId: string) => string | null
+  /**
+   * The listener's tuning, as a GETTER — never as values (011 section 2.3).
+   *
+   * `SpeechServiceDeps` is `readonly` and captured in the constructor, so passing values would
+   * mean the only way to apply a settings change is to rebuild the service: dropping the queue
+   * and re-paying provider warm-up. A getter costs nothing and makes an edit reach the next
+   * utterance.
+   *
+   * When present it SUPERSEDES `normalizeOptions`, `maxUnits`, `isolateFirstSentence`, `voice` and
+   * `rate` — because a settings-derived value competing with a constructor literal is exactly the
+   * two-defaults bug 011 section 5 exists to delete.
+   */
+  readonly settings?: () => SettingsSnapshot
+  /**
+   * The host's runtime voice list, index to name. `synthesize.voiceIndex` persists an INDEX
+   * because voice NAMES have zero overlap across the three platforms (P28), and resolving one
+   * needs a list only the host has. With no resolver, or an index the list does not reach, the
+   * voice is OMITTED rather than guessed.
+   */
+  readonly resolveVoice?: (index: number) => string | undefined
 }
 
 const DEFAULT_MAX_QUEUED = 20
@@ -99,6 +120,15 @@ interface PendingUtterance {
   sessionId?: string
   /** Announcements are exempt from overflow trimming: the report must outlive what it reports. */
   announcement?: true
+  /**
+   * The settings snapshot current AT ENQUEUE TIME (011 section 2.2).
+   *
+   * Carried per item rather than read at speak time so that a settings promotion is never a
+   * playback-queue operation: Stop and a settings write cannot race, because a settings write
+   * touches neither the generation nor `#pending`. `apply.toQueued` defaults false, and this
+   * field is what makes that the cheap answer rather than the expensive one.
+   */
+  snapshot?: SettingsSnapshot
 }
 
 /**
@@ -219,11 +249,14 @@ export class SpeechService {
       this.#skip = true
       this.#observe(this.#playback.bargeIn(), 'stop the current sentence')
     }
+    const entry: PendingUtterance = { text, announcement: true }
+    const snap = this.#deps.settings?.()
+    if (snap !== undefined) entry.snapshot = snap
     // Ahead of queued replies, behind any announcement already waiting, so a run of announcements
     // is heard in the order it was generated.
     let at = 0
     while (this.#pending[at]?.announcement === true) at++
-    this.#pending.splice(at, 0, { text, announcement: true })
+    this.#pending.splice(at, 0, entry)
     this.#cancelled = false
     this.#observe(this.#drain(), 'read that text')
   }
@@ -244,10 +277,11 @@ export class SpeechService {
     let bytes = 0
     let error: string | null = null
     try {
-      const spokenText = normalize(phrase, this.#deps.normalizeOptions ?? {})
-      const chunker = new Chunker({})
+      const snapshot = this.#deps.settings?.()
+      const spokenText = normalize(phrase, this.#normalizeOptions(snapshot))
+      const chunker = new Chunker(this.#chunkerOptions(snapshot))
       for (const chunk of [...chunker.addText(spokenText), ...chunker.finish()]) {
-        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
+        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions(snapshot))) {
           chunks++
           bytes += audio.data.length
           await this.#deps.sink.enqueue(audio)
@@ -284,6 +318,10 @@ export class SpeechService {
     const entry: PendingUtterance = { text }
     if (label !== undefined) entry.label = label
     if (sessionId !== undefined) entry.sessionId = sessionId
+    // 011 section 2.2: the item carries the snapshot current at ENQUEUE time. `apply.toQueued`
+    // defaults false, and this is what implements it.
+    const snap = this.#deps.settings?.()
+    if (snap !== undefined) entry.snapshot = snap
     this.#pending.push(entry)
     const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED
     const replies = this.#pending.filter((p) => p.announcement !== true)
@@ -389,7 +427,8 @@ export class SpeechService {
         this.#current = attribution?.label ?? next.label ?? null
         this.#skip = false
         const outcome = await this.#speakOne(
-          attribution === null ? next.text : attribution.prefix + next.text
+          attribution === null ? next.text : attribution.prefix + next.text,
+          next.snapshot
         )
         this.#current = null
         // An announcement that cannot be spoken must never announce that it cannot be spoken: that
@@ -446,10 +485,31 @@ export class SpeechService {
    * Built fresh per utterance and omitting undefined fields, so "nothing passed" stays byte-for-
    * byte the request the provider received before.
    */
-  #synthesizeOptions(): SynthesizeOptions {
+  #synthesizeOptions(snapshot?: SettingsSnapshot): SynthesizeOptions {
+    if (snapshot !== undefined) {
+      return toSynthesizeOptions(snapshot.values, this.#deps.resolveVoice)
+    }
     const opts: { voice?: string; rate?: number } = {}
     if (this.#deps.voice !== undefined) opts.voice = this.#deps.voice
     if (this.#deps.rate !== undefined) opts.rate = this.#deps.rate
+    return opts
+  }
+
+  /** Normalizer options for one utterance: the item's own snapshot, else the constructor's. */
+  #normalizeOptions(snapshot?: SettingsSnapshot): NormalizeOptions {
+    return snapshot === undefined
+      ? this.#deps.normalizeOptions ?? {}
+      : toNormalizeOptions(snapshot.values)
+  }
+
+  /** Chunker options for one utterance, same rule. */
+  #chunkerOptions(snapshot?: SettingsSnapshot): ChunkerOptions {
+    if (snapshot !== undefined) return toChunkerOptions(snapshot.values)
+    const opts: { maxUnits?: number; isolateFirstSentence?: boolean } = {}
+    if (this.#deps.maxUnits !== undefined) opts.maxUnits = this.#deps.maxUnits
+    if (this.#deps.isolateFirstSentence !== undefined) {
+      opts.isolateFirstSentence = this.#deps.isolateFirstSentence
+    }
     return opts
   }
 
@@ -458,18 +518,13 @@ export class SpeechService {
    * all arrived at one indistinguishable early return, so the caller could not tell a loss the
    * listener should hear about from a control the listener just pressed.
    */
-  async #speakOne(text: string): Promise<SpeakOutcome> {
-    const spoken = normalize(text, this.#deps.normalizeOptions ?? {})
+  async #speakOne(text: string, snapshot?: SettingsSnapshot): Promise<SpeakOutcome> {
+    const spoken = normalize(text, this.#normalizeOptions(snapshot))
     if (spoken.length === 0) {
       this.#deps.log?.('nothing speakable in that text')
       return 'empty'
     }
-    const chunkerOpts: { maxUnits?: number; isolateFirstSentence?: boolean } = {}
-    if (this.#deps.maxUnits !== undefined) chunkerOpts.maxUnits = this.#deps.maxUnits
-    if (this.#deps.isolateFirstSentence !== undefined) {
-      chunkerOpts.isolateFirstSentence = this.#deps.isolateFirstSentence
-    }
-    const chunker = new Chunker(chunkerOpts)
+    const chunker = new Chunker(this.#chunkerOptions(snapshot))
     const chunks = [...chunker.addText(spoken), ...chunker.finish()]
 
     // Site 53: `boundary: 'scalar'` marks a cut that landed mid-word because 200 characters went by
@@ -478,13 +533,18 @@ export class SpeechService {
     // otherwise generate a dozen identical reports about one paste.
     if (chunks.some((c) => c.boundary === 'scalar')) this.#noteLoss('cut-mid-word')
 
+    // 011 section 2.3, the one required source change the settings design forces: this used to be
+    // called INSIDE the per-chunk loop. With a live snapshot behind it, a voice change would land
+    // between chunk three and chunk four of one utterance — a sentence that changes speaker
+    // mid-word. Read once, into a local, at the top.
+    const synthOpts = this.#synthesizeOptions(snapshot)
     const generation = this.#playback.begin()
     for (const chunk of chunks) {
       if (this.#cancelled) return 'cancelled'
       if (this.#skip) return 'skipped'
       if (generation !== this.#playback.generation) return 'superseded'
       try {
-        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
+        for await (const audio of this.#deps.provider.generate(chunk.text, synthOpts)) {
           if (!this.#playback.push(generation, audio)) return 'superseded'
         }
       } catch (err) {

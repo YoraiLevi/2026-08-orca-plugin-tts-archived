@@ -6,6 +6,38 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P42 — `speak('replace')` cut the announcement that was queued in front of it, and the loss looked like a short sentence
+**Symptom:** the held settings report was spoken as exactly `"Before that. "` and then the reply
+started. The rest of the sentence — the part that named the file, the reason and the path — was
+gone. Measured while writing the G1 tests, reproducible every run, not a flake:
+
+    expected 'Before that.  Four files changed, and…' to match /could not find your settings file/i
+
+**Cause:** two protections that look like one. `SpeechService.#pending` deliberately spares
+announcements when a `'replace'` speak clears the queue (`p.announcement === true` survives the
+filter), and that is the C5 rule: *an announcement must never be destroyed by the thing it is
+reporting.* But `'replace'` also calls `#playback.bargeIn()`, which **bumps the playback
+generation** — and `#speakOne` returns `'superseded'` the moment the generation moves. So the
+announcement was never removed from the queue; it was cut **mid-utterance**, after chunk one, by a
+speak request issued microseconds later. The queue-level protection had no playback-level twin.
+
+It is invisible from inside `SpeechService`: the utterance was enqueued, drained, and reported
+`'superseded'`, which is a legitimate outcome that is deliberately *not* announced as a loss
+(006 site 32 — a control the listener pressed must not be reported as an engine failure). The only
+way to see it is to assert on **the strings the provider was handed**, which is what the G1 test
+does.
+
+**What to do instead:** when something is put in front of a speak request on purpose, the speak
+must not barge in. `main.ts` `modeAfter()` selects `'queue'` for exactly the press that flushed a
+held report, and `'replace'` for every other press. The argument is not a special case: `'replace'`
+exists so a SECOND press cancels the first, and a held report is only ever flushed on the FIRST
+press of a session, when there is nothing to cancel.
+
+**The general shape, worth carrying:** *sparing something from a queue is not the same as sparing
+it from a generation bump.* Any future code that protects a queue entry by class must ask whether
+the same class also needs protecting from barge-in, or it has built half a guarantee — and the half
+that is missing is the one that shows up as a truncated sentence rather than a missing one.
+
 ## P41 — `mutation-check` edits source in place, so it cannot share a worktree
 **Symptom:** mid-run, `packages/plugin/src/adapter/index.ts` read
 `registeredCommands: () => 1` in the SHARED tree — the `register-always-succeeds` mutant, live,

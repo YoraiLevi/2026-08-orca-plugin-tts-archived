@@ -127,7 +127,16 @@ const watching = async (h: Harness): Promise<void> =>
   until(() => h.logs.some((l) => l.startsWith('read-aloud: watching ')),
     'huddle to prime the transcript and establish its watch')
 
-async function boot(projectsDir: string): Promise<Harness> {
+/**
+ * `settingsDir` defaults to a directory inside the test's own temp root that does not exist.
+ *
+ * Without it, every `boot()` in this file would read the AUTHOR'S real settings inbox out of
+ * `~/Library/Application Support/orca-tts/` — so the spoken-text assertions below would depend on
+ * how they last tuned the plugin by ear and would change under them with no commit. That is P40's
+ * shape aimed at the one file M12 exists to read. Tests that WANT a settings file pass their own
+ * directory.
+ */
+async function boot(projectsDir: string, settingsDir?: string): Promise<Harness> {
   const provider = new RecordingProvider()
   const commands = new Map<string, (args?: unknown) => unknown>()
   const events = new Map<string, (payload: unknown) => void>()
@@ -145,7 +154,10 @@ async function boot(projectsDir: string): Promise<Harness> {
     },
     log: (m: string) => { logs.push(m) }
   }
-  activate(orca, { provider, sink: new FakeSink(), projectsDir, announceDelayMs: 5 })
+  activate(orca, {
+    provider, sink: new FakeSink(), projectsDir, announceDelayMs: 5,
+    settingsDir: settingsDir ?? join(projectsDir, 'no-settings-inbox-here')
+  })
   await settle(10)   // let registry.resolve() finish so `speech` exists
   return {
     provider, commands, events, notifications, logs,
