@@ -9,6 +9,8 @@
  */
 import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,6 +21,7 @@ import {
   downloadRuntime, integrityOf, platformKey, readTar, runtimeDir, runtimeStatus,
 } from './runtime.ts'
 
+const HERE = dirname(fileURLToPath(import.meta.url))
 const made: string[] = []
 const scratch = (): string => {
   const d = mkdtempSync(join(tmpdir(), 'ort-runtime-'))
@@ -82,11 +85,28 @@ function tarballFetch(tgz: Buffer, opts: { status?: number } = {}): typeof fetch
 /* -------------------------------------------------------------------------------- the manifest */
 
 describe('the pinned runtime', () => {
-  it('pins an exact version and npm-shaped integrity, never a range', () => {
+  it('pins an exact version, never a range', () => {
     expect(RUNTIME_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
     expect(RUNTIME_TARBALL).toContain(RUNTIME_VERSION)
     expect(RUNTIME_TARBALL).not.toContain('latest')
-    expect(RUNTIME_INTEGRITY).toMatch(/^sha512-[A-Za-z0-9+/]+={0,2}$/)
+  })
+
+  it('PINS THE ACTUAL DIGEST, not the shape of a digest', () => {
+    // R16-02. The only check on this constant used to be
+    //     expect(RUNTIME_INTEGRITY).toMatch(/^sha512-[A-Za-z0-9+/]+={0,2}$/)
+    // which is a claim about punctuation. Flipping the first nibble of the pin left 20/20 green
+    // — on the one constant in this repo that gates an EXECUTABLE, and directly under three
+    // paragraphs explaining why it must be a hard refusal. R14-07's costume, worn on a binary.
+    //
+    // The lockfile is an independent local record of what npm published: pnpm wrote it from the
+    // registry, this file was written by hand, and they must agree. Two paths to one value, which
+    // is the only arrangement that can catch a hand-typed hash.
+    const lock = readFileSync(join(HERE, '../../../../pnpm-lock.yaml'), 'utf8')
+    const entry = new RegExp(`onnxruntime-node@${RUNTIME_VERSION.replaceAll('.', '\\.')}:[\\s\\S]{0,400}?integrity: (sha512-[A-Za-z0-9+/=]+)`)
+      .exec(lock)
+    expect(entry?.[1], 'the lockfile has no integrity for the pinned version — this check has ' +
+      'stopped matching and can no longer detect a wrong pin').toBeDefined()
+    expect(RUNTIME_INTEGRITY).toBe(entry?.[1])
   })
 
   it('covers five targets and NOT darwin-x64, which is upstream\'s gap', () => {
