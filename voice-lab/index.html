@@ -98,36 +98,62 @@
   }
   .attribution strong { color: var(--ink); }
 
-  /* ── Control surface: one column, one control per row, full width ──────────── */
+  /* ── Control surface ───────────────────────────────────────────────────────────
+     One column, one control per row, the input on the same line as its name. Every row here can
+     be moved and changes the audio on the next press (020): the thirty-six that could not are in
+     `.unbuilt` at the bottom, as prose. */
   .panel {
     border: 2px solid var(--rule); border-radius: 12px; background: var(--panel);
     margin: 1.2rem 0; overflow: hidden;
   }
-  .panel[data-open="true"] { background: var(--panel-focus); border-color: var(--accent); }
-  .panel > .head {
-    display: flex; align-items: center; gap: .8rem; width: 100%; min-height: var(--row-min);
-    padding: .8rem 1.2rem; background: none; border: 0; border-radius: 0; text-align: left;
+  .group-head {
+    margin: 0; padding: .75rem 1.2rem; font-size: .78rem; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--ink-dim); border-bottom: 2px solid var(--rule);
   }
-  .panel > .head .title { font-size: 1.05rem; font-weight: 600; }
-  .panel > .head .count { color: var(--ink-dim); font-size: .9rem; }
-  .rows { border-top: 2px solid var(--rule); }
   .row {
-    display: flex; align-items: center; gap: 1rem; width: 100%;
-    min-height: var(--row-min); padding: .8rem 1.2rem;
-    border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left;
-    border-radius: 0;
+    display: grid; grid-template-columns: minmax(12rem, 1fr) minmax(16rem, 1.1fr);
+    gap: .4rem 1.2rem; align-items: center; padding: .9rem 1.2rem;
+    border-bottom: 1px solid var(--rule);
   }
   .row:last-child { border-bottom: 0; }
-  .row .label { flex: 1 1 auto; font-size: 1.02rem; }
-  .row .value { color: var(--accent); font-size: 1.02rem; }
-  .row .tag {
-    font-family: ui-monospace, monospace; font-size: .72rem; color: var(--ink-dim);
-    border: 1px solid var(--rule); border-radius: 4px; padding: .1em .4em;
+  @media (max-width: 46rem) { .row { grid-template-columns: 1fr; } }
+  .row .label { font-size: 1.02rem; cursor: pointer; }
+  .row .field { display: flex; align-items: center; gap: .7rem; }
+  .row .field select { width: 100%; }
+  .row .help {
+    grid-column: 1 / -1; margin: 0; font-size: .86rem; color: var(--ink-dim); line-height: 1.45;
   }
-  .row .unwired { font-size: .72rem; color: var(--ink-dim); }
-  .tier-more { display: none; }
-  .panel[data-more="true"] .tier-more { display: flex; }
   .row[data-focused="true"] { background: rgba(124,199,255,.12); }
+  .switch { display: flex; align-items: center; gap: .6rem; min-height: 48px; cursor: pointer; }
+  .switch input { width: 24px; height: 24px; accent-color: var(--accent); cursor: pointer; }
+  .switch span { color: var(--accent); }
+  .slider { display: flex; align-items: center; gap: .8rem; width: 100%; }
+  .slider input[type="range"] { flex: 1 1 auto; accent-color: var(--accent); min-height: 44px; }
+  .slider output { color: var(--accent); min-width: 8.5rem; text-align: right; font-size: .95rem; }
+
+  /* The designed-but-unbuilt list. Deliberately NOT styled as controls. */
+  .unbuilt {
+    border: 2px dashed var(--rule); border-radius: 12px; padding: .5rem 1.2rem; margin: 1.6rem 0;
+    color: var(--ink-dim);
+  }
+  .unbuilt summary { cursor: pointer; padding: .7rem 0; font-size: .95rem; }
+  .unbuilt li { margin: .5rem 0; font-size: .9rem; }
+  .unbuilt strong { color: var(--ink); font-weight: 600; }
+
+  /* ── The example editor ────────────────────────────────────────────────────────
+     "don't scatter me around to edit config files locally" — so the text under test is editable
+     here, saved here, and created here. */
+  .example {
+    border: 2px solid var(--rule); border-radius: 12px; background: var(--panel);
+    margin: 1.2rem 0; padding: 1rem 1.2rem;
+  }
+  .example textarea {
+    font: inherit; font-size: .95rem; width: 100%; min-height: 9rem; resize: vertical;
+    color: var(--ink); background: var(--bg); border: 2px solid var(--rule); border-radius: 8px;
+    padding: .7rem .9rem; line-height: 1.6;
+  }
+  .example .actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .7rem; align-items: center; }
+  .example .note { font-size: .86rem; color: var(--ink-dim); margin: .5rem 0 0; }
 
   /* ── Overlays ──────────────────────────────────────────────────────────────── */
   .overlay {
@@ -159,17 +185,17 @@
 
 <header>
   <h1>Voice Lab</h1>
-  <label>fixture
-    <select id="fixture" aria-label="fixture"></select>
+  <label>Example
+    <select id="fixture" aria-label="Example to read"></select>
   </label>
   <span class="grow"></span>
   <button id="btn-play"><span class="kbd">Space</span> Play</button>
   <button id="btn-stop"><span class="kbd">s</span> Stop</button>
   <button id="btn-replay"><span class="kbd">R</span> Replay</button>
-  <button id="btn-compare"><span class="kbd">C</span> Compare</button>
-  <button id="btn-blind3">Blind × 3</button>
-  <button id="btn-explain"><span class="kbd">E</span> Explain</button>
-  <button id="btn-mute" aria-pressed="false"><span class="kbd">m</span> Speak-on-change: on</button>
+  <button id="btn-compare" title="Play set A, then set B, and pick the one that sounded better."><span class="kbd">C</span> Compare A and B</button>
+  <button id="btn-blind3" title="The same two sets three times in a random order, without telling you which is which, so your ears decide and not your expectations.">Blind test × 3</button>
+  <button id="btn-explain" title="Show every transform in the pipeline, what it changed, and which control governs it."><span class="kbd">E</span> Show every step</button>
+  <button id="btn-mute" aria-pressed="false" title="After you change a control, hear the difference immediately without pressing Play."><span class="kbd">m</span> Speak each change: on</button>
 </header>
 
 <main>
@@ -198,14 +224,31 @@
     </div>
   </section>
 
+  <!-- The text under test, editable in place. The author asked not to be sent to a file on
+       disk to change what he is listening to, and he was right: the sentences worth keeping are
+       the ones that surprised you, and you find them by typing. -->
+  <section class="example">
+    <h2 class="group-head" style="border:0;padding-left:0">The words being read</h2>
+    <textarea id="example-text" aria-label="The text being read aloud"
+      spellcheck="false" placeholder="Type anything here and press Play."></textarea>
+    <div class="actions">
+      <button id="btn-example-save">Save this example</button>
+      <button id="btn-example-saveas">Save as a new example…</button>
+      <button id="btn-example-delete">Delete this example</button>
+      <span class="grow"></span>
+      <span id="example-status" class="note"></span>
+    </div>
+    <p class="note">Edits are read aloud straight away — you do not have to save first. Saving
+      keeps the example for next time.</p>
+  </section>
+
   <div id="controls"></div>
 
   <p style="color:var(--ink-dim);font-size:.9rem">
-    Set <strong id="ab-set">A</strong> ·
+    Comparing set <strong id="ab-set">A</strong> ·
     <button id="btn-swap">Switch to the other set</button>
     <button id="btn-copy-ab">Copy this set to the other</button>
     <span class="kbd">K</span> snapshot · <span class="kbd">L</span> restore ·
-    <span class="kbd">+</span>/<span class="kbd">-</span> more controls ·
     <span class="kbd">?</span> describe the focused control
   </p>
 </main>
@@ -1301,10 +1344,17 @@ function scheduleBuffers (bufs, gapMs, onDone) {
    The contract is docs/design/004-voice-lab.md section 2. `scripts/voice-lab.mjs` (job J12) owns
    the other end; this page never spawns anything and never plays server-side. */
 
-async function api (path, body) {
-  const res = await fetch(path, body === undefined
+async function api (path, body, method) {
+  // `method` is explicit for PUT and DELETE (the example editor). Left out, the old rule stands:
+  // a body means POST, no body means GET.
+  const verb = method ?? (body === undefined ? 'GET' : 'POST')
+  const res = await fetch(path, verb === 'GET'
     ? { headers: { accept: 'application/json' } }
-    : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    : {
+        method: verb,
+        headers: { 'content-type': 'application/json' },
+        body: body == null ? undefined : JSON.stringify(body)
+      })
   const text = await res.text()
   let json = null
   try { json = text ? JSON.parse(text) : null } catch { /* a non-JSON body is reported as-is */ }
@@ -1406,6 +1456,21 @@ function synthOptions () {
   return { voice: chosen ? chosen.name : undefined, rate: v['voice.rate'] }
 }
 
+/**
+ * A read-only seam for `scripts/ui-probe.mjs`, and the reason it exists is the whole lesson of
+ * `020`.
+ *
+ * The probe asserts that EVERY control on screen takes effect. "Takes effect" means one of two
+ * things: the spoken text changes, or the audio that would be synthesized from it changes. The
+ * first is visible in the DOM; the second is not visible anywhere without either synthesizing
+ * (slow, and it makes the check depend on the engine) or reading the options the page is about
+ * to send. This returns both, and nothing else — no setter, no behaviour.
+ *
+ * A dead control is exactly a control that moves neither of these, which is what thirty-six of
+ * them did while looking identical to the ten that worked.
+ */
+window.__labEffect = () => ({ spoken: state.spokenText, speak: speakOptions() })
+
 function speakOptions () {
   return { normalize: normalizeOptions(), chunk: chunkOptions(), synthesize: synthOptions() }
 }
@@ -1504,101 +1569,219 @@ function jumpToControlFor (stageNumber) {
     return
   }
   const target = governing[0]
-  state.openPanel = target.panel
-  if (target.tier === 'more') state.morePanels.add(target.panel)
-  renderControls()
   const idx = visibleControls().findIndex((c) => c.id === target.id)
-  if (idx >= 0) { state.focusIndex = idx; focusRow(true) }
+  if (idx < 0) {
+    // The stage IS governed — by a control nobody built. Say which one, rather than moving focus
+    // somewhere arbitrary or, worse, silently doing nothing.
+    speakConfirmation(`${target.label} governs that transform, and it is not built yet.`)
+    return
+  }
+  state.focusIndex = idx
+  focusRow(true)
 }
 
 /* ── The control surface ─────────────────────────────────────────────────────
-   One column. One control per row. Full width. No two-dimensional scanning, ever. Panels are
-   collapsed except the one in focus (004 section 8 rule 1). */
+   REWRITTEN per docs/design/020-voice-lab-ux.md, from the author's session using it:
 
+     "i cannot edit/configure from the voice lab what's being pronounced and how, i just see the
+      currently coded settings i think? there is no way for me to change anything here"
+     "i was expecting to have some kind of drop down/cyclic choice controls"
+
+   Two things were wrong and both are fixed here.
+
+   ONE — thirty-six of the forty-six controls could not change anything. `wire: null` means no
+   consumer reads the value: `NormalizeOptions` has exactly six fields, and those thirty-six
+   describe transforms nobody has built. Rendering them was not "honest about a gap", it was a
+   screenful of dead switches that cost the listener a press and a guess each. They are now BELOW
+   the fold in a collapsed list, as prose, with no affordance suggesting they do anything.
+
+   TWO — the ten live ones cycled by keyboard on a focused element, with the hint in the footer.
+   He looked for a dropdown and found `< announced >`, which reads as a readout. They are now real
+   form controls: `<select>` for a choice, `<input type=range>` for a number, a checkbox for a
+   flag. The keyboard stays as an accelerator (arrows still step the focused row); it is no longer
+   the only route.
+
+   `CONTROLS` itself is unchanged, deliberately. `toSettingsFile()` iterates all forty-six and the
+   round-trip test compares against it, so deleting rows would break C4 and T124. What changed is
+   what the PAGE renders — the schema still carries every field. */
+
+/** The ten controls a listener can actually move, flat, in panel order. */
 function visibleControls () {
-  return CONTROLS.filter((c) =>
-    c.panel === state.openPanel && (c.tier === 'common' || state.morePanels.has(c.panel)))
+  return CONTROLS.filter((c) => c.wire !== null)
+}
+
+function unwiredControls () {
+  return CONTROLS.filter((c) => c.wire === null)
 }
 
 function renderControls () {
   const root = $('controls')
   root.textContent = ''
+
   for (const panel of PANELS) {
-    const count = CONTROLS.filter((c) => c.panel === panel.id).length
-    const open = state.openPanel === panel.id
+    const live = visibleControls().filter((c) => c.panel === panel.id)
+    if (live.length === 0) continue        // no empty headings; a group with nothing in it is noise
     const el = document.createElement('section')
     el.className = 'panel'
-    el.dataset.open = String(open)
-    el.dataset.more = String(state.morePanels.has(panel.id))
-
-    const head = document.createElement('button')
-    head.className = 'head'
-    head.setAttribute('aria-expanded', String(open))
-    head.innerHTML = `<span class="title">${panel.title}</span>
-      <span class="count">${count} control${count === 1 ? '' : 's'}</span>`
-    head.addEventListener('click', () => {
-      state.openPanel = panel.id
-      state.focusIndex = 0
-      renderControls()
-      focusRow(false)
-      speakConfirmation(`${panel.title}, ${numberWords(count)} controls.`)
-    })
+    el.dataset.open = 'true'
+    const head = document.createElement('h2')
+    head.className = 'group-head'
+    head.textContent = panel.title
     el.append(head)
-
-    if (open) {
-      const rows = document.createElement('div')
-      rows.className = 'rows'
-      for (const c of CONTROLS.filter((x) => x.panel === panel.id)) {
-        rows.append(renderRow(c))
-      }
-      const moreBtn = document.createElement('button')
-      moreBtn.className = 'row'
-      const hidden = CONTROLS.filter((x) => x.panel === panel.id && x.tier === 'more').length
-      moreBtn.innerHTML = state.morePanels.has(panel.id)
-        ? `<span class="label">Hide the ${numberWords(hidden)} less-used controls</span><span class="kbd">-</span>`
-        : `<span class="label">Show ${numberWords(hidden)} more controls</span><span class="kbd">+</span>`
-      moreBtn.addEventListener('click', () => toggleMore(panel.id))
-      rows.append(moreBtn)
-      el.append(rows)
-    }
+    const rows = document.createElement('div')
+    rows.className = 'rows'
+    for (const c of live) rows.append(renderRow(c))
+    el.append(rows)
     root.append(el)
   }
-  $('count').textContent =
-    `${CONTROLS.length} controls · ${CONTROLS.filter((c) => c.tag !== 'EI').length} engine- or pacing-provisional` +
-    ` · ${CONTROLS.filter((c) => c.wire === null).length} designed, not wired`
+
+  root.append(renderUnbuilt())
+
+  $('count').textContent = `${visibleControls().length} controls`
   markFocus()
 }
 
+/** The thirty-six, collapsed, as a list of sentences — not as controls. */
+function renderUnbuilt () {
+  const list = unwiredControls()
+  const d = document.createElement('details')
+  d.className = 'unbuilt'
+  const s = document.createElement('summary')
+  s.textContent = `Designed but not built yet — ${numberWords(list.length)} more decisions`
+  d.append(s)
+  const p = document.createElement('p')
+  p.textContent =
+    'These are written down and specified, and nothing reads them yet, so the Lab does not pretend ' +
+    'they are switches. They are listed here so a decision that was MADE is never mistaken for one ' +
+    'that was overlooked.'
+  d.append(p)
+  const ul = document.createElement('ul')
+  for (const c of list) {
+    const li = document.createElement('li')
+    li.innerHTML = `<strong></strong> — <span></span>`
+    li.querySelector('strong').textContent = c.label
+    li.querySelector('span').textContent = c.help
+    ul.append(li)
+  }
+  d.append(ul)
+  return d
+}
+
+/**
+ * One control, as a real form element.
+ *
+ * The row is a `<div>`, not a `<button>`: a button containing a `<select>` swallows the select's
+ * own clicks, which is exactly the "I can hear things but not change them" the rewrite exists to
+ * end. Clicking a row's label focuses its input; arrows still step it, so the keyboard route the
+ * earlier design was built around survives as an accelerator.
+ */
 function renderRow (c) {
-  const row = document.createElement('button')
-  row.className = 'row' + (c.tier === 'more' ? ' tier-more' : '')
+  const row = document.createElement('div')
+  row.className = 'row'
   row.dataset.control = c.id
-  const label = document.createElement('span')
+  const value = values()[c.id]
+
+  const label = document.createElement('label')
   label.className = 'label'
   label.textContent = c.label
-  const value = document.createElement('span')
-  value.className = 'value'
-  value.textContent = '‹ ' + speakValue(c, values()[c.id]) + ' ›'
-  const tag = document.createElement('span')
-  tag.className = 'tag'
-  tag.textContent = c.tag
-  tag.title = { EI: 'engine-independent — this decision transfers to any engine',
-    EP: 'engine-provisional — another engine or platform may invalidate this value',
-    PP: 'pacing-provisional — judged against a floor that is going to change' }[c.tag]
-  row.append(label, value, tag)
-  if (c.wire === null) {
-    const un = document.createElement('span')
-    un.className = 'unwired'
-    un.textContent = 'not yet wired'
-    un.title = 'The lab renders this control and the settings file carries it; the plugin does not read it yet.'
-    row.append(un)
-  }
-  row.setAttribute('aria-label', `${c.label}, ${speakValue(c, values()[c.id])}`)
-  row.addEventListener('click', () => {
-    const idx = visibleControls().findIndex((x) => x.id === c.id)
-    if (idx >= 0) { state.focusIndex = idx; focusRow(true) }
-  })
+  label.htmlFor = `ctl-${c.id}`
+  row.append(label)
+
+  const field = document.createElement('div')
+  field.className = 'field'
+  field.append(inputFor(c, value))
+  row.append(field)
+
+  const help = document.createElement('p')
+  help.className = 'help'
+  help.textContent = c.help
+  row.append(help)
   return row
+}
+
+/** The element itself, chosen by kind. Every one of these changes the audio on the next press. */
+function inputFor (c, value) {
+  const id = `ctl-${c.id}`
+
+  if (c.kind === 'enum') {
+    const s = document.createElement('select')
+    s.id = id
+    for (const v of c.values) {
+      const o = document.createElement('option')
+      o.value = v
+      // The words the LISTENER uses, with the schema value beside it — he tunes by the first and
+      // reports bugs by the second.
+      o.textContent = c.words?.[v] ? `${c.words[v]}  (${v})` : v
+      o.selected = v === value
+      s.append(o)
+    }
+    s.addEventListener('change', () => setControl(c, s.value))
+    return s
+  }
+
+  if (c.kind === 'bool') {
+    const wrap = document.createElement('label')
+    wrap.className = 'switch'
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.id = id
+    box.checked = Boolean(value)
+    const text = document.createElement('span')
+    text.textContent = speakValue(c, value)
+    box.addEventListener('change', () => setControl(c, box.checked))
+    wrap.append(box, text)
+    return wrap
+  }
+
+  if (c.kind === 'voice') {
+    const s = document.createElement('select')
+    s.id = id
+    if (state.voices.length === 0) {
+      const o = document.createElement('option')
+      o.textContent = 'No voices found on this machine'
+      s.append(o)
+      s.disabled = true
+      return s
+    }
+    for (const v of state.voices) {
+      const o = document.createElement('option')
+      o.value = String(v.index)
+      o.textContent = v.locale ? `${v.name} — ${v.locale}` : v.name
+      o.selected = v.index === value
+      s.append(o)
+    }
+    s.addEventListener('change', () => setControl(c, Number(s.value)))
+    return s
+  }
+
+  if (c.kind === 'int' || c.kind === 'float') {
+    const wrap = document.createElement('span')
+    wrap.className = 'slider'
+    const r = document.createElement('input')
+    r.type = 'range'
+    r.id = id
+    r.min = String(c.range.min)
+    r.max = String(c.range.max)
+    r.step = String(c.range.step)
+    r.value = String(value)
+    const out = document.createElement('output')
+    out.textContent = speakValue(c, value)
+    // `input` updates the READOUT only; `change` is what re-speaks. Dragging a slider must not
+    // queue thirty utterances (P21) — the same rule the debounce in speakConfirmation enforces.
+    r.addEventListener('input', () => { out.textContent = speakValue(c, Number(r.value)) })
+    r.addEventListener('change', () => setControl(c, Number(r.value)))
+    wrap.append(r, out)
+    return wrap
+  }
+
+  // template / map / multi — none is wired today, so none reaches here. If one ever is, a text
+  // box is the right shape and this is where it goes.
+  const t = document.createElement('input')
+  t.type = 'text'
+  t.id = id
+  t.value = typeof value === 'string' ? value : JSON.stringify(value)
+  t.addEventListener('change', () => setControl(c, t.value))
+  return t
 }
 
 function focused () {
@@ -1620,16 +1803,31 @@ function focusRow (speak) {
   markFocus()
   const c = focused()
   if (!c) return
-  const el = document.querySelector(`.row[data-control="${CSS.escape(c.id)}"]`)
+  // The row is a div now; the thing that takes focus is its input.
+  const el = document.querySelector(`.row[data-control="${CSS.escape(c.id)}"] select, ` +
+    `.row[data-control="${CSS.escape(c.id)}"] input`)
   if (el) el.focus({ preventScroll: false })
   if (speak) speakConfirmation(`${c.label}, ${speakValue(c, values()[c.id])}.`)
 }
 
-function toggleMore (panelId) {
-  if (state.morePanels.has(panelId)) state.morePanels.delete(panelId)
-  else state.morePanels.add(panelId)
-  renderControls()
-  speakConfirmation(state.morePanels.has(panelId) ? 'More controls shown.' : 'More controls hidden.')
+/**
+ * Update ONE row in place, rather than rebuilding the control surface.
+ *
+ * A full `renderControls()` on every change destroys the element the listener is holding — the
+ * `<select>` closes mid-choice and a dragged slider loses focus on mouse-up. Nothing else on the
+ * page depends on a sibling control's markup, so a targeted refresh is both correct and the only
+ * one that leaves the instrument usable.
+ */
+function refreshRow (c) {
+  const row = document.querySelector(`.row[data-control="${CSS.escape(c.id)}"]`)
+  if (!row) return
+  const v = values()[c.id]
+  const box = row.querySelector('input[type=checkbox]')
+  if (box) { box.checked = Boolean(v); row.querySelector('.switch span').textContent = speakValue(c, v) }
+  const sel = row.querySelector('select')
+  if (sel) sel.value = String(v)
+  const range = row.querySelector('input[type=range]')
+  if (range) { range.value = String(v); row.querySelector('output').textContent = speakValue(c, v) }
 }
 
 function setControl (c, next) {
@@ -1637,7 +1835,7 @@ function setControl (c, next) {
   if (before === next) return
   values()[c.id] = next
   persist()
-  renderControls()
+  refreshRow(c)
   markFocus()
   if (c.warnAbove !== undefined && Number(next) > c.warnAbove && !state.hexWarned) {
     state.hexWarned = true
@@ -1678,6 +1876,19 @@ async function speak (text, { confirmation = false } = {}) {
   if (!text || !text.trim()) return
   const synth = synthOptions()
   const t0 = performance.now()
+
+  // ONE QUEUE, ONE STOP — 020 defect 4, in the author's words: "pressing 'play this stage' in
+  // succession makes it speak over itself without a way to stop anything. the cacophony of the
+  // audio was horrible."
+  //
+  // Every path into this function is a new utterance, so it barges in on whatever is sounding.
+  // That is the guarantee the PLUGIN already gives (006 cascade C6) and the Lab did not: the
+  // fetch was aborted here, but already-scheduled AudioBufferSourceNodes kept running, and the
+  // warm path did not even do that — two presses inside 41 ms overlapped completely.
+  //
+  // `stopAudio()` before anything else, confirmations included. A confirmation that talks over
+  // the sample being judged is worse than a confirmation that replaces it.
+  stopAudio()
 
   // The warm path first, and it never touches the network.
   //
@@ -2272,8 +2483,8 @@ document.addEventListener('keydown', (e) => {
     case 'step-down': stepFocused(-1); break
     case 'step-up': stepFocused(1); break
     case 'next-panel': nextPanel(); break
-    case 'more': if (!state.morePanels.has(state.openPanel)) toggleMore(state.openPanel); break
-    case 'less': if (state.morePanels.has(state.openPanel)) toggleMore(state.openPanel); break
+    // `+`/`-` used to reveal the "more" tier. Every built control is on screen now, so the tier
+    // split has nothing left to hide and the keys are gone rather than left as no-ops.
     case 'compare': void compare({ trials: 1 }); break
     case 'keep-first': chooseCompare(1); break
     case 'keep-second': chooseCompare(2); break
@@ -2316,24 +2527,31 @@ function describeFocused () {
   speakConfirmation(line, { force: true })
 }
 
+/** Jump to the first control of the next group. Nothing collapses any more, so this is movement. */
 function nextPanel () {
-  const i = PANELS.findIndex((p) => p.id === state.openPanel)
-  const panel = PANELS[(i + 1) % PANELS.length]
-  state.openPanel = panel.id
-  state.focusIndex = 0
-  renderControls()
+  const list = visibleControls()
+  const here = list[state.focusIndex]
+  const order = PANELS.map((p) => p.id).filter((id) => list.some((c) => c.panel === id))
+  const i = order.indexOf(here?.panel ?? order[0])
+  const nextId = order[(i + 1) % order.length]
+  const idx = list.findIndex((c) => c.panel === nextId)
+  if (idx < 0) return
+  state.focusIndex = idx
   focusRow(false)
-  const n = CONTROLS.filter((c) => c.panel === panel.id).length
-  speakConfirmation(`${panel.title}, ${numberWords(n)} controls.`)
+  const panel = PANELS.find((p) => p.id === nextId)
+  const n = list.filter((c) => c.panel === nextId).length
+  speakConfirmation(`${panel.title}, ${numberWords(n)} control${n === 1 ? '' : 's'}.`)
 }
 
 function toggleMute () {
   state.speakOnChange = !state.speakOnChange
   const btn = $('btn-mute')
   btn.setAttribute('aria-pressed', String(!state.speakOnChange))
-  btn.innerHTML = `<span class="kbd">m</span> Speak-on-change: ${state.speakOnChange ? 'on' : 'off'}`
+  btn.innerHTML = `<span class="kbd">m</span> Speak each change: ${state.speakOnChange ? 'on' : 'off'}`
   // The confirmation that it is off has to be audible, or "did that work" is unanswerable.
-  speakConfirmation(state.speakOnChange ? 'Speak-on-change, on.' : 'Speak-on-change, off.', { force: true })
+  speakConfirmation(state.speakOnChange
+    ? 'Each change will be spoken.'
+    : 'Changes will be silent. Press space to hear one.', { force: true })
 }
 
 function closeOverlays () {
@@ -2400,7 +2618,103 @@ async function loadFixture (name) {
   buffers.clear()
   state.chunkKeysFor = new Map()
   state.lastPlayed = null
+  $('example-text').value = state.fixture.text
+  exampleStatus('')
   await renormalize()
+}
+
+/* ── The example editor ──────────────────────────────────────────────────────
+   020: "make the webui editable in place for both settings and examples, allow me to make new
+   examples too." The server half (PUT / DELETE `/fixtures/<name>`) landed first; this is the half
+   he can reach.
+
+   Editing is LIVE and saving is separate, on purpose. Tuning by ear means typing a sentence and
+   hearing it — if hearing it required a save, every throwaway experiment would leave a file
+   behind, and the examples folder would fill with things nobody meant to keep. */
+
+function exampleStatus (text) { $('example-status').textContent = text }
+
+let exampleTimer = null
+$('example-text').addEventListener('input', () => {
+  if (!state.fixture) state.fixture = { name: '(unsaved)', text: '' }
+  state.fixture.text = $('example-text').value
+  // New bytes mean the cached audio is unreachable rather than wrong; dropping it keeps the
+  // memory bounded and keeps FR-023 honest — nothing may replay audio for text that changed.
+  buffers.clear()
+  state.chunkKeysFor = new Map()
+  state.lastPlayed = null
+  exampleStatus('edited, not saved')
+  clearTimeout(exampleTimer)
+  // 300 ms: long enough that a typed word is one round trip, short enough to feel immediate.
+  exampleTimer = setTimeout(() => { void renormalize() }, 300)
+})
+
+async function putExample (name, text) {
+  const r = await api(`/fixtures/${encodeURIComponent(name)}`, { text }, 'PUT')
+  if (!r.ok) {
+    const why = r.json?.message ?? r.json?.error ?? `HTTP ${r.status}`
+    exampleStatus(why)
+    speakConfirmation(`That example was not saved. ${why}`, { force: true })
+    return false
+  }
+  return true
+}
+
+$('btn-example-save').addEventListener('click', async () => {
+  if (!state.fixture || state.fixture.name === '(unsaved)') {
+    exampleStatus('This one has no name yet — use "Save as a new example".')
+    return
+  }
+  if (await putExample(state.fixture.name, $('example-text').value)) {
+    exampleStatus(`saved to ${state.fixture.name}`)
+    speakConfirmation(`Saved, ${state.fixture.name}.`, { force: true })
+  }
+})
+
+$('btn-example-saveas').addEventListener('click', async () => {
+  const raw = prompt('A name for this example:', suggestExampleName())
+  if (raw === null) return
+  const name = raw.trim().endsWith('.md') ? raw.trim() : `${raw.trim()}.md`
+  if (!await putExample(name, $('example-text').value)) return
+  await refreshExampleList(name)
+  state.fixture = { name, text: $('example-text').value }
+  exampleStatus(`saved as ${name}`)
+  speakConfirmation(`Saved as ${name}.`, { force: true })
+})
+
+$('btn-example-delete').addEventListener('click', async () => {
+  const name = state.fixture?.name
+  if (!name || name === '(unsaved)') { exampleStatus('There is nothing on disk to delete.'); return }
+  if (!confirm(`Delete the example "${name}"? This removes the file.`)) return
+  const r = await api(`/fixtures/${encodeURIComponent(name)}`, null, 'DELETE')
+  if (!r.ok) { exampleStatus(r.json?.error ?? `HTTP ${r.status}`); return }
+  speakConfirmation(`Deleted, ${name}.`, { force: true })
+  await refreshExampleList()
+  const next = $('fixture').value
+  if (next) await loadFixture(next)
+  else { state.fixture = { name: '(unsaved)', text: '' }; $('example-text').value = '' }
+})
+
+/** The first few words of the text, so the name means something without being typed twice. */
+function suggestExampleName () {
+  const words = $('example-text').value.trim().split(/\s+/).slice(0, 5)
+    .map((w) => w.replace(/[^\w-]/g, '')).filter(Boolean)
+  return (words.join('-').toLowerCase() || 'new-example') + '.md'
+}
+
+/** Re-read the list from the server — never patch the `<select>` from what we hoped happened. */
+async function refreshExampleList (select) {
+  const f = await api('/fixtures')
+  const names = (f.json && f.json.fixtures) || []
+  const sel = $('fixture')
+  sel.textContent = ''
+  for (const name of names) {
+    const opt = document.createElement('option')
+    opt.value = name
+    opt.textContent = name
+    sel.append(opt)
+  }
+  if (select && names.includes(select)) sel.value = select
 }
 
 /* ── Start ───────────────────────────────────────────────────────────────────
@@ -2473,6 +2787,11 @@ async function start () {
   await renormalize()
   focusRow(false)
   setStatus('Ready. Nothing has played yet — this page makes no sound until you press something.')
+  // The last line of start(), and the signal scripts/ui-probe.mjs waits on. Without it the probe
+  // guessed at readiness from "a control row exists", which is true one render BEFORE the voice
+  // list arrives — so the voice picker held its one "no voices found" placeholder and the check
+  // flickered between pass and fail on timing alone. A flaky check is a check nobody trusts.
+  window.__labReady = true
 }
 
 void start()

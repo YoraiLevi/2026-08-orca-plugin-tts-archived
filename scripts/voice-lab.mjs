@@ -908,26 +908,36 @@ export function createLabServer ({ provider, fixtureDir, pageDir, settingsPath }
  */
 export function parseArgs (argv) {
   let port = 7311
+  let pageDir = null
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
+    // `--page <dir>` serves a DIFFERENT copy of the page. It exists for `scripts/ui-probe.mjs`,
+    // which proves each of its checks can fail by running it against a deliberately broken copy —
+    // a check that cannot go red is not a check. Nothing else should pass it.
+    if (a.startsWith('--page=') || a === '--page') {
+      const raw = a === '--page' ? (argv[++i] ?? '') : a.slice('--page='.length)
+      if (!raw) throw new Error('--page wants a directory.')
+      pageDir = raw
+      continue
+    }
     let raw = null
     if (a.startsWith('--port=')) raw = a.slice('--port='.length)
     else if (a === '--port') { raw = argv[i + 1] ?? ''; i++ }
-    else throw new Error(`unrecognised argument ${JSON.stringify(a)}. The only flag is --port=<n> (or --port <n>).`)
+    else throw new Error(`unrecognised argument ${JSON.stringify(a)}. The flags are --port=<n> and --page=<dir>.`)
     const n = Number(raw)
     if (!Number.isInteger(n) || n < 0 || n > 65535) {
       throw new Error(`--port wants an integer from 0 to 65535, got ${JSON.stringify(raw)}.`)
     }
     port = n
   }
-  return { port }
+  return { port, pageDir }
 }
 
 export async function main (argv = process.argv.slice(2)) {
-  const { port } = parseArgs(argv)
+  const { port, pageDir } = parseArgs(argv)
 
   const proof = await assertLoadedModuleIsOnDiskSource()
-  const server = createLabServer()
+  const server = createLabServer({ pageDir })
 
   /**
    * EADDRINUSE is not a harmless "already running" — it is a TRAP, and it cost the author a
@@ -964,7 +974,7 @@ export async function main (argv = process.argv.slice(2)) {
     `  stages      ${STAGES.length}\n` +
     `  fixtures    ${join(REPO_ROOT, 'fixtures')}\n` +
     `  settings    ${inbox}${existsSync(inbox) ? '' : '  (not created yet)'}\n` +
-    `  page        ${existsSync(join(REPO_ROOT, 'voice-lab/index.html')) ? 'voice-lab/index.html' : 'voice-lab/index.html  (J13, not landed yet)'}\n` +
+    `  page        ${pageDir ?? join(REPO_ROOT, 'voice-lab')}${pageDir ? '   (--page: NOT the committed page)' : ''}\n` +
     '  audio       the BROWSER plays. This process spawns no player and makes no sound.\n'
   )
   return server
