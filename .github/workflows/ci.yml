@@ -223,3 +223,20 @@ jobs:
       # reported by name with its reason and lands in the job summary (spec FR-107).
       - name: Voice Lab — headless assertions, and zero audio-device opens
         run: node scripts/ci/voice-lab-ci.mjs
+
+      # The UI gate. Everything above asserts what the page WOULD SAY; this asserts that a person
+      # can change it -- the property whose absence shipped 36 dead controls past thirteen rounds
+      # of review (PITFALLS P47, docs/design/020-voice-lab-ux.md).
+      #
+      # `--prove` first and on its own line, for the same reason `--prove-guard` runs before the
+      # harness above: it re-runs each check against a page broken in exactly the way that check
+      # watches for, and requires it to go red. Three of these checks were vacuous when first
+      # written and only this caught them.
+      #
+      # NOT ON LINUX, and the reason is deliberate rather than an oversight: this job does not
+      # install the espeak-ng COMMAND (see the note above P25), so `/speak` has no engine there and
+      # U4 -- which is about audio overlapping -- would have nothing to hear. macOS has `say` and
+      # Windows has SAPI, so the audio half is covered by two of the three legs.
+      - name: The UI checks must be able to fail
+        if: runner.os != 'Linux'
+        run: pnpm probe:ui -- --prove
