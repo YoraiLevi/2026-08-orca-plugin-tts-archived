@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import type {
   AudioChunk, ProviderCapabilities, SynthesizeOptions, TtsProvider,
 } from '@orca-tts/core'
-import { writeWav } from './audio.ts'
+import { resample, writeWav } from './audio.ts'
 import {
-  MODEL_TOTAL_BYTES,
+  INSTALL_TOTAL_BYTES,
   modelDir,
   modelStatus as readModelStatus,
   type ModelStatus,
@@ -22,6 +22,25 @@ import {
 const ORT_MODULE = 'onnxruntime-node'
 const ENGINE_MODULE = './engine.ts'
 
+/** Options the provider forwards into `PocketTts.synthesize`. */
+export interface PocketSynthesizeOpts {
+  readonly temperature?: number
+  readonly lsdSteps?: number
+  readonly seed?: number
+  /** Aborted by `cancel()`. The frame loop must stop observing this. */
+  readonly signal?: AbortSignal
+}
+
+/** Options the provider forwards into `PocketTts.framesFor`. */
+export interface PocketFramesForOpts {
+  readonly temperature: number
+  readonly lsdSteps: number
+  readonly maxFrames: number | null
+  readonly framesAfterEos: number
+  readonly rng: (std: number) => number
+  readonly signal?: AbortSignal
+}
+
 /** The provider-facing portion of the engine. Kept structural so tests never load ONNX. */
 export interface PocketTtsEngine {
   readonly sampleRate: number
@@ -29,8 +48,21 @@ export interface PocketTtsEngine {
   synthesize(
     text: string,
     voiceState: unknown,
-    opts?: { temperature?: number, lsdSteps?: number, seed?: number },
+    opts?: PocketSynthesizeOpts,
   ): Promise<Float32Array>
+  /**
+   * When present, the provider drives this generator so `cancel()` can land *between frames*
+   * (Principle VII / R014). `synthesize()` is a Promise that otherwise runs the loop to completion.
+   */
+  framesFor?(
+    voiceState: unknown,
+    tokenIds: readonly number[],
+    opts: PocketFramesForOpts,
+  ): AsyncIterable<Float32Array>
+  decodeFrames?(frames: readonly Float32Array[]): Promise<Float32Array>
+  splitIntoChunks?(text: string): string[]
+  preparePrompt?(text: string): { readonly framesAfterEos: number }
+  readonly tokenizer?: { encode(text: string): readonly number[] }
 }
 
 export interface PocketTtsModule {
@@ -54,7 +86,7 @@ export const POCKET_CAPABILITIES: ProviderCapabilities = {
   streaming: false,
   offline: true,
   needsApiKey: false,
-  needsModelDownload: MODEL_TOTAL_BYTES,
+  needsModelDownload: INSTALL_TOTAL_BYTES,
   licence: 'CC-BY-4.0',
   cloning: true,
   sampleRate: 24_000,
@@ -95,26 +127,102 @@ export class PocketVoiceUnavailableError extends Error {
 
 interface ActiveGeneration {
   cancelled: boolean
+  iterator: AsyncIterator<unknown> | null
+  readonly signal: AbortSignal
   readonly stopped: Promise<void>
+  readonly finished: Promise<void>
   stop(): void
+  finish(): void
   dispose(): void
 }
 
-function cancellation(signal: AbortSignal | undefined): ActiveGeneration {
-  let settle: (() => void) | undefined
+function cancellation(external: AbortSignal | undefined): ActiveGeneration {
+  const controller = new AbortController()
+  let settleStopped: (() => void) | undefined
+  let settleFinished: (() => void) | undefined
   const token: ActiveGeneration = {
-    cancelled: signal?.aborted === true,
-    stopped: new Promise<void>((resolve) => { settle = resolve }),
+    cancelled: external?.aborted === true,
+    iterator: null,
+    signal: controller.signal,
+    stopped: new Promise<void>((resolve) => { settleStopped = resolve }),
+    finished: new Promise<void>((resolve) => { settleFinished = resolve }),
     stop: () => {
       if (token.cancelled) return
       token.cancelled = true
-      settle?.()
+      controller.abort()
+      // Closing the generator is what actually stops `framesFor` mid-await — a cancelled
+      // flag the loop has not yet reached leaves the ONNX call running (R15-01).
+      void token.iterator?.return?.()?.then(() => undefined, () => undefined)
+      settleStopped?.()
     },
-    dispose: () => { signal?.removeEventListener('abort', token.stop) },
+    finish: () => { settleFinished?.() },
+    dispose: () => {
+      external?.removeEventListener('abort', token.stop)
+      settleFinished?.()
+    },
   }
-  if (token.cancelled) settle?.()
-  else signal?.addEventListener('abort', token.stop, { once: true })
+  if (token.cancelled) {
+    controller.abort()
+    settleStopped?.()
+  } else {
+    external?.addEventListener('abort', token.stop, { once: true })
+  }
   return token
+}
+
+function hasFrameLoop(engine: PocketTtsEngine): engine is PocketTtsEngine & {
+  framesFor: NonNullable<PocketTtsEngine['framesFor']>
+  decodeFrames: NonNullable<PocketTtsEngine['decodeFrames']>
+  tokenizer: NonNullable<PocketTtsEngine['tokenizer']>
+} {
+  return typeof engine.framesFor === 'function'
+    && typeof engine.decodeFrames === 'function'
+    && engine.tokenizer !== undefined
+}
+
+/**
+ * Pocket has no native speaking-rate control. Map `SynthesizeOptions.rate` (1.0 = natural)
+ * onto duration by resampling, then write the result at the engine's sample rate.
+ *
+ * `rate > 1` is faster (fewer samples); `rate < 1` is slower (more samples). This also
+ * shifts pitch — the same trade-off as speeding a tape. Pitch-preserving time-stretch is
+ * not in this package, and refusing the control would recreate P47 (a visible knob that
+ * does nothing). Duration is the listener-audible effect.
+ */
+function applySpeechRate(
+  samples: Float32Array, sampleRate: number, rate: number | undefined,
+): Float32Array {
+  if (rate === undefined || rate === 1) return samples
+  if (!(rate > 0) || !Number.isFinite(rate)) {
+    throw new RangeError(`Pocket TTS speaking rate must be a positive finite number, got ${String(rate)}`)
+  }
+  return resample(samples, sampleRate, sampleRate / rate)
+}
+
+/** Seedable Box-Muller, kept in lockstep with `engine.ts` `makeRng` (that file is owned elsewhere). */
+function pocketRng(seed = 1): (std: number) => number {
+  let s = seed >>> 0 || 1
+  const next = (): number => {
+    s ^= s << 13; s >>>= 0
+    s ^= s >>> 17
+    s ^= s << 5; s >>>= 0
+    return s / 0x1_0000_0000
+  }
+  let spare: number | null = null
+  return (std: number): number => {
+    if (spare !== null) { const v = spare; spare = null; return v * std }
+    let u = 0
+    let v = 0
+    let r = 0
+    do {
+      u = next() * 2 - 1
+      v = next() * 2 - 1
+      r = u * u + v * v
+    } while (r === 0 || r >= 1)
+    const mag = Math.sqrt((-2 * Math.log(r)) / r)
+    spare = v * mag
+    return u * mag * std
+  }
 }
 
 /**
@@ -199,20 +307,13 @@ export class PocketSynthProvider implements TtsProvider {
       const state = await this.#voiceState(engine, voice)
       if (active.cancelled) return
 
-      // Attach both handlers before racing. If cancellation wins, a later engine rejection is
-      // still observed rather than becoming an unhandled promise rejection.
-      const rendered = engine.synthesize(text, state, {}).then(
-        (samples) => ({ kind: 'audio' as const, samples }),
-        (error: unknown) => ({ kind: 'error' as const, error }),
-      )
-      const outcome = await Promise.race([
-        rendered,
-        active.stopped.then(() => ({ kind: 'cancelled' as const })),
-      ])
-      if (outcome.kind === 'cancelled' || active.cancelled) return
-      if (outcome.kind === 'error') throw outcome.error
+      const samples = hasFrameLoop(engine)
+        ? await this.#renderFrames(engine, state, text, active)
+        : await this.#renderSynthesize(engine, state, text, active)
+      if (samples === null || active.cancelled) return
 
-      const wav = writeWav(outcome.samples, engine.sampleRate)
+      const timed = applySpeechRate(samples, engine.sampleRate, opts.rate)
+      const wav = writeWav(timed, engine.sampleRate)
       yield {
         data: new Uint8Array(wav),
         format: 'wav',
@@ -221,15 +322,83 @@ export class PocketSynthProvider implements TtsProvider {
       }
     } finally {
       this.#active.delete(active)
+      active.finish()
       active.dispose()
     }
   }
 
   async cancel(): Promise<void> {
-    for (const active of this.#active) active.stop()
-    // Await one microtask so callers can order the next utterance after every iterator has seen
-    // the cancellation notification, while keeping the method inside the provider budget.
-    await Promise.resolve()
+    const pending = [...this.#active]
+    for (const active of pending) active.stop()
+    // Resolve only after every in-flight generate() has seen the abort — otherwise a second
+    // utterance can start while the abandoned frame loop is still on the CPU (R15-01).
+    await Promise.all(pending.map((active) => active.finished))
+  }
+
+  /**
+   * Drive `framesFor` so cancel can close the generator between ONNX frames.
+   * The real engine exposes this loop; tests that only stub `synthesize` take the other path.
+   */
+  async #renderFrames(
+    engine: PocketTtsEngine & {
+      framesFor: NonNullable<PocketTtsEngine['framesFor']>
+      decodeFrames: NonNullable<PocketTtsEngine['decodeFrames']>
+      tokenizer: NonNullable<PocketTtsEngine['tokenizer']>
+    },
+    state: unknown,
+    text: string,
+    active: ActiveGeneration,
+  ): Promise<Float32Array | null> {
+    const chunks = engine.splitIntoChunks?.(text) ?? [text]
+    const frames: Float32Array[] = []
+    const rng = pocketRng(1)
+    for (const chunk of chunks) {
+      if (active.cancelled) return null
+      const ids = [...engine.tokenizer.encode(chunk)]
+      const framesAfterEos = (engine.preparePrompt?.(chunk).framesAfterEos ?? 1) + 2
+      const iterator = engine.framesFor(state, ids, {
+        temperature: 0.7,
+        lsdSteps: 1,
+        maxFrames: null,
+        framesAfterEos,
+        rng,
+        signal: active.signal,
+      })[Symbol.asyncIterator]()
+      active.iterator = iterator
+      try {
+        for (;;) {
+          const next = await iterator.next()
+          if (next.done === true || active.cancelled) break
+          frames.push(next.value)
+        }
+      } finally {
+        if (active.iterator === iterator) active.iterator = null
+      }
+      if (active.cancelled) return null
+    }
+    if (active.cancelled) return null
+    return engine.decodeFrames(frames)
+  }
+
+  async #renderSynthesize(
+    engine: PocketTtsEngine,
+    state: unknown,
+    text: string,
+    active: ActiveGeneration,
+  ): Promise<Float32Array | null> {
+    // Attach both handlers before racing. If cancellation wins, a later engine rejection is
+    // still observed rather than becoming an unhandled promise rejection.
+    const rendered = engine.synthesize(text, state, { signal: active.signal }).then(
+      (samples) => ({ kind: 'audio' as const, samples }),
+      (error: unknown) => ({ kind: 'error' as const, error }),
+    )
+    const outcome = await Promise.race([
+      rendered,
+      active.stopped.then(() => ({ kind: 'cancelled' as const })),
+    ])
+    if (outcome.kind === 'cancelled' || active.cancelled) return null
+    if (outcome.kind === 'error') throw outcome.error
+    return outcome.samples
   }
 
   #resolveVoice(key: string): PocketVoice {

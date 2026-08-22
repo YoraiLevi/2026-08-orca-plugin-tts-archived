@@ -3,7 +3,10 @@ import type { AudioChunk, ProviderCapabilities, TtsProvider } from '@orca-tts/co
 import { CANCEL_BUDGET_MS } from '../contract.ts'
 import { ProviderRegistry } from '../registry.ts'
 import { createProviderRegistry } from '../index.ts'
-import { MODEL_TOTAL_BYTES, type ModelStatus } from './models.ts'
+import {
+  INSTALL_TOTAL_BYTES, MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, VOICE_ARTIFACTS,
+  type ModelStatus,
+} from './models.ts'
 import {
   PocketModelUnavailableError,
   PocketOrtUnavailableError,
@@ -18,8 +21,45 @@ interface VoiceStateStub {
 class PocketEngineStub {
   readonly sampleRate = 24_000
   readonly voiceState = vi.fn(async (key: string): Promise<VoiceStateStub> => ({ key }))
-  readonly synthesize = vi.fn(async (): Promise<Float32Array> =>
+  readonly synthesize = vi.fn(async (
+    _text?: string, _state?: unknown, _opts?: { signal?: AbortSignal },
+  ): Promise<Float32Array> =>
     new Float32Array([0, 0.5, -0.5]))
+}
+
+/**
+ * A fake whose frame loop runs until the provider stops iterating it.
+ *
+ * Finite on purpose: a mutant that never cancels must make the assertion go red, not hang the
+ * suite. 10_000 frames is plenty for the 20-turn post-cancel check to see continued counting.
+ */
+class FrameCountingEngine {
+  readonly sampleRate = 24_000
+  frames = 0
+  readonly tokenizer = { encode: (text: string): number[] => [...text].map((_, i) => i) }
+  readonly voiceState = vi.fn(async (key: string): Promise<VoiceStateStub> => ({ key }))
+  readonly synthesize = vi.fn(async (): Promise<Float32Array> => {
+    throw new Error('PV-072: provider must drive framesFor so cancel can land between frames')
+  })
+  splitIntoChunks(text: string): string[] { return [text] }
+  decodeFrames(frames: readonly Float32Array[]): Promise<Float32Array> {
+    return Promise.resolve(new Float32Array(frames.length))
+  }
+  async *framesFor(): AsyncGenerator<Float32Array> {
+    for (let i = 0; i < 10_000; i++) {
+      this.frames++
+      yield new Float32Array(8)
+      await Promise.resolve()
+    }
+  }
+}
+
+async function until(predicate: () => boolean, what: string): Promise<void> {
+  for (let i = 0; i < 1_000; i++) {
+    if (predicate()) return
+    await Promise.resolve()
+  }
+  throw new Error(`hang, not slowness: ${what}`)
 }
 
 function readyStatus(dir: string): Promise<ModelStatus> {
@@ -27,7 +67,7 @@ function readyStatus(dir: string): Promise<ModelStatus> {
 }
 
 function providerWith(
-  engine: PocketEngineStub,
+  engine: PocketEngineStub | FrameCountingEngine,
   overrides: Partial<ConstructorParameters<typeof PocketSynthProvider>[0]> = {},
 ): PocketSynthProvider {
   return new PocketSynthProvider({
@@ -85,15 +125,23 @@ describe('PV-020/PV-021 optional ONNX Runtime degrades by name', () => {
 describe('PV-022 capabilities and named availability causes', () => {
   it('derives the model download size from the pinned manifest', () => {
     const capabilities = providerWith(new PocketEngineStub()).capabilities
+    // Restated from the artifacts modelStatus requires, not from the capability constant
+    // (P36: importing the number the implementation chose cannot fail).
+    const readySetBytes = [...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS]
+      .reduce((n, artifact) => n + artifact.bytes, 0)
+    expect(VOICE_ARTIFACTS, 'the advertised download omitted the twelve voice clips').toHaveLength(12)
+    expect(readySetBytes).toBe(INSTALL_TOTAL_BYTES)
     expect(capabilities).toEqual({
       streaming: false,
       offline: true,
       needsApiKey: false,
-      needsModelDownload: MODEL_TOTAL_BYTES,
+      needsModelDownload: readySetBytes,
       licence: 'CC-BY-4.0',
       cloning: true,
       sampleRate: 24_000,
     })
+    expect(capabilities.needsModelDownload, 'the twelve required voice clips were omitted from the advertised download')
+      .toBeGreaterThan(MODEL_TOTAL_BYTES)
   })
 
   it('distinguishes an absent model from an unknown voice and does not import ORT for the former', async () => {
@@ -145,6 +193,29 @@ describe('PV-023 emits audio and never owns playback', () => {
   })
 })
 
+describe('PV-076 SynthesizeOptions.rate must change Pocket audio by effect', () => {
+  it('two rates produce measurably different audio, not identical bytes', async () => {
+    const engine = new PocketEngineStub()
+    engine.synthesize.mockImplementation(async () => new Float32Array(2_400).fill(0.25))
+    const p = providerWith(engine)
+    const bytesAt = async (rate: number): Promise<Buffer> => {
+      const parts: Buffer[] = []
+      for await (const chunk of p.generate('hello neural voice', { voice: 'pocket:eve', rate })) {
+        parts.push(Buffer.from(chunk.data))
+      }
+      return Buffer.concat(parts)
+    }
+
+    const slow = await bytesAt(0.7)
+    const fast = await bytesAt(1.4)
+    expect(
+      slow.equals(fast),
+      'PocketSynthProvider discarded SynthesizeOptions.rate',
+    ).toBe(false)
+    expect(slow.length, 'slower speech must last longer than faster speech').toBeGreaterThan(fast.length)
+  })
+})
+
 describe('PV-024 cancellation is awaitable and stops provider output by effect', () => {
   it(`ends an in-flight iterator within ${CANCEL_BUDGET_MS} ms and yields no audio`, async () => {
     let synthesisStarted: (() => void) | undefined
@@ -171,6 +242,50 @@ describe('PV-024 cancellation is awaitable and stops provider output by effect',
       .toBeLessThanOrEqual(CANCEL_BUDGET_MS)
     expect(result.done, 'cancel returned while the provider could still emit stale audio').toBe(true)
     expect(result.value).toBeUndefined()
+  })
+
+  it('PV-072 cancel reaches the engine frame loop, not only the output iterator', async () => {
+    let captured: { signal?: AbortSignal } | undefined
+    const engine = new PocketEngineStub()
+    engine.synthesize.mockImplementation(async (
+      _text?: string, _state?: unknown, opts?: { signal?: AbortSignal },
+    ) => {
+      captured = opts ?? {}
+      return await new Promise<Float32Array>(() => {})
+    })
+    const p = providerWith(engine)
+    const pending = p.generate('keep synthesizing until cancelled')[Symbol.asyncIterator]().next()
+    await vi.waitFor(() => { expect(engine.synthesize).toHaveBeenCalled() })
+
+    await p.cancel()
+    await pending
+
+    expect(captured?.signal, 'no abort signal reached PocketTts.synthesize')
+      .toBeInstanceOf(AbortSignal)
+    expect(captured?.signal?.aborted, 'cancel() resolved without aborting the engine signal')
+      .toBe(true)
+  })
+})
+
+describe('PV-072 cancel stops the ONNX frame loop by effect', () => {
+  it('produces no further frames after cancel — a count, not a timer', async () => {
+    const engine = new FrameCountingEngine()
+    const p = providerWith(engine)
+    const iter = p.generate('a sentence long enough to loop')[Symbol.asyncIterator]()
+    const pending = iter.next()
+    await until(() => engine.frames >= 3, 'the frame loop never started')
+
+    const atCancel = engine.frames
+    await p.cancel()
+    const result = await pending
+    // Several turns for a loop that was not actually cancelled to keep counting.
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+
+    expect(result.done, 'cancel returned while the provider could still emit stale audio').toBe(true)
+    expect(
+      engine.frames,
+      `frame loop kept running after cancel: ${engine.frames} frames, ${atCancel} at cancel`,
+    ).toBeLessThanOrEqual(atCancel + 1)
   })
 })
 

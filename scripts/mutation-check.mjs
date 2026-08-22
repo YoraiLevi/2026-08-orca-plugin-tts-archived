@@ -500,6 +500,50 @@ const MUTANTS = [
     to: "        child = spawn(cmd, args, { stdio: 'ignore' })",
     test: 'packages/providers/src/os-synth/os-synth.test.ts',
     only: 'R8-05'
+  },
+  {
+    id: 'pocket-cancel-leaves-frame-loop',
+    claim: 'PV-072 / R15-01: cancel() must stop the ONNX frame loop, not only the output iterator',
+    file: 'packages/providers/src/pocket-synth/index.ts',
+    edits: [
+      [
+        'void token.iterator?.return?.()?.then(() => undefined, () => undefined)',
+        'void token.iterator',
+      ],
+      [
+        'if (next.done === true || active.cancelled) break',
+        'if (next.done === true) break',
+      ],
+    ],
+    test: 'packages/providers/src/pocket-synth/provider.test.ts',
+    only: 'produces no further frames after cancel'
+  },
+  {
+    id: 'pocket-cancel-skips-abort-signal',
+    claim: 'PV-072: cancel() must abort the signal handed to synthesize()',
+    file: 'packages/providers/src/pocket-synth/index.ts',
+    from: '      token.cancelled = true\n      controller.abort()',
+    to: '      token.cancelled = true\n      void controller',
+    test: 'packages/providers/src/pocket-synth/provider.test.ts',
+    only: 'cancel reaches the engine frame loop'
+  },
+  {
+    id: 'pocket-rate-discarded',
+    claim: 'PV-076 / R15-07: SynthesizeOptions.rate must change Pocket audio by effect',
+    file: 'packages/providers/src/pocket-synth/index.ts',
+    from: 'const timed = applySpeechRate(samples, engine.sampleRate, opts.rate)',
+    to: 'const timed = samples',
+    test: 'packages/providers/src/pocket-synth/provider.test.ts',
+    only: 'two rates produce'
+  },
+  {
+    id: 'pocket-download-omits-voices',
+    claim: 'PV-078 / R15-08: capabilities must advertise every byte of the ready set, including voice clips',
+    file: 'packages/providers/src/pocket-synth/index.ts',
+    from: 'needsModelDownload: INSTALL_TOTAL_BYTES,',
+    to: 'needsModelDownload: 165_232_420,',
+    test: 'packages/providers/src/pocket-synth/provider.test.ts',
+    only: 'derives the model download'
   }
 ]
 
