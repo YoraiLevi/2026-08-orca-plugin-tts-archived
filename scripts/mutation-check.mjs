@@ -88,18 +88,26 @@ const MUTANTS = [
   {
     id: 'stop-one-sided',
     claim: 'stop is two-sided (R014): killing the player without cancelling synthesis is the bug',
+    // RE-POINTED. The braced body became a concise arrow when the cancel was made awaitable
+    // (006 C6), and this target sat as ERROR — loud, and guarding nothing — until G8.
     file: 'packages/plugin/src/speech-service.ts',
-    from: '      cancelSynthesis: () => { deps.provider.cancel() }',
+    from: '      cancelSynthesis: () => deps.provider.cancel()',
     to: '      cancelSynthesis: () => { /* mutant */ }',
-    test: 'packages/plugin/src/speech-service.test.ts'
+    test: 'packages/plugin/src/speech-service.test.ts',
+    only: 'two-sided'
   },
   {
     id: 'bargein-no-cancel',
     claim: 'PlaybackQueue.bargeIn cancels synthesis as well as flushing audio',
+    // RE-POINTED, same refactor as stop-one-sided: the call gained an `await` (006 C6), so the
+    // bare snippet stopped matching. `cancel-not-awaited` mutates the SAME line differently —
+    // that one deletes the await, this one deletes the call. Both are needed: a barge-in can be
+    // one-sided by never cancelling, or two-sided but too late.
     file: 'packages/core/src/queue/index.ts',
-    from: '    this.#deps.cancelSynthesis()',
+    from: '    await this.#deps.cancelSynthesis()',
     to: '    void 0',
-    test: 'packages/core/src/queue/queue.test.ts'
+    test: 'packages/core/src/queue/queue.test.ts',
+    only: 'T044a'
   },
   {
     id: 'stale-generation-plays',
@@ -271,7 +279,8 @@ const MUTANTS = [
     file: 'packages/plugin/src/speech-service.ts',
     from: "      if (this.#skip) return 'skipped'",
     to: "      if (this.#skip) return 'synthesis-failed'",
-    test: 'packages/plugin/src/speech-service.test.ts'
+    test: 'packages/plugin/src/speech-service.test.ts',
+    only: 'site 32'
   },
   {
     id: 'cancel-not-awaited',

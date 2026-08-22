@@ -10,6 +10,18 @@ const settle = async (): Promise<void> => {
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5))
 }
 
+/**
+ * A promise the test resolves by hand.
+ *
+ * Exists so a test can ARRANGE the moment it needs rather than out-run the system to reach it —
+ * P40's failure mode, and the reason the site-32 test below could not fail.
+ */
+const deferred = (): { promise: Promise<void>; resolve: () => void } => {
+  let resolve: () => void = () => {}
+  const promise = new Promise<void>((r) => { resolve = r })
+  return { promise, resolve }
+}
+
 class RecordingProvider implements TtsProvider {
   id = 'fake'; displayName = 'Fake'
   synthesized: string[] = []
@@ -331,13 +343,46 @@ describe('006 sites 31/32/33/53 — a loss inside a reply is spoken, not logged'
   it('site 32: pressing skip is NOT reported as a failure', async () => {
     // The reason site 32 had to be fixed before site 33 could be: with all six causes collapsed
     // into one silent return, announcing the loss would announce every skip as an engine failure.
-    const provider = new RecordingProvider()
+    //
+    // WHY THIS TEST IS BUILT THIS WAY. The previous version pressed skip after `setTimeout(2)`
+    // against a provider that returns instantly. The utterance had always finished by then, so
+    // `#speakOne` never reached its skip check at all and the assertion below was green for free:
+    // the `skip-reported-as-failure` mutant survived it. The precondition is now ARRANGED — the
+    // provider holds the utterance open BETWEEN chunks, so skip is pressed at exactly the instant
+    // the invariant is about (P40: a precondition reached by out-running the system is not a
+    // precondition). Holding it *after* chunk one's audio was pushed matters: the generation is
+    // still current, so `#skip` is the only thing that can end the loop, and the outcome the
+    // service reports is the one under test rather than `superseded`.
+    const chunkOneDone = deferred()
+    const release = deferred()
+    class HoldsBetweenChunks extends RecordingProvider {
+      calls = 0
+      override async *generate(text: string, opts: SynthesizeOptions = {}): AsyncIterable<AudioChunk> {
+        this.calls++
+        yield* super.generate(text, opts)
+        if (this.calls === 1) { chunkOneDone.resolve(); await release.promise }
+      }
+    }
+    const provider = new HoldsBetweenChunks()
     const s = new SpeechService({ provider, sink: new FakeSink(), announceDelayMs: 5, maxUnits: 20 })
     s.speak('Alpha sentence one. Bravo sentence two. Charlie sentence three.', 'queue')
-    await new Promise((r) => setTimeout(r, 2))
-    await s.skip()
+    s.speak('Delta the next reply.', 'queue')
+    await chunkOneDone.promise
+    const skipping = s.skip()   // sets #skip synchronously, before the drain loop can resume
+    release.resolve()
+    await skipping
     await settle()
-    expect(provider.synthesized.join(' '), 'a control the listener pressed became an error report')
+
+    const said = provider.synthesized.join(' ')
+    // Two controls, so the assertion that matters cannot be green because nothing happened.
+    expect(said, 'the utterance never started; the assertion below would prove nothing')
+      .toContain('Alpha')
+    expect(said, 'skip must land mid-utterance, or the skip check is never reached')
+      .not.toContain('Charlie')
+    // The behaviour, not just the report: skip ABANDONS this utterance and moves to the next one.
+    // Without this the service could satisfy every assertion above by going permanently silent.
+    expect(said, 'skip must move to the next reply, not end speech').toContain('Delta')
+    expect(said, 'a control the listener pressed became an error report')
       .not.toMatch(/cut short|failed/i)
   })
 
