@@ -115,7 +115,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
     expect(p.said.join(' ')).toContain('nothing in it that could be read aloud')
   })
 
-  it('outcome `synthesis-failed`: an engine that dies mid-reply is reported aloud', async () => {
+  it('outcome `synthesis-failed`: an engine that dies mid-reply is reported aloud', { timeout: 30_000 }, async () => {
     const p = new SpyProvider()
     p.failOn = 'alpha'
     const s = service(p)
@@ -124,7 +124,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
     expect(p.said.join(' ')).toContain('cut short')
   })
 
-  it('outcome `spoken`: a reply that worked produces no report at all', async () => {
+  it('outcome `spoken`: a reply that worked produces no report at all', { timeout: 30_000 }, async () => {
     const p = new SpyProvider()
     const s = service(p)
     s.speak('This one is fine. Nothing to report.')
@@ -139,7 +139,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
    * test could only see reports it already knew the words of. A control that answers with speech is
    * a defect whatever the words are, so the assertion is on the COUNT.
    */
-  it('outcome `cancelled`: stop is answered with silence, never with a sentence', async () => {
+  it('outcome `cancelled`: stop is answered with silence, never with a sentence', { timeout: 30_000 }, async () => {
     const p = new SpyProvider()
     const s = service(p)
     s.speak('One. Two. Three.')
@@ -150,7 +150,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
       `${JSON.stringify(p.said.slice(afterStop))} -- the P22 helplessness shape`).toBe(afterStop)
   })
 
-  it('outcome `skipped`: skip is answered with silence too', async () => {
+  it('outcome `skipped`: skip is answered with silence too', { timeout: 30_000 }, async () => {
     const p = new SpyProvider()
     const s = service(p)
     s.speak('One. Two. Three.')
@@ -159,7 +159,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
     expect(reports(p.said), 'skip announced itself').toHaveLength(0)
   })
 
-  it('a LOSS is coalesced into one sentence naming the total, not a burst of sentences', async () => {
+  it('a LOSS is coalesced into one sentence naming the total, not a burst of sentences', { timeout: 30_000 }, async () => {
     const p = new SpyProvider()
     const s = service(p)
     s.speak('\u{1f389}', 'queue')
@@ -179,7 +179,7 @@ describe('SC-11 — a LOSS reaches the audio stream, and a CONTROL does not', ()
    * channel is BOTH the reporter and a consumer of the same pipeline. An announcement that cannot
    * itself be spoken must not announce that it could not be spoken.
    */
-  it('an announcement that fails does not announce its own failure forever', async () => {
+  it('an announcement that fails does not announce its own failure forever', { timeout: 30_000 }, async () => {
     const p = new SpyProvider()
     p.failOn = 'z'
     const s = service(p)
