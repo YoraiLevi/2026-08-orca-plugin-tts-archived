@@ -1,6 +1,7 @@
 # D002 — How does an agent choose what is spoken?
 
 **Status:** open, pending the listener's taste calls (Q8) and four new empirical probes (Q43-Q46).
+**Built 2026-08-22 (`213ee55`) — steps 2 and 4 of the engineer prompt, plus half of step 3.**
 **Raised:** 2026-08-21, after `docs/.research/q-round1-orca-api.md` and
 `docs/.research/q-round1-buzz-transcript.md` closed Q1-Q4.
 **Governs:** roadmap phase M14 (`docs/TASKS.md` "Phase M14", tasks T140-T146 — reordered
@@ -12,6 +13,58 @@ Q8 — that belongs to the listener, in Voice Lab (PITFALLS P23).
 > `docs/design/007-user-stories.md` §30 and `docs/design/006-fma.md` §15b were resolved **in this
 > document, in place**. Every amendment carries a dated note naming the finding that forced it.
 > Ledger of what changed and what was deferred: `docs/design/009-reconciliation.md`.
+
+---
+
+## What is built, 2026-08-22 (`213ee55`) — gates G3 and G4
+
+> Added in place, dated, in this document's own convention. It changes no argument above; it
+> records which of them are now code.
+
+**Option D is built and is stage 3 of the normalizer, `diagramsToLabels`** — the floor, holding
+with zero agent cooperation, exactly as "the second diagram is the product" asks. It lives in
+`packages/core/src/normalizer/index.ts` rather than upstream of it for one decisive reason: the
+announcement's WORDING is Q47, Q47 is taste, and taste is settled in the Voice Lab — which only
+renders normalizer STAGES. A classifier upstream of `normalize()` would be invisible in the ladder,
+so the listener could not tune the one thing this milestone exists to let them tune.
+
+**The announcement, and the argument this document asked for.** Q47 asks for the *named
+vocabulary*. The answer is that naming the KIND is not enough:
+
+> *"Here, a diagram is omitted. It is labelled: transcript watcher, normalizer (17 stages),
+> synthesizer (Piper), barge-in."*
+
+The split is between the diagram's **geometry** — which a linear audio stream cannot carry at all,
+so nothing deliverable is lost by dropping it — and its **nouns**, the text inside the boxes, which
+is the only part that survives linearisation. "A diagram was skipped" throws the nouns away with
+the geometry for no gain. Reading forty cells is the harm the announcement exists to prevent, so
+six labels is the cap and past it the announcement says *"and 9 more"* — a lead-in that hides its
+own truncation is the defect one level up from the one it reports. Labels are merged down COLUMNS,
+so a two-line box is one name; read line-wise the motivating fixture says "transcript, normalizer,
+synthesizer, watcher, 17 stages, Piper", which is three boxes scrambled into six fragments.
+
+One deliberate silence, and it is the only one: a LONE unlabelled rule is removed with no
+announcement, because a rule carries no proposition and announcing layout is narration — the same
+judgement `stripEmoji` makes for a party popper. Two or more unlabelled lines are a picture, and
+are announced as *"It has no labels to read."*
+
+**Option A is built as far as this document's step 3 and 4 go.** `extractSpeakFence(md)` is a pure
+export of the same module; `stripFencedCode` honours the `speak` info string unconditionally, so
+the "immediate correctness fix" this document names is closed — a cooperating agent is no longer
+answered with *"Here, a code block is omitted."* The identity property is pinned as demanded:
+byte-equality over the five marker-free fixtures, with `code-heavy.md`, which really does carry a
+marker, as the committed positive case.
+
+**Not built, and named rather than implied:**
+
+| | Why |
+|---|---|
+| the call from `huddle/index.ts` into `extractSpeakFence` | one line, in a file two peers held that session. The Q5 POLICY it needs (`spoken-only` / `spoken-then-prose` / `prose-only` / `agent-decides`) does not exist as a setting yet, and this document forbids picking its default here. |
+| the "spoken channel used in N of M replies" counter (step 5) | belongs with the wiring above |
+| the README snippet, Option B (step 6) | belongs with the counter |
+| stack traces and wide tables in the classifier | each needs its own fixture and its own announcement; guessing the wording without one is the P23 loop. A box-drawing TABLE is announced as "a diagram" today, which is honest but not right — `┬`/`┼` could distinguish it, and the row-paired reading `tablesToRows` already gives pipe tables is the shape it should get. |
+| a Voice Lab control for the wording and the cap (Q47) | the numbers live in the source until it exists, and stage 3 sits on `FIXED_BY_DESIGN_STAGES` until it does |
+| the per-utterance cap on the huddle path | scoped in "The reply that does not fit"; untouched here |
 
 ---
 
