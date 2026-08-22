@@ -348,7 +348,13 @@ describe('006 TT3 — a half-written final line is re-read, not concluded on', (
   it('speaks the reply that arrives as a half-flushed line', async () => {
     const { root, worktree, file } = await scaffold()
     const speech = new FakeSpeech()
-    const c = boot(root, new MemoryStore(), speech)
+    // Capture the log, because WHO triggered the read is platform-dependent and WHICH CODE PATH
+    // ran is not. See the assertion at the end of this test.
+    const logged: string[] = []
+    const c = new HuddleController({
+      speech, store: new MemoryStore(), projectsDir: root,
+      log: (m: string) => { logged.push(m) }, notify: () => {}
+    })
     c.toggle()
     c.onAgentStatus({ worktreeId: null, paneKey: 'p', state: 'done', receivedAt: 0 }, worktree)
     await settle(20)
@@ -375,6 +381,23 @@ describe('006 TT3 — a half-written final line is re-read, not concluded on', (
     await settle()
     expect(speech.spoken.join(' '), 'the final reply of the turn was lost permanently')
       .toContain('the last reply of the turn')
+
+    // THE PLATFORM-INDEPENDENT HALF, and the reason this row exists twice over.
+    //
+    // The assertion above says the reply arrived. It does NOT say the retry is what delivered it,
+    // and on Linux it demonstrably does not: `fs.watch` behaves differently there (SC-15 measured
+    // darwin ["change","rename"] against linux ["change","change","rename","rename"]), so the
+    // post-dispose append can still reach a live watcher and the reply is spoken with or without
+    // the retry budget. The mutant `half-written-line-concluded-on` SURVIVED on the Linux leg for
+    // exactly that reason while being killed on macOS — the test was passing there by luck.
+    //
+    // This asserts the CODE PATH instead of the outcome. Exhausting the budget is the one thing
+    // the mutant always does, on every platform, and it announces itself in the log.
+    expect(logged.join('\n'), 'the retry budget was spent and the line was concluded on — the '
+      + 'reply may still have arrived by some other route, but TT3\'s guarantee did not hold')
+      .not.toContain('treating it as absent')
+    expect(logged.join('\n'), 'no re-read was ever attempted, so this test is not exercising '
+      + 'the retry path at all').toContain('ends mid-line, re-read')
     c.dispose()
   })
 

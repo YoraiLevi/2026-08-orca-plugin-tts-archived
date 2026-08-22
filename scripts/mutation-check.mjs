@@ -348,25 +348,18 @@ const MUTANTS = [
     from: '        this.#truncatedRetries.set(file, spent + 1)',
     to: '        this.#truncatedRetries.set(file, MAX_TRUNCATED_RETRIES)',
     test: 'packages/plugin/src/huddle/huddle.test.ts',
-    // KNOWN GAP, deliberately left FAILING on Linux rather than marked equivalent.
+    // Was a KNOWN GAP surviving on Linux; closed 2026-08-22 by changing what the test asserts.
     //
-    // This mutation DOES change Linux behaviour — the retry budget is exhausted immediately and a
-    // half-written final line is concluded on — so `equivalentOn: ['linux']` would be a lie that
-    // silences a real invariant. It survives there because the TEST goes vacuous on Linux, not
-    // because the code is safe.
+    // The row used to prove itself by outcome — "the reply arrived" — which is only evidence on a
+    // platform where the retry is the ONLY thing that could have delivered it. On Linux it is not:
+    // SC-15 measured `fs.watch` emitting more events there, so the post-dispose append reaches a
+    // live watcher and the reply is spoken with or without the retry budget. macOS killed this
+    // mutant by luck.
     //
-    // Hypothesis, from measured behaviour rather than guesswork: the test closes the watcher first
-    // so that only the scheduled re-read can find the rest of the record — that is what makes it
-    // fail for the right reason on macOS. But SC-15 measured `fs.watch` differing by platform
-    // (darwin emits ["change","rename"], linux ["change","change","rename","rename"], CI run
-    // 32505473403), so on Linux the post-dispose append is plausibly still delivered by a live
-    // watch event, and the reply is spoken with or without the fix.
-    //
-    // What would settle it: run this single test on Linux with the mutant applied and log the
-    // event sequence. Not done here — vitest will not start in the container available on this
-    // machine, because node_modules is mounted from macOS and rollup's native binary is the wrong
-    // arch. Recorded as `[claimed]` rather than asserted.
-    knownGap: 'survives on linux; the test is vacuous there, the invariant is not'
+    // It now asserts the CODE PATH. Exhausting the budget is the one thing this mutation always
+    // does, on every platform, and it says so in the log — verified by printing it under the
+    // mutant: "transcript ends mid-line, re-read 1" followed by "transcript last line is
+    // unreadable; treating it as absent". The row asserts that second line never appears.
   },
   {
     id: 'status-deletes-queue',
