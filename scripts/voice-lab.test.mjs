@@ -6,7 +6,7 @@
  * a test run must not make a sound at the author's machine.
  */
 import { describe, it, expect } from 'vitest'
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -730,5 +730,195 @@ describe('examples can be created, edited and removed from the page', () => {
         + 'guarding this endpoint, and containment does not restrict what a filename may contain')
         .toBe(400)
     } finally { await close() }
+  })
+})
+
+/* ------------------------------------------------------------------ Pocket TTS server surface */
+
+// Restated independently of the manifest (P36): deleting a manifest row must make these tests
+// disagree, not silently make the expected progress stream one row shorter too.
+const POCKET_MODEL_FILES = [
+  'bundle.json',
+  'bos_before_voice.npy',
+  'tokenizer.model',
+  'flow_lm_main_int8.onnx',
+  'flow_lm_flow_int8.onnx',
+  'mimi_decoder_int8.onnx',
+  'mimi_encoder.onnx',
+  'text_conditioner.onnx'
+]
+
+async function readyModelFixture (dir) {
+  await mkdir(dir, { recursive: true })
+  for (const file of [...POCKET_MODEL_FILES, 'MODEL_LICENSE.txt']) {
+    await writeFile(join(dir, file), 'fixture')
+  }
+  await writeFile(join(dir, '.orca-tts-model-manifest'), '1\n')
+}
+
+describe('PV-030 — /voices names both backends and their availability', () => {
+  it('keeps OS voices usable by the existing page and exposes unavailable Pocket voices', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-voices-'))
+    let listCalls = 0
+    const provider = {
+      ...fakeProvider(),
+      id: 'os-synth',
+      unavailableReason: null,
+      async listVoices () { listCalls++; return ['Alex', 'Samantha'] }
+    }
+    const { base, close } = await listen(createLabServer({ provider, modelDirectory: dir }))
+    try {
+      const first = await (await fetch(`${base}/voices`)).json()
+      const second = await (await fetch(`${base}/voices`)).json()
+
+      expect(listCalls, 'the ~487 ms OS probe was not cached (P28)').toBe(1)
+      expect(second.voices).toEqual(first.voices)
+
+      const alex = first.voices.find((voice) => voice.key === 'os:Alex')
+      expect(alex).toEqual({
+        key: 'os:Alex', displayName: 'Alex', backend: 'os', available: true, reason: null,
+        // Compatibility alias consumed by the page on disk before PV-040 lands.
+        name: 'Alex'
+      })
+      const eve = first.voices.find((voice) => voice.key === 'pocket:eve')
+      expect(eve).toMatchObject({
+        key: 'pocket:eve', displayName: 'Eve', backend: 'pocket', available: false
+      })
+      expect(eve.reason).toMatch(/mimi_encoder\.onnx/)
+      expect(first.voices.filter((voice) => voice.backend === 'pocket')).toHaveLength(12)
+
+      // This is the exact mapper in the existing page's start(). If the compatibility field is
+      // removed, Alex silently becomes "0" and the current Voice Lab control regresses.
+      const currentPageVoices = first.voices.map((entry, index) => ({
+        index, name: typeof entry === 'string' ? entry : (entry.name ?? entry.id ?? String(index))
+      }))
+      expect(currentPageVoices.find((voice) => voice.index === 0)?.name).toBe('Alex')
+    } finally {
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('PV-031 — /model/status names what is missing', () => {
+  it('reports an empty isolated directory as absent and names mimi_encoder.onnx', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-status-'))
+    const { base, close } = await listen(createLabServer({ modelDirectory: dir }))
+    try {
+      const res = await fetch(`${base}/model/status`)
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.kind).toBe('absent')
+      expect(body.dir).toBe(dir)
+      expect(body.missing).toContain('mimi_encoder.onnx')
+    } finally {
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('PV-032 — /model/download streams progress and a terminal result', () => {
+  it('emits one ordered progress record per artifact and verifies ready by effect', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-download-'))
+    const noNetwork = async () => { throw new Error('the test tried to use the network') }
+    let receivedOptions = null
+    const downloadModelImpl = async (options) => {
+      receivedOptions = options
+      for (const [fileIndex, file] of POCKET_MODEL_FILES.entries()) {
+        options.onProgress({ file, received: fileIndex + 1, total: fileIndex + 1, fileIndex, fileCount: POCKET_MODEL_FILES.length })
+      }
+      await readyModelFixture(options.dir)
+      return options.dir
+    }
+    const { base, close } = await listen(createLabServer({
+      modelDirectory: dir, fetchImpl: noNetwork, downloadModelImpl
+    }))
+    try {
+      const res = await fetch(`${base}/model/download`, { method: 'POST' })
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toMatch(/ndjson/)
+      const records = []
+      for await (const record of readLines(res)) records.push(record)
+
+      expect(records.filter((record) => record.kind === 'progress').map((record) => record.file))
+        .toEqual(POCKET_MODEL_FILES)
+      expect(records.at(-1)).toMatchObject({ kind: 'complete', ok: true, backend: 'pocket' })
+      expect(receivedOptions.dir).toBe(dir)
+      expect(receivedOptions.fetchImpl).toBe(noNetwork)
+      expect(receivedOptions.signal).toBeInstanceOf(AbortSignal)
+      expect((await (await fetch(`${base}/model/status`)).json()).kind).toBe('ready')
+    } finally {
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('ends an induced failure with a record naming the file and cause', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-failure-'))
+    const downloadModelImpl = async (options) => {
+      options.onProgress({ file: 'bundle.json', received: 24381, total: 24381, fileIndex: 0, fileCount: 8 })
+      throw new Error('downloading flow_lm_main_int8.onnx: HTTP 503 Service Unavailable')
+    }
+    const { base, close } = await listen(createLabServer({ modelDirectory: dir, downloadModelImpl }))
+    try {
+      const res = await fetch(`${base}/model/download`, { method: 'POST' })
+      const records = []
+      for await (const record of readLines(res)) records.push(record)
+      expect(records.at(-1)).toMatchObject({
+        kind: 'error', ok: false, error: 'model_download_failed',
+        file: 'flow_lm_main_int8.onnx'
+      })
+      expect(records.at(-1).cause).toMatch(/HTTP 503 Service Unavailable/)
+      expect(records.at(-1).kind, 'the stream stopped without a terminal failure record').toBe('error')
+    } finally {
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('PV-033 — a second model download is refused by name', () => {
+  it('returns model_download_in_progress while the first request still completes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-overlap-'))
+    const gate = makeGate()
+    let calls = 0
+    const downloadModelImpl = async (options) => {
+      calls++
+      gate.enter()
+      await gate.openPromise
+      for (const [fileIndex, file] of POCKET_MODEL_FILES.entries()) {
+        options.onProgress({ file, received: 1, total: 1, fileIndex, fileCount: POCKET_MODEL_FILES.length })
+      }
+      await readyModelFixture(options.dir)
+      return options.dir
+    }
+    const { base, close } = await listen(createLabServer({ modelDirectory: dir, downloadModelImpl }))
+    try {
+      const firstPending = fetch(`${base}/model/download`, { method: 'POST' })
+      const firstEffect = await Promise.race([
+        gate.enteredPromise.then(() => 'download-entered'),
+        firstPending.then((res) => `HTTP ${res.status}`)
+      ])
+      expect(firstEffect, 'the first request never entered the downloader').toBe('download-entered')
+      const first = await firstPending
+
+      const second = await fetch(`${base}/model/download`, { method: 'POST' })
+      expect(second.status).toBe(409)
+      expect(await second.json()).toMatchObject({
+        error: 'model_download_in_progress', backend: 'pocket'
+      })
+      expect(calls).toBe(1)
+
+      gate.open()
+      const firstRecords = []
+      for await (const record of readLines(first)) firstRecords.push(record)
+      expect(firstRecords.at(-1)).toMatchObject({ kind: 'complete', ok: true })
+      expect(calls).toBe(1)
+    } finally {
+      gate.open()
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

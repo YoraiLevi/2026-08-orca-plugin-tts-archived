@@ -45,11 +45,20 @@ export const REPO_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const NORMALIZER_SRC = join(REPO_ROOT, 'packages/core/src/normalizer/index.ts')
 const CHUNKER_SRC = join(REPO_ROOT, 'packages/core/src/chunker/index.ts')
 const PROVIDER_SRC = join(REPO_ROOT, 'packages/providers/src/os-synth/index.ts')
+const POCKET_MODELS_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/models.ts')
+const POCKET_VOICES_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/voices.ts')
 
 const { normalize } = await import(pathToFileURL(NORMALIZER_SRC).href)
 const { Chunker } = await import(pathToFileURL(CHUNKER_SRC).href)
 const { OsSynthProvider, LINUX_WAV_BACKENDS, LINUX_INSTALL_HINT } =
   await import(pathToFileURL(PROVIDER_SRC).href)
+const {
+  modelStatus, modelDir: defaultModelDir, downloadModel,
+  MODEL_TOTAL_BYTES, MODEL_ARTIFACTS
+} = await import(pathToFileURL(POCKET_MODELS_SRC).href)
+const {
+  POCKET_VOICES, parseVoiceKey, OS_BACKEND, POCKET_BACKEND
+} = await import(pathToFileURL(POCKET_VOICES_SRC).href)
 
 /* ================================================================= the source-not-dist guard
  *
@@ -210,6 +219,8 @@ export async function assertLoadedModuleIsOnDiskSource (fixtureDir = join(REPO_R
   assertSourceModule(pathToFileURL(NORMALIZER_SRC).href, 'normalizer')
   assertSourceModule(pathToFileURL(CHUNKER_SRC).href, 'chunker')
   assertSourceModule(pathToFileURL(PROVIDER_SRC).href, 'os-synth provider')
+  assertSourceModule(pathToFileURL(POCKET_MODELS_SRC).href, 'Pocket model manager')
+  assertSourceModule(pathToFileURL(POCKET_VOICES_SRC).href, 'Pocket voice registry')
 
   const names = existsSync(fixtureDir)
     ? (await readdir(fixtureDir)).filter((f) => f.endsWith('.md')).toSorted()
@@ -766,13 +777,135 @@ async function speakStreaming (res, prov, text, options, { allowElsewhere, signa
   res.end()
 }
 
-export function createLabServer ({ provider, fixtureDir, pageDir, settingsPath } = {}) {
+/* ================================================================= Pocket TTS model surface
+ *
+ * The model manager owns hashing, staging and the atomic swap. This server only translates that
+ * work into the page's control surface: honest voice availability, named status, and an NDJSON
+ * progress stream. Tests inject both the downloader and its fetch implementation; no test reaches
+ * the network or the author's real cache (R061 / PV-NFR-004).
+ */
+
+function pocketUnavailableReason (status) {
+  if (status.kind === 'ready') return null
+  if (status.kind === 'absent') {
+    return `Pocket TTS model is not downloaded; missing files: ${status.missing.join(', ')}`
+  }
+  return `Pocket TTS model is stale; found manifest ${status.found}, expected ${status.want}`
+}
+
+function voiceEntries (osVoices, pocketStatus) {
+  const pocketAvailable = pocketStatus.kind === 'ready'
+  const pocketReason = pocketUnavailableReason(pocketStatus)
+  const os = osVoices.map((raw) => {
+    const name = String(raw)
+    const key = name.startsWith(`${OS_BACKEND}:`) ? name : `${OS_BACKEND}:${name}`
+    const parsed = parseVoiceKey(key)
+    return {
+      key,
+      displayName: parsed.voice,
+      backend: OS_BACKEND,
+      available: true,
+      reason: null,
+      // The page currently on disk reads `entry.name`. Keep that OS path working while PV-040
+      // teaches it backend-qualified keys; removing this silently turns Alex into voice "0".
+      name: parsed.voice
+    }
+  })
+  const pocket = POCKET_VOICES.map((voice) => ({
+    key: voice.key,
+    displayName: voice.displayName,
+    backend: parseVoiceKey(voice.key).backend,
+    available: pocketAvailable,
+    reason: pocketReason
+  }))
+  return [...os, ...pocket]
+}
+
+function downloadFailureFile (err, completedFiles) {
+  if (typeof err?.file === 'string' && err.file.length > 0) return err.file
+  const message = err instanceof Error ? err.message : String(err)
+  const named = MODEL_ARTIFACTS.find((artifact) => message.includes(artifact.file))
+  if (named !== undefined) return named.file
+  return MODEL_ARTIFACTS[completedFiles]?.file ?? 'model'
+}
+
+async function streamModelDownload (
+  res, { dir, signal, fetchImpl, downloadModelImpl }
+) {
+  res.writeHead(200, {
+    'content-type': 'application/x-ndjson; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff'
+  })
+  await writeRecord(res, {
+    kind: 'start', backend: POCKET_BACKEND,
+    fileCount: MODEL_ARTIFACTS.length, totalBytes: MODEL_TOTAL_BYTES
+  })
+
+  // `downloadModel` calls onProgress synchronously after each complete file. Serialize those tiny
+  // writes so their wire order remains the manifest order even when the socket applies pressure.
+  let writes = Promise.resolve()
+  let completedFiles = 0
+  const options = {
+    dir,
+    signal,
+    onProgress: (progress) => {
+      completedFiles++
+      writes = writes.then(() => writeRecord(res, {
+        kind: 'progress', backend: POCKET_BACKEND, ...progress
+      }))
+    }
+  }
+  if (fetchImpl !== undefined) options.fetchImpl = fetchImpl
+
+  try {
+    await downloadModelImpl(options)
+    await writes
+
+    // R003: the downloader returning is not the gate. Ask the cache whether the files it needs are
+    // actually ready, so an injected or future downloader cannot earn a false terminal success.
+    const status = await modelStatus(dir)
+    if (status.kind !== 'ready') {
+      const file = status.kind === 'absent' ? (status.missing[0] ?? 'model') : 'model'
+      throw Object.assign(new Error(
+        status.kind === 'absent'
+          ? `download returned but ${file} is still missing`
+          : `download returned but manifest ${status.found} is stale; expected ${status.want}`
+      ), { file })
+    }
+
+    await writeRecord(res, {
+      kind: 'complete', ok: true, backend: POCKET_BACKEND, dir,
+      fileCount: MODEL_ARTIFACTS.length, totalBytes: MODEL_TOTAL_BYTES
+    })
+  } catch (err) {
+    // An HTTP status cannot change after `start`; the failure therefore MUST be a terminal record.
+    // Await earlier progress writes first so the terminal record can never overtake them.
+    await writes
+    const cause = err instanceof Error ? err.message : String(err)
+    await writeRecord(res, {
+      kind: 'error', ok: false, error: 'model_download_failed', backend: POCKET_BACKEND,
+      file: downloadFailureFile(err, completedFiles),
+      name: err?.name ?? err?.constructor?.name ?? 'Error',
+      cause,
+      message: cause
+    })
+  }
+  res.end()
+}
+
+export function createLabServer ({
+  provider, fixtureDir, pageDir, settingsPath,
+  modelDirectory, fetchImpl, downloadModelImpl = downloadModel
+} = {}) {
   const prov = provider ?? new OsSynthProvider()
   const fixtures = fixtureDir ?? join(REPO_ROOT, 'fixtures')
   const page = pageDir ?? join(REPO_ROOT, 'voice-lab')
   const inbox = settingsPath ?? settingsPathFor()
+  const pocketDir = modelDirectory ?? defaultModelDir()
   let inflight = null
   let voiceCache = null
+  let modelDownloadInFlight = null
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${HOST}`)
@@ -812,7 +945,40 @@ export function createLabServer ({ provider, fixtureDir, pageDir, settingsPath }
 
       if (req.method === 'GET' && path === '/voices') {
         if (voiceCache === null) voiceCache = await prov.listVoices()   // ~487 ms on macOS; cached (P28)
-        return json(res, 200, { voices: voiceCache })
+        // Model status is deliberately NOT cached: a completed button press must make Pocket
+        // voices available on the very next GET without restarting this server.
+        const pocketStatus = await modelStatus(pocketDir)
+        return json(res, 200, {
+          voices: voiceEntries(voiceCache, pocketStatus),
+          platform: process.platform,
+          provider: prov.id ?? 'os-synth'
+        })
+      }
+
+      if (req.method === 'GET' && path === '/model/status') {
+        return json(res, 200, await modelStatus(pocketDir))
+      }
+
+      if (req.method === 'POST' && path === '/model/download') {
+        if (modelDownloadInFlight !== null) {
+          return json(res, 409, {
+            error: 'model_download_in_progress',
+            backend: POCKET_BACKEND,
+            message: 'A Pocket TTS model download is already in progress.'
+          })
+        }
+        const ac = new AbortController()
+        const current = { controller: ac }
+        modelDownloadInFlight = current
+        // A disconnected page must not leave 166 MB arriving with nobody able to see progress.
+        res.on('close', () => { if (!res.writableEnded) ac.abort() })
+        try {
+          return await streamModelDownload(res, {
+            dir: pocketDir, signal: ac.signal, fetchImpl, downloadModelImpl
+          })
+        } finally {
+          if (modelDownloadInFlight === current) modelDownloadInFlight = null
+        }
       }
 
       if (path === '/settings') {
