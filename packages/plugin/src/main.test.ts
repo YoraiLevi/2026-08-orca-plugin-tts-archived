@@ -627,7 +627,21 @@ describe('006 rank 3 — provenance is wired end to end, not only unit-tested', 
  * from values chosen by this test — never read back from the surface under test.
  */
 describe('G2 terminal dashboard and control channel', () => {
-  it('names the independently-created session and queue depth, then Stop reaches the plugin by effect', async () => {
+  /**
+   * 30 s, and this is a HANG DETECTOR rather than a race budget — the distinction the other
+   * timeout decisions in this repo turn on.
+   *
+   * Every wait inside is `until(...)`, a CONDITION, so a slower machine simply arrives later and
+   * nothing is being out-run. What blew the 5 s default is vitest's wrapper, on the one platform
+   * where `fs.watch` is measurably different: SC-15 measured darwin emitting ["change","rename"],
+   * linux ["change","change","rename","rename"], and win32 keeping the watch ALIVE across an
+   * atomic replace (CI run 32505473403).
+   *
+   * Windows could not be measured locally — there is no Windows host here — so this is `[claimed]`
+   * as a bound, not `[measured-here]`. If it ever fires, that is a hang and it should be read as
+   * one, not raised again.
+   */
+  it('names the independently-created session and queue depth, then Stop reaches the plugin by effect', { timeout: 30_000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), 'orca-tts-g2-'))
     const worktree = join(root, 'dashboard-worktree')
     const project = worktree.replace(/[/\\:]/g, '-')
