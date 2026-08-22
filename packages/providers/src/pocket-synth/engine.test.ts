@@ -75,11 +75,18 @@ describe('a missing ONNX Runtime is a sentence, not a stack trace', () => {
   it('names the module, says what still works, and says how to fix it', () => {
     // R015: degrade LOUDLY. A bare ERR_MODULE_NOT_FOUND reaching a listener as "speech failed"
     // is the quiet degradation this rule exists to forbid.
-    const err = new OnnxRuntimeMissingError(new Error('Cannot find module onnxruntime-node'))
-    expect(err.code).toBe('onnxruntime_missing')
-    expect(err.message).toContain('onnxruntime-node')
-    expect(err.message).toMatch(/operating system voices are unaffected/i)
-    expect(err.message).toContain('pnpm add onnxruntime-node')
+    const absent = new OnnxRuntimeMissingError(
+      'The neural voices need the ONNX Runtime, which is not on this machine yet (37 MB). ' +
+      'The operating system voices are unaffected, and the Voice Lab can fetch it.')
+    expect(absent.code).toBe('onnxruntime_missing')
+    expect(absent.reason).toBe('absent')
+    expect(absent.message).toMatch(/operating system voices are unaffected/i)
+
+    // `unsupported` is a DIFFERENT state and the caller must be able to tell them apart: one is a
+    // button the listener can press, the other is a fact about their hardware. Collapsing them
+    // would offer an Intel Mac a download that can never work.
+    const never = new OnnxRuntimeMissingError('no Intel-Mac binary exists', 'unsupported')
+    expect(never.reason).toBe('unsupported')
   })
 
   it('is importable on a machine without the runtime', async () => {

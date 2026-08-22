@@ -32,6 +32,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SentencePieceUnigram } from './sentencepiece.js'
 import { readNpy, readWav, resample, type Npy } from './audio.js'
+import { runtimeStatus } from './runtime.ts'
 
 /* --------------------------------------------------------------------------- the ONNX surface */
 
@@ -61,13 +62,12 @@ interface Ort {
 
 export class OnnxRuntimeMissingError extends Error {
   readonly code = 'onnxruntime_missing'
-  constructor(cause: unknown) {
-    super(
-      'onnxruntime-node is not installed, so the Pocket TTS voices cannot run on this machine. ' +
-      'The operating system voices are unaffected. ' +
-      `Install it with \`pnpm add onnxruntime-node\`. (${cause instanceof Error ? cause.message : String(cause)})`,
-    )
+  /** `absent` — it can be downloaded. `unsupported` — it cannot, on this machine, ever. */
+  readonly reason: 'absent' | 'unsupported'
+  constructor(message: string, reason: 'absent' | 'unsupported' = 'absent') {
+    super(message)
     this.name = 'OnnxRuntimeMissingError'
+    this.reason = reason
   }
 }
 
@@ -81,11 +81,38 @@ let ortPromise: Promise<Ort> | null = null
 export async function loadOrt(): Promise<Ort> {
   ortPromise ??= (async () => {
     try {
+      // A developer's `node_modules` copy wins locally; this is also the path CI uses.
       const mod = (await import('onnxruntime-node')) as unknown as { default?: Ort } & Ort
       return mod.default ?? mod
-    } catch (err) {
-      ortPromise = null // so a later install is picked up without a restart
-      throw new OnnxRuntimeMissingError(err)
+    } catch (bundled) {
+      // Then the cache, which is how a third party gets one at all. ORCA never runs `npm install`
+      // for a plugin, so without this branch R14-01 stands: the backend reports itself unavailable
+      // forever on every machine but ours.
+      const status = await runtimeStatus()
+      if (status.kind === 'unsupported') {
+        ortPromise = null
+        throw new OnnxRuntimeMissingError(status.why, 'unsupported')
+      }
+      if (status.kind === 'ready') {
+        try {
+          const mod = (await import(status.dir + '/onnxruntime_binding.node')) as unknown as { default?: Ort } & Ort
+          return mod.default ?? mod
+        } catch (cached) {
+          ortPromise = null
+          throw new OnnxRuntimeMissingError(
+            `an ONNX Runtime is cached at ${status.dir} but could not be loaded: ` +
+            `${cached instanceof Error ? cached.message : String(cached)}. ` +
+            'The operating system voices are unaffected.',
+          )
+        }
+      }
+      ortPromise = null // so a later download is picked up without a restart
+      const size = status.kind === 'absent' ? Math.round(status.bytes / 1_000_000) : 0
+      throw new OnnxRuntimeMissingError(
+        'The neural voices need the ONNX Runtime, which is not on this machine yet ' +
+        `(about ${size} MB). The operating system voices are unaffected, and the Voice Lab can ` +
+        `fetch it. (${bundled instanceof Error ? bundled.message : String(bundled)})`,
+      )
     }
   })()
   return ortPromise
