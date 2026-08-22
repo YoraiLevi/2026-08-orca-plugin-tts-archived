@@ -249,7 +249,15 @@ export class PocketSynthProvider implements TtsProvider {
 
   constructor(opts: PocketSynthOptions = {}) {
     this.#dir = opts.dir ?? modelDir()
-    this.#loadOrt = opts.loadOrt ?? (async () => import(ORT_MODULE))
+    // R16-01: this used to be `import(ORT_MODULE)` DIRECTLY, which bypassed the engine's cache
+    // fallback entirely. `engine.ts`'s `loadOrt()` tries node_modules first and then the
+    // downloaded runtime cache — the whole point of R14-01's delivery path — and the provider,
+    // the only production caller that matters, was routing around it. A delivery path nothing
+    // calls is not a delivery path.
+    this.#loadOrt = opts.loadOrt ?? (async () => {
+      const { loadOrt } = await import('./engine.ts')
+      return loadOrt()
+    })
     this.#loadEngine = opts.loadEngine ?? (async () =>
       await import(ENGINE_MODULE) as unknown as PocketTtsModule)
     this.#modelStatus = opts.modelStatus ?? readModelStatus

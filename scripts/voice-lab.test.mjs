@@ -1189,7 +1189,7 @@ describe('PV-032 — /model/download streams progress and a terminal result', ()
       return options.dir
     }
     const { base, close } = await listen(createLabServer({
-      modelDirectory: dir, fetchImpl: noNetwork, downloadModelImpl,
+      modelDirectory: dir, fetchImpl: noNetwork, downloadModelImpl, runtimeStatusImpl: null,
       // This row tests the transport. R14-10 below tests the real byte verifier with an
       // independently hashed tiny artifact, so a 173 MB production manifest is never fabricated.
       verifyModelInstallImpl: async () => ({
@@ -1227,7 +1227,7 @@ describe('PV-032 — /model/download streams progress and a terminal result', ()
       throw new Error('downloading flow_lm_main_int8.onnx: HTTP 503 Service Unavailable')
     }
     const { base, close } = await listen(createLabServer({
-      modelDirectory: dir, downloadModelImpl,
+      modelDirectory: dir, downloadModelImpl, runtimeStatusImpl: null,
       verifyModelInstallImpl: async () => ({
         verified: true, manifestVersion: 2,
         artifactCount: POCKET_DOWNLOAD_FILES.length, totalBytes: 1
@@ -1279,7 +1279,7 @@ describe('R14-10 — the falsifier distinguishes a verified page download from a
       modelStatusImpl: statusProbe(dir, ready),
       verificationArtifacts: [artifact], verificationManifestFile: manifestFile,
       verificationManifestVersion: manifestVersion,
-      downloadModelImpl
+      downloadModelImpl, runtimeStatusImpl: null
     }))
     try {
       const before = await (await fetch(`${base}/model/status`)).json()
@@ -1321,7 +1321,7 @@ describe('R14-10 — the falsifier distinguishes a verified page download from a
       modelStatusImpl: statusProbe(dir, ready),
       verificationArtifacts: [artifact], verificationManifestFile: manifestFile,
       verificationManifestVersion: manifestVersion,
-      downloadModelImpl
+      downloadModelImpl, runtimeStatusImpl: null
     }))
     try {
       const records = []
@@ -1360,7 +1360,7 @@ describe('PV-033 — a second model download is refused by name', () => {
       return options.dir
     }
     const { base, close } = await listen(createLabServer({
-      modelDirectory: dir, downloadModelImpl,
+      modelDirectory: dir, downloadModelImpl, runtimeStatusImpl: null,
       verifyModelInstallImpl: async () => ({
         verified: true, manifestVersion: 2,
         artifactCount: POCKET_DOWNLOAD_FILES.length, totalBytes: 1
@@ -1392,5 +1392,72 @@ describe('PV-033 — a second model download is refused by name', () => {
       await close()
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+
+/* ------------------------------------------------ R16-01: the installer has a production caller */
+
+describe('R16-01 — one button yields a WORKING backend, not half of one', () => {
+  it('fetches the ONNX Runtime as part of the model download when it is absent', async () => {
+    // The defect: `downloadRuntime()` was implemented, unit-tested, and called by NOTHING. A
+    // listener could press the one button, watch 173.8 MB arrive, and still be told the neural
+    // voices cannot run. A delivery path nothing calls is not a delivery path.
+    const dir = await mkdtemp(join(tmpdir(), 'r16-01-'))
+    let runtimeFetched = false
+    let runtimeReady = false
+    const { base, close } = await listen(createLabServer({
+      modelDirectory: dir,
+      downloadModelImpl: async () => {},
+      modelStatusImpl: async () => ({ kind: 'ready', dir }),
+      runtimeStatusImpl: async () => (runtimeFetched ? { kind: 'ready', dir, binding: 'x' } : { kind: 'absent', dir, missing: ['onnxruntime_binding.node'], bytes: 39_000_000 }),
+      downloadRuntimeImpl: async () => { runtimeFetched = true; runtimeReady = true; return dir }
+    }))
+    try {
+      const res = await fetch(`${base}/model/download`, { method: 'POST' })
+      const body = await res.text()
+      const records = body.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+      const runtime = records.filter((r) => r.kind === 'runtime')
+      expect(runtimeReady, 'the runtime installer was never called').toBe(true)
+      expect(runtime.map((r) => r.state)).toContain('fetching')
+      expect(runtime.map((r) => r.state)).toContain('ready')
+    } finally { await close(); await rm(dir, { recursive: true, force: true }) }
+  })
+
+  it('reports an unsupported platform without pretending the download failed', async () => {
+    // An Intel Mac gets a sentence and keeps its OS voices. "Download failed" would be a lie.
+    const dir = await mkdtemp(join(tmpdir(), 'r16-01b-'))
+    let downloadCalled = false
+    const { base, close } = await listen(createLabServer({
+      modelDirectory: dir,
+      downloadModelImpl: async () => {},
+      modelStatusImpl: async () => ({ kind: 'ready', dir }),
+      runtimeStatusImpl: async () => ({ kind: 'unsupported', platform: 'darwin-x64', why: 'no Intel-Mac binary exists; your system voices are unaffected' }),
+      downloadRuntimeImpl: async () => { downloadCalled = true }
+    }))
+    try {
+      const body = await (await fetch(`${base}/model/download`, { method: 'POST' })).text()
+      const records = body.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+      const runtime = records.find((r) => r.kind === 'runtime')
+      expect(runtime?.state).toBe('unsupported')
+      expect(runtime?.why).toMatch(/system voices are unaffected/i)
+      expect(downloadCalled, 'offered a download that can never work').toBe(false)
+    } finally { await close(); await rm(dir, { recursive: true, force: true }) }
+  })
+
+  it('CONTROL: a ready runtime is not re-downloaded', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'r16-01c-'))
+    let downloadCalled = false
+    const { base, close } = await listen(createLabServer({
+      modelDirectory: dir,
+      downloadModelImpl: async () => {},
+      modelStatusImpl: async () => ({ kind: 'ready', dir }),
+      runtimeStatusImpl: async () => ({ kind: 'ready', dir, binding: 'x' }),
+      downloadRuntimeImpl: async () => { downloadCalled = true }
+    }))
+    try {
+      await (await fetch(`${base}/model/download`, { method: 'POST' })).text()
+      expect(downloadCalled).toBe(false)
+    } finally { await close(); await rm(dir, { recursive: true, force: true }) }
   })
 })

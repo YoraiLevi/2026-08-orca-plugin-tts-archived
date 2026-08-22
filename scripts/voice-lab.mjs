@@ -48,6 +48,7 @@ const PROVIDER_SRC = join(REPO_ROOT, 'packages/providers/src/os-synth/index.ts')
 const POCKET_MODELS_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/models.ts')
 const POCKET_VOICES_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/voices.ts')
 const POCKET_PROVIDER_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/index.ts')
+const POCKET_RUNTIME_SRC = join(REPO_ROOT, 'packages/providers/src/pocket-synth/runtime.ts')
 
 const { normalize } = await import(pathToFileURL(NORMALIZER_SRC).href)
 const { Chunker } = await import(pathToFileURL(CHUNKER_SRC).href)
@@ -58,6 +59,7 @@ const {
   modelStatus, modelDir: defaultModelDir, downloadModel,
   MODEL_TOTAL_BYTES, MODEL_ARTIFACTS, MANIFEST_VERSION, MANIFEST_FILE, sha256
 } = pocketModels
+const { runtimeStatus, downloadRuntime } = await import(pathToFileURL(POCKET_RUNTIME_SRC).href)
 const {
   POCKET_VOICES, parseVoiceKey, resolveVoiceForBackend, OS_BACKEND, POCKET_BACKEND
 } = await import(pathToFileURL(POCKET_VOICES_SRC).href)
@@ -1047,6 +1049,7 @@ async function streamModelDownload (
   res, {
     dir, signal, fetchImpl, downloadModelImpl, modelStatusImpl,
     verifyModelInstallImpl, onVerified,
+    runtimeStatusImpl = runtimeStatus, downloadRuntimeImpl = downloadRuntime,
     artifacts = DOWNLOAD_ARTIFACTS, totalBytes = DOWNLOAD_TOTAL_BYTES
   }
 ) {
@@ -1079,6 +1082,47 @@ async function streamModelDownload (
   try {
     await downloadModelImpl(options)
     await writes
+
+    // R16-01: the weights alone do not make a working backend. `downloadRuntime` existed, was
+    // unit-tested, and had NO PRODUCTION CALLER — so a listener could press the one button, watch
+    // 173.8 MB arrive, and still be told the neural voices cannot run. One button, one outcome:
+    // whatever else is missing for Pocket to speak is fetched here or the failure is named.
+    //
+    // `unsupported` is not a failure. An Intel Mac gets a sentence and keeps its OS voices.
+    // R16-01's proof, and it must be able to fail: comment this branch out and the three
+    // R16-01 cases in voice-lab.test.mjs go red.
+    if (runtimeStatusImpl === null) {
+      // A caller that is deliberately exercising only the model path says so, and the stream
+      // records it. A silently skipped step is how R16-01 happened in the first place.
+      await writeRecord(res, { kind: 'runtime', backend: POCKET_BACKEND, state: 'not-requested' })
+      await writes
+    } else {
+    const rt = await runtimeStatusImpl()
+    if (rt.kind === 'unsupported') {
+      await writeRecord(res, {
+        kind: 'runtime', backend: POCKET_BACKEND, state: 'unsupported', why: rt.why
+      })
+    } else if (rt.kind !== 'ready') {
+      await writeRecord(res, {
+        kind: 'runtime', backend: POCKET_BACKEND, state: 'fetching', bytes: rt.kind === 'absent' ? rt.bytes : 0
+      })
+      const rtOptions = { onProgress: (p) => {
+        writes = writes.then(() => writeRecord(res, { kind: 'runtime', backend: POCKET_BACKEND, ...p }))
+      } }
+      if (signal !== undefined) rtOptions.signal = signal
+      if (fetchImpl !== undefined) rtOptions.fetchImpl = fetchImpl
+      await downloadRuntimeImpl(rtOptions)
+      await writes
+      // R003 again: ask the cache, do not trust the return.
+      const after = await runtimeStatusImpl()
+      if (after.kind !== 'ready') {
+        throw Object.assign(new Error(
+          `the ONNX Runtime download returned but the cache reports ${after.kind}`),
+        { file: 'onnxruntime' })
+      }
+      await writeRecord(res, { kind: 'runtime', backend: POCKET_BACKEND, state: 'ready' })
+    }
+    }
 
     // R003: the downloader returning is not the gate. Ask the cache whether the files it needs are
     // actually ready, so an injected or future downloader cannot earn a false terminal success.
@@ -1123,6 +1167,7 @@ async function streamModelDownload (
 export function createLabServer ({
   provider, pocketProvider, fixtureDir, pageDir, settingsPath,
   modelDirectory, fetchImpl, downloadModelImpl = downloadModel,
+  runtimeStatusImpl = runtimeStatus, downloadRuntimeImpl = downloadRuntime,
   modelStatusImpl = modelStatus, verifyModelInstallImpl,
   verificationArtifacts = DOWNLOAD_ARTIFACTS,
   verificationManifestFile = MANIFEST_FILE,
@@ -1224,6 +1269,7 @@ export function createLabServer ({
             dir: pocketDir, signal: ac.signal, fetchImpl, downloadModelImpl,
             modelStatusImpl, verifyModelInstallImpl: verifyInstall,
             onVerified: (proof) => { modelInstallProof = proof },
+            runtimeStatusImpl, downloadRuntimeImpl,
             artifacts: verificationArtifacts,
             totalBytes: verificationArtifacts.reduce((n, artifact) => n + artifact.bytes, 0)
           })
