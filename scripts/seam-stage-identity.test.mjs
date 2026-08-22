@@ -361,7 +361,12 @@ describe('SC-14 — every module the Lab loads, loads under the resolver that sh
     // keep -- and this time against a change made by a different agent in a different file.
     'packages/providers/src/pocket-synth/models.ts',
     'packages/providers/src/pocket-synth/voices.ts',
-    'packages/providers/src/pocket-synth/index.ts'
+    'packages/providers/src/pocket-synth/index.ts',
+    // The runtime installer, which the Lab now calls so that one button yields a WORKING backend
+    // (R16-01). Fourth time this floor has caught an import the hand-written list did not know
+    // about — twice against other agents and twice against me, which is the point: it does not
+    // care whose change it was.
+    'packages/providers/src/pocket-synth/runtime.ts'
   ]
 
   /**
