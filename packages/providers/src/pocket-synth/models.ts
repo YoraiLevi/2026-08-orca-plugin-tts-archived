@@ -24,8 +24,8 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile, rename, rm, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
 
 /* ------------------------------------------------------------------------------- the manifest */
 
@@ -157,19 +157,69 @@ export interface DownloadProgress {
  * end. An interrupted download therefore leaves the previous model exactly as it was — the machine
  * whose network died halfway is the one that can least afford to lose the copy it had.
  */
-export async function downloadModel(options: {
+export interface DownloadHooks {
+  /** After every artifact is staged, before the live directory is touched. */
+  readonly afterStage?: () => void | Promise<void>
+  /** After the live directory has been moved aside, before staging is renamed into place. */
+  readonly afterBackup?: () => void | Promise<void>
+  /** After staging is live, before the backup is discarded. */
+  readonly afterSwap?: () => void | Promise<void>
+}
+
+export interface DownloadOptions {
   dir?: string
   onProgress?: (p: DownloadProgress) => void
   signal?: AbortSignal
   fetchImpl?: typeof fetch
-} = {}): Promise<string> {
+  /**
+   * The manifest to fetch. Defaults to the real one; a test overrides it with a handful of tiny
+   * artifacts whose bytes actually hash to their declared digests, which is the ONLY way to reach
+   * the success tail. Deriving a fixture from production hashes cannot: no fake body can satisfy
+   * a 76 MB file's SHA-256, so every previous test died in the fetch loop and the swap was never
+   * executed by anything (R14-06).
+   */
+  artifacts?: readonly ModelArtifact[]
+  /** Failure-injection points. Tests only; production passes nothing. */
+  hooks?: DownloadHooks
+}
+
+/**
+ * Fetch the whole bundle into `dir`, preserving whatever was there if anything goes wrong.
+ *
+ * **The swap is the dangerous part and the first version of it was wrong.** It did
+ * `rm(dir)` and then `rename(staging, dir)`, so a crash, a full disk or a cross-device rename in
+ * between destroyed the only working model — on the machine of someone whose download had just
+ * failed, which is the machine that can least afford it. Round 14 (R14-06) demonstrated it by
+ * throwing in that window and watching 20/20 tests stay green: nothing reached the swap at all,
+ * because no fake body can satisfy a real 76 MB digest.
+ *
+ * The order now is the one that survives a failure at every step:
+ *
+ *   1. stage BESIDE the live directory, not in `tmpdir()` — a rename across filesystems is
+ *      `EXDEV`, and `tmpdir()` is a different filesystem often enough to matter;
+ *   2. move the live directory aside to a backup (a rename, so it is instant and reversible);
+ *   3. rename staging into place;
+ *   4. and only then discard the backup.
+ *
+ * A failure at 2, 3 or 4 rolls the backup back. There is no instant at which the machine has no
+ * usable model unless it had none to begin with.
+ */
+export async function downloadModel(options: DownloadOptions = {}): Promise<string> {
   const dir = options.dir ?? modelDir()
   const doFetch = options.fetchImpl ?? fetch
-  const staging = join(tmpdir(), `orca-tts-pocket-${process.pid}-${Date.now()}`)
+  const artifacts = options.artifacts ?? MODEL_ARTIFACTS
+  const hooks = options.hooks ?? {}
+
+  // Siblings, not `tmpdir()`: same filesystem, so the renames below cannot fail with EXDEV.
+  const staging = `${dir}.staging-${process.pid}`
+  const backup = `${dir}.previous-${process.pid}`
+
+  await mkdir(dirname(dir), { recursive: true })
+  await rm(staging, { recursive: true, force: true })
   await mkdir(staging, { recursive: true })
 
-  const pinned = new Map(MODEL_ARTIFACTS.map((a) => [a.file, a]))
-  const files = MODEL_ARTIFACTS.map((a) => a.file)
+  const pinned = new Map(artifacts.map((a) => [a.file, a]))
+  const files = artifacts.map((a) => a.file)
 
   try {
     for (const [index, file] of files.entries()) {
@@ -196,22 +246,45 @@ export async function downloadModel(options: {
       await writeFile(join(staging, file), body)
     }
 
-    // Attribution beside the bytes, as CC-BY-4.0 requires.
+    // Attribution beside the bytes, as CC-BY-4.0 requires. R14-08: this is REQUIRED, not
+    // best-effort — an install that silently omits the upstream licence is a licence violation
+    // that nothing reports, so a failure to fetch it fails the download.
     const licenceInit: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
     const licence = await doFetch(urlFor('LICENSE'), licenceInit)
-    if (licence.ok) await writeFile(join(staging, 'LICENSE'), Buffer.from(await licence.arrayBuffer()))
+    if (!licence.ok) {
+      throw new Error(
+        `the upstream LICENSE could not be fetched (HTTP ${licence.status} ${licence.statusText}). ` +
+        'These models are CC-BY-4.0 and may not be installed without it.',
+      )
+    }
+    await writeFile(join(staging, 'LICENSE'), Buffer.from(await licence.arrayBuffer()))
     await writeFile(join(staging, LICENSE_FILE), LICENSE_TEXT)
 
     // The manifest goes LAST. A directory holding every file but this one reads as `absent`,
     // which is exactly right for a download that died before it finished.
     await writeFile(join(staging, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
-
-    await mkdir(join(dir, '..'), { recursive: true })
-    await rm(dir, { recursive: true, force: true })
-    await rename(staging, dir)
-    return dir
+    await hooks.afterStage?.()
   } catch (err) {
     await rm(staging, { recursive: true, force: true })
     throw err
   }
+
+  // ---- the swap. Everything below is reversible until the last line. ----
+  const hadPrevious = existsSync(dir)
+  await rm(backup, { recursive: true, force: true })
+  try {
+    if (hadPrevious) await rename(dir, backup)
+    await hooks.afterBackup?.()
+    await rename(staging, dir)
+    await hooks.afterSwap?.()
+  } catch (err) {
+    // Put back exactly what was there. `force` on the staging cleanup because it may or may not
+    // still exist depending on where this threw.
+    await rm(dir, { recursive: true, force: true })
+    if (hadPrevious && existsSync(backup)) await rename(backup, dir)
+    await rm(staging, { recursive: true, force: true })
+    throw err
+  }
+  await rm(backup, { recursive: true, force: true })
+  return dir
 }

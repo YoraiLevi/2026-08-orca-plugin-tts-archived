@@ -8,7 +8,7 @@
  * pinned table is proved to pin the right bytes rather than merely to be a well-formed hex string.
  */
 import { readFileSync } from 'node:fs'
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync as read } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, readFileSync as read } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, MODEL_REVISION, MANIFEST_FILE, MANIFEST_VERSION,
-  downloadModel, modelDir, modelStatus, requiredFiles, sha256, urlFor,
+  LICENSE_FILE, downloadModel, modelDir, modelStatus, requiredFiles, sha256, urlFor,
+  type ModelArtifact,
 } from './models.js'
 import {
   POCKET_VOICES, POCKET_DEFAULT_VOICE, parseVoiceKey, formatVoiceKey, resolveVoiceForBackend,
@@ -221,5 +222,139 @@ describe('voice keys', () => {
 
   it('has a default that is one of the presets', () => {
     expect(POCKET_VOICES.map((v) => v.key)).toContain(POCKET_DEFAULT_VOICE)
+  })
+})
+
+
+/* ------------------------------------------------------- R14-06: the swap, actually exercised */
+
+/**
+ * A manifest of THREE TINY FILES whose bytes really do hash to their declared digests.
+ *
+ * This is the whole point of R14-06's remedy. Every earlier download test derived its fixture from
+ * the production hashes, and no fake body can satisfy a 76 MB file's SHA-256 — so every one of them
+ * died inside the fetch loop, the swap was executed by NOTHING, and a `throw` placed immediately
+ * after the live directory was deleted left 20/20 green. The tests were thorough about refusal and
+ * blind to the one window where the user's data can be destroyed.
+ */
+const TINY_BODIES: Record<string, Buffer> = {
+  'bundle.json': Buffer.from('{"bundle_name":"tiny"}'),
+  'tokenizer.model': Buffer.from('tiny tokenizer bytes'),
+  'mimi_encoder.onnx': Buffer.from('tiny encoder bytes'),
+}
+const TINY: readonly ModelArtifact[] = Object.entries(TINY_BODIES).map(([file, body]) => ({
+  file, bytes: body.length, sha256: sha256(body),
+}))
+
+function tinyFetch(opts: { failLicence?: boolean } = {}): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    const file = String(input).split('/').pop() ?? ''
+    if (file === 'LICENSE') {
+      return opts.failLicence === true
+        ? new Response('nope', { status: 503, statusText: 'Service Unavailable' })
+        : new Response('upstream licence text')
+    }
+    const body = TINY_BODIES[file]
+    if (body === undefined) return new Response('not found', { status: 404, statusText: 'Not Found' })
+    return new Response(body, { headers: { 'content-length': String(body.length) } })
+  }) as unknown as typeof fetch
+}
+
+/** Seed a directory with a recognisable, complete, current model. */
+function seedReady(dir: string): void {
+  mkdirSync(dir, { recursive: true })
+  for (const f of requiredFiles()) writeFileSync(join(dir, f), 'PREVIOUS')
+  writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+}
+
+const stillPrevious = (dir: string): boolean =>
+  existsSync(join(dir, 'bundle.json')) && read(join(dir, 'bundle.json'), 'utf8') === 'PREVIOUS'
+
+describe('R14-06 — the swap is reversible at every step', () => {
+  it('reaches the success tail at all, which nothing did before', async () => {
+    const dir = join(scratch(), 'model')
+    await downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() })
+    // By effect: the new bytes are live, the licences are beside them, and the manifest is current.
+    expect(read(join(dir, 'bundle.json'), 'utf8')).toBe('{"bundle_name":"tiny"}')
+    expect(read(join(dir, 'LICENSE'), 'utf8')).toBe('upstream licence text')
+    expect(existsSync(join(dir, LICENSE_FILE))).toBe(true)
+    expect(read(join(dir, MANIFEST_FILE), 'utf8').trim()).toBe(String(MANIFEST_VERSION))
+  })
+
+  it('replaces a previous model with the new one', async () => {
+    const dir = join(scratch(), 'model')
+    seedReady(dir)
+    expect(stillPrevious(dir)).toBe(true)
+    await downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() })
+    expect(stillPrevious(dir)).toBe(false)
+    expect(read(join(dir, 'bundle.json'), 'utf8')).toBe('{"bundle_name":"tiny"}')
+  })
+
+  it('KEEPS THE OLD MODEL when the swap fails after the live directory moved aside', async () => {
+    // R14-06's exact window. Before the fix this destroyed the only working cache; before the fix
+    // NO TEST REACHED IT, which is the more important half.
+    const dir = join(scratch(), 'model')
+    seedReady(dir)
+    await expect(downloadModel({
+      dir, artifacts: TINY, fetchImpl: tinyFetch(),
+      hooks: { afterBackup: () => { throw new Error('injected: the swap died mid-rename') } },
+    })).rejects.toThrow(/injected/)
+    expect(stillPrevious(dir), 'the previous model was destroyed by a failed swap').toBe(true)
+    expect((await modelStatus(dir)).kind).toBe('ready')
+  })
+
+  it('KEEPS THE OLD MODEL when activation fails after the rename', async () => {
+    const dir = join(scratch(), 'model')
+    seedReady(dir)
+    await expect(downloadModel({
+      dir, artifacts: TINY, fetchImpl: tinyFetch(),
+      hooks: { afterSwap: () => { throw new Error('injected: activation failed') } },
+    })).rejects.toThrow(/injected/)
+    expect(stillPrevious(dir)).toBe(true)
+  })
+
+  it('CONTROL: with no hook injected, the same run replaces the model', async () => {
+    // Without this, the two cases above would also pass if `downloadModel` never did anything.
+    const dir = join(scratch(), 'model')
+    seedReady(dir)
+    await downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() })
+    expect(stillPrevious(dir)).toBe(false)
+  })
+
+  it('leaves no staging or backup directory behind, on success or on failure', async () => {
+    const root = scratch()
+    const dir = join(root, 'model')
+    seedReady(dir)
+    await expect(downloadModel({
+      dir, artifacts: TINY, fetchImpl: tinyFetch(),
+      hooks: { afterBackup: () => { throw new Error('injected') } },
+    })).rejects.toThrow()
+    await downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() })
+    // A failed download that keeps its debris turns every retry into another 166 MB on a disk
+    // nobody is watching.
+    expect(readdirSync(root).filter((n) => n !== 'model')).toEqual([])
+  })
+
+  it('stages BESIDE the target, not in the system temp directory', async () => {
+    // `tmpdir()` is a different filesystem often enough to matter, and a cross-device rename is
+    // EXDEV — a failure mode that would only ever appear on someone else's machine.
+    const root = scratch()
+    const dir = join(root, 'model')
+    let sawStagingBeside = false
+    await downloadModel({
+      dir, artifacts: TINY, fetchImpl: tinyFetch(),
+      hooks: { afterStage: () => { sawStagingBeside = readdirSync(root).some((n) => n.includes('.staging-')) } },
+    })
+    expect(sawStagingBeside).toBe(true)
+  })
+
+  it('R14-08: REFUSES to install when the upstream licence cannot be fetched', async () => {
+    // These models are CC-BY-4.0. An install that silently omits the licence is a violation that
+    // nothing reports; it was previously best-effort behind `if (licence.ok)`.
+    const dir = join(scratch(), 'model')
+    seedReady(dir)
+    await expect(downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch({ failLicence: true }) }))
+      .rejects.toThrow(/CC-BY-4\.0|LICENSE could not be fetched/)
+    expect(stillPrevious(dir)).toBe(true)
   })
 })
