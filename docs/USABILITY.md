@@ -55,6 +55,10 @@ known gap.
    as an option flag.
 3. **Numbers.** `p50 1,112-2,017 ms` should be *"one thousand one hundred twelve to two thousand
    seventeen milliseconds"*. It used to be *"one, one hundred twelve"*.
+   Also try a big one: **`1234567` is now spoken as "one million two hundred thirty four thousand
+   five hundred sixty seven"**. Until this morning anything past 999,999 went to the engine raw —
+   which macOS and espeak-ng read correctly and **Windows SAPI reads digit by digit**. The probe
+   that found that ran on the one platform nobody here could test by hand.
 4. **Change a control, press play.** You must hear the NEW setting. Until today the page replayed
    audio synthesized before your change — 41 ms and confidently wrong.
 5. **Stop.** Press it mid-utterance. It should cut within a fifth of a second.
@@ -71,8 +75,8 @@ Named so you do not spend time discovering it.
 | **Per-agent voices, the perceptual half** | Two agents render to measurably different audio — proved by checksum. Whether you can *tell them apart* is yours; identity rides on a spoken call-sign because voice-based identity guaranteed on all three platforms is exactly **one**. |
 | **`sessionLabel` still speaks hex** | It slices 8 characters of a UUID. The call-sign that replaces it exists; wiring it in is next. |
 | **Live settings reload** | An edit needs an ORCA restart today. |
-| **Windows unreadable-root** | Unguarded: the test harness cannot produce the condition with `chmod`. Needs an injected fs seam. |
-| **One mutant on Linux** | `half-written-line-concluded-on` survives there — the test goes vacuous on Linux, the invariant is not safe. Written up in the registry. |
+| **Windows unreadable-root** | Unguarded: the harness cannot produce the condition with `chmod`, which Node maps to almost nothing on Windows. Needs an injected fs seam. |
+| **One mutant, on Linux WITH a synthesizer** | `prepare-warm-on-broken-say`. *A synthesizer that cannot run must never report itself warm* — and on the configuration CI actually tests, nothing checks it. Its guarding test early-returns on Linux saying "the Linux ladder already throws; covered above"; that claim is what the mutant disproves. Closing it needs an injected resolver seam. |
 
 ---
 
