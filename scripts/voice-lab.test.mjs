@@ -672,3 +672,63 @@ describe('static serving is confined to its root', () => {
     expect(safeJoin('/srv/page', '/lib/diff.mjs')).toBe(resolve('/srv/page', 'lib/diff.mjs'))
   })
 })
+
+/**
+ * Examples are EDITABLE from the page — added 2026-08-22 because the author could not use the
+ * instrument without leaving it.
+ *
+ * They were read-only, so trying a phrase meant editing a file on disk and coming back. Tuning by
+ * ear means typing a sentence and hearing it; the sentences worth keeping are the ones that
+ * surprised you, and they only exist after you have heard them.
+ */
+describe('examples can be created, edited and removed from the page', () => {
+  it('creates a new example, lists it, reads it back, and removes it', async () => {
+    const { base, close } = await listen(createLabServer())
+    try {
+      const put = await fetch(`${base}/fixtures/probe-example`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'A new sentence to hear.' })
+      })
+      expect(put.status, 'the example could not be written').toBe(200)
+      expect((await put.json()).created, 'a new example did not report itself as new').toBe(true)
+
+      const list = await (await fetch(`${base}/fixtures`)).json()
+      expect(list.fixtures, 'the new example is not in the list').toContain('probe-example.md')
+
+      const back = await (await fetch(`${base}/fixtures/probe-example.md`)).text()
+      expect(back, 'what came back is not what was written').toBe('A new sentence to hear.')
+
+      const del = await fetch(`${base}/fixtures/probe-example.md`, { method: 'DELETE' })
+      expect(del.status, 'the example could not be removed').toBe(200)
+      const after = await (await fetch(`${base}/fixtures`)).json()
+      expect(after.fixtures, 'the example survived deletion').not.toContain('probe-example.md')
+    } finally { await close() }
+  })
+
+  it('refuses a name that escapes the examples folder', async () => {
+    // The containment check is `safeJoin`, and this is the row that proves it is wired here and
+    // not merely present elsewhere. Without it, a write endpoint reachable from a page is an
+    // arbitrary-file-write.
+    const { base, close } = await listen(createLabServer())
+    try {
+      const r = await fetch(`${base}/fixtures/${encodeURIComponent('../../evil')}`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'should never be written' })
+      })
+      expect(r.status, 'a path-escaping name was accepted').toBe(400)
+      expect((await r.json()).error).toBe('bad_name')
+
+      // A name `safeJoin` would ACCEPT — it stays inside the folder and resolves fine — but the
+      // charset rule rejects. Without this row the test passes with the charset rule deleted,
+      // because containment catches the `../../` case on its own: a check that cannot fail for
+      // the thing it names. The mutant that proved it: replacing the regex test with `false`.
+      const odd = await fetch(`${base}/fixtures/${encodeURIComponent('we;ird$name')}`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'x' })
+      })
+      expect(odd.status, 'a name outside the allowed charset was accepted — only containment is '
+        + 'guarding this endpoint, and containment does not restrict what a filename may contain')
+        .toBe(400)
+    } finally { await close() }
+  })
+})

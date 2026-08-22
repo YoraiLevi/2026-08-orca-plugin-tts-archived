@@ -27,7 +27,7 @@
  */
 
 import { createServer } from 'node:http'
-import { readFile, writeFile, rename, mkdir, readdir } from 'node:fs/promises'
+import { readFile, writeFile, rename, mkdir, readdir, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -833,6 +833,43 @@ export function createLabServer ({ provider, fixtureDir, pageDir, settingsPath }
         if (file === null || !existsSync(file)) return json(res, 404, { error: 'no_such_fixture', path })
         res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
         return res.end(await readFile(file))
+      }
+
+      /**
+       * WRITE an example, from the page. New or existing, same endpoint.
+       *
+       * Examples were read-only, so trying a phrase meant leaving the instrument, editing a file
+       * on disk, and coming back — which is exactly the "scatter me around to edit config files"
+       * the author objected to. Tuning by ear means typing a sentence and hearing it, and the
+       * sentences worth keeping are the ones that surprised you.
+       *
+       * `safeJoin` is the containment check (it resolves and refuses anything outside `fixtures`),
+       * and the name is forced to end in `.md` so this cannot be used to write arbitrary files.
+       */
+      if (req.method === 'PUT' && path.startsWith('/fixtures/')) {
+        const raw = decodeURIComponent(path.slice('/fixtures/'.length))
+        const name = raw.endsWith('.md') ? raw : `${raw}.md`
+        if (!/^[\w .-]+\.md$/.test(name)) {
+          return json(res, 400, {
+            error: 'bad_name',
+            message: 'An example name may contain letters, numbers, spaces, dots, dashes and underscores.'
+          })
+        }
+        const file = safeJoin(fixtures, name)
+        if (file === null) return json(res, 400, { error: 'bad_name', message: 'That name escapes the examples folder.' })
+        const body = await readBody(req)
+        const text = typeof body.text === 'string' ? body.text : ''
+        const existed = existsSync(file)
+        await writeFile(file, text, 'utf8')
+        return json(res, 200, { ok: true, name, created: !existed, bytes: Buffer.byteLength(text) })
+      }
+
+      if (req.method === 'DELETE' && path.startsWith('/fixtures/')) {
+        const name = decodeURIComponent(path.slice('/fixtures/'.length))
+        const file = safeJoin(fixtures, name)
+        if (file === null || !existsSync(file)) return json(res, 404, { error: 'no_such_fixture', path })
+        await rm(file)
+        return json(res, 200, { ok: true, name, deleted: true })
       }
 
       if (req.method === 'GET') {
