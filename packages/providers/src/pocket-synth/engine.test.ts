@@ -16,11 +16,13 @@
  * out-of-process transcriber and it is the check that decides whether any of this is correct; a
  * vitest case that shells out to `uv` would be a slow, flaky copy of it.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { makeRng, OnnxRuntimeMissingError } from './engine.js'
+import { makeRng, OnnxRuntimeMissingError, splitAtNaturalBoundaries } from './engine.js'
+import { SentencePieceUnigram } from './sentencepiece.js'
 
 /* ------------------------------------------------------------------------------ PV-012 the RNG */
 
@@ -98,6 +100,104 @@ describe('a missing ONNX Runtime is a sentence, not a stack trace', () => {
   })
 })
 
+/* ---------------------------------------------- PV-077 the splitter ladder, no model required */
+
+/**
+ * Word-count tokenizer, the same stand-in buzz uses to pin the ladder without the 166 MB
+ * of weights. One whitespace-separated token is one unit. Trailing punctuation rides with
+ * its word, so "three," counts as one.
+ */
+function whitespaceTokenCount(text: string): number {
+  const t = text.trim()
+  if (t === '') return 0
+  return t.split(/\s+/).length
+}
+
+const TOKENIZER_PATH = join(dirname(fileURLToPath(import.meta.url)), 'model/tokenizer.model')
+const sp = SentencePieceUnigram.fromBuffer(readFileSync(TOKENIZER_PATH))
+
+describe('PV-077 — splitAtNaturalBoundaries falls below the sentence (pure tier)', () => {
+  it('a single oversized sentence with NO full stop still splits and loses nothing', () => {
+    // The existing PV-013 conservation row uses twelve punctuated sentences, so a splitter
+    // that only cuts on '.' stays green. This one has no sentence end at all.
+    const text = 'One two three four five six seven eight nine ten eleven twelve'
+    const chunks = splitAtNaturalBoundaries(text, 5, whitespaceTokenCount)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.join('')).toBe(text)
+    for (const chunk of chunks) expect(whitespaceTokenCount(chunk)).toBeLessThanOrEqual(5)
+    for (const word of text.split(' ')) expect(chunks.join('')).toContain(word)
+  })
+
+  it('falls back to a clause when no sentence end fits', () => {
+    const text = 'One two three, four five six seven.'
+    const chunks = splitAtNaturalBoundaries(text, 5, whitespaceTokenCount)
+    expect(chunks[0]).toBe('One two three, ')
+    expect(chunks.join('')).toBe(text)
+    for (const chunk of chunks) expect(whitespaceTokenCount(chunk)).toBeLessThanOrEqual(5)
+  })
+
+  it('falls back to a word when no clause fits', () => {
+    const text = 'One two three four five six.'
+    const chunks = splitAtNaturalBoundaries(text, 4, whitespaceTokenCount)
+    expect(chunks[0]).toBe('One two three four ')
+    expect(chunks.join('')).toBe(text)
+    for (const chunk of chunks) expect(whitespaceTokenCount(chunk)).toBeLessThanOrEqual(4)
+  })
+
+  it('falls back to a unicode-scalar cut when a SINGLE WORD exceeds the cap, and loses nothing', () => {
+    // Character count as the unit, matching buzz's oversized-word row. Four "é"s at a cap
+    // of 3 cannot split on whitespace — there is none — so the last rung must fire.
+    const text = 'éééé'
+    const chunks = splitAtNaturalBoundaries(text, 3, (s) => [...s].length)
+    expect(chunks).toEqual(['ééé', 'é'])
+    expect(chunks.join('')).toBe(text)
+  })
+
+  it('throws when even one character cannot fit the cap, rather than dropping it', () => {
+    expect(() => splitAtNaturalBoundaries('é', 0, (s) => [...s].length)).toThrow(/one character/)
+  })
+
+  it('does not treat 12:30 or 1,000 as clause cuts', () => {
+    const text = 'Meet at 12:30 with 1,000 guests onward.'
+    const chunks = splitAtNaturalBoundaries(text, 3, whitespaceTokenCount)
+    expect(chunks.join('')).toBe(text)
+    expect(chunks.some((c) => c.includes('12:30'))).toBe(true)
+    expect(chunks.some((c) => c.includes('1,000'))).toBe(true)
+    for (const chunk of chunks) expect(whitespaceTokenCount(chunk)).toBeLessThanOrEqual(3)
+  })
+
+  it('preserves closing quotes and non-ASCII and still conserves every code point', () => {
+    const text = '“Café naïve?” Maybe—yes, definitely; 東京 speaks.'
+    const chunks = splitAtNaturalBoundaries(text, 3, whitespaceTokenCount)
+    expect(chunks.join('')).toBe(text)
+    for (const chunk of chunks) expect(whitespaceTokenCount(chunk)).toBeLessThanOrEqual(3)
+  })
+
+  it('packs several sentences when they fit (model split, not first-sentence isolation)', () => {
+    const text = 'One two. Three four. Five six.'
+    const chunks = splitAtNaturalBoundaries(text, 4, whitespaceTokenCount)
+    expect(chunks).toEqual(['One two. Three four. ', 'Five six.'])
+    expect(chunks.join('')).toBe(text)
+  })
+
+  it('a 90-word boundary-free sentence stays inside the real tokenizer cap of 50', () => {
+    // R15-04's fixture shape, against the vendored 59 KB tokenizer, no ONNX weights.
+    const text = Array.from({ length: 90 }, (_, i) => `word${i}`).join(' ')
+    const tokens = sp.encode(text).length
+    expect(tokens, 'fixture must overflow 50 or this row cannot fail').toBeGreaterThan(50)
+
+    const chunks = splitAtNaturalBoundaries(text, 50, (s) => sp.encode(s).length)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.join('')).toBe(text)
+    for (const chunk of chunks) {
+      // Trailing whitespace rides with the chunk so join('') conserves the
+      // source; the cap is what the model hears, which is the trimmed prompt.
+      expect(sp.encode(chunk.trim()).length).toBeLessThanOrEqual(50)
+    }
+    for (const word of text.split(' ')) expect(chunks.join('')).toContain(word)
+  })
+})
+
 /* ------------------------------------------------------------------------ the gated engine tier */
 
 const MODEL_DIR = process.env.POCKET_MODEL_DIR ?? ''
@@ -148,9 +248,49 @@ describe.skipIf(!HAVE_MODEL)('PV-013 / PV-014 — against a real bundle', () => 
     const tts = await load()
     const text = Array.from({ length: 20 }, (_, i) => `Sentence ${i} with several words in it.`).join(' ')
     for (const chunk of tts.splitIntoChunks(text)) {
-      // A chunk over the cap does not error — it degrades. That is why this is asserted rather
-      // than trusted to the splitter's arithmetic.
-      expect(tts.tokenizer.encode(chunk).length).toBeLessThanOrEqual(tts.maxTokenPerChunk * 2)
+      // A chunk over the cap does not error — it degrades. The gate IS the cap (P33): a
+      // `* 2` slack is what lets a 51–99 token sentence through, which is the silent-wrong
+      // half of R15-04. The other half was this fixture — short punctuated sentences never
+      // reach a missing lower rung.
+      expect(tts.tokenizer.encode(chunk.trim()).length).toBeLessThanOrEqual(tts.maxTokenPerChunk)
+    }
+  })
+
+  it('PV-077 R15-04: a single sentence with no full stop still stays inside the cap and loses nothing', async () => {
+    // Exact demonstration from docs/design/023-review-round15.md R15-04: ninety
+    // whitespace-separated words, no sentence end, one chunk against a 50-token cap.
+    const tts = await load()
+    const words = Array.from({ length: 90 }, (_, i) => `word${i}`)
+    const text = words.join(' ')
+    const { text: prepared } = tts.preparePrompt(text)
+    expect(
+      tts.tokenizer.encode(prepared).length,
+      'fixture must overflow the bundle cap or this row cannot fail',
+    ).toBeGreaterThan(tts.maxTokenPerChunk)
+
+    const chunks = tts.splitIntoChunks(text)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.join('')).toBe(prepared)
+    for (const chunk of chunks) {
+      expect(tts.tokenizer.encode(chunk.trim()).length).toBeLessThanOrEqual(tts.maxTokenPerChunk)
+    }
+    const flat = (s: string): string =>
+      s.toLowerCase().replaceAll(/[^a-z0-9 ]/g, '').replaceAll(/\s+/g, ' ').trim()
+    const rejoined = flat(chunks.join(''))
+    for (const w of words) expect(rejoined).toContain(w.toLowerCase())
+  })
+
+  it('PV-077 an oversized word is cut at a unicode scalar and loses nothing', async () => {
+    const tts = await load()
+    const text = `${'é'.repeat(80)} tail`
+    const { text: prepared } = tts.preparePrompt(text)
+    expect(tts.tokenizer.encode(prepared).length).toBeGreaterThan(tts.maxTokenPerChunk)
+
+    const chunks = tts.splitIntoChunks(text)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.join('')).toBe(prepared)
+    for (const chunk of chunks) {
+      expect(tts.tokenizer.encode(chunk.trim()).length).toBeLessThanOrEqual(tts.maxTokenPerChunk)
     }
   })
 

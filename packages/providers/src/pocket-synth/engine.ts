@@ -206,6 +206,138 @@ export function makeRng(seed = 1): (std: number) => number {
   }
 }
 
+/* --------------------------------------------------------------- model-prompt packing */
+
+const SENTENCE_ENDERS = new Set(['.', '!', '?', '。'])
+const CLAUSE_ENDERS = new Set([',', ';', ':', '—', '–'])
+const CLOSERS = new Set(['"', "'", '”', '’', ')', ']', '}'])
+const ABBREVIATIONS = new Set([
+  'Dr.', 'Mr.', 'Mrs.', 'Ms.', 'Prof.', 'Sr.', 'Jr.', 'St.',
+  'Ave.', 'Rd.', 'Blvd.', 'Dept.', 'Inc.', 'Ltd.', 'Co.', 'Corp.',
+  'etc.', 'vs.', 'i.e.', 'e.g.', 'Ph.D.',
+])
+
+function isSpace(ch: string | undefined): boolean {
+  return ch !== undefined && ch.trim() === ''
+}
+
+function isCloser(ch: string | undefined): boolean {
+  return ch !== undefined && CLOSERS.has(ch)
+}
+
+type TextBoundary = 'sentence' | 'clause' | 'word'
+
+function lastWord(candidate: string): string {
+  const trimmed = candidate.trimEnd()
+  const parts = trimmed.split(/\s+/)
+  return parts[parts.length - 1] ?? ''
+}
+
+function looksLikeAbbreviation(candidate: string): boolean {
+  let s = candidate
+  while (s.length > 0 && isCloser(s[s.length - 1])) s = s.slice(0, -1)
+  const word = lastWord(s)
+  if (ABBREVIATIONS.has(word)) return true
+  if (word.endsWith('.')) {
+    const stem = word.slice(0, -1)
+    if (stem.length > 0 && [...stem].every((c) => c >= '0' && c <= '9')) return true
+  }
+  return false
+}
+
+function naturalBoundary(candidate: string, isEndOfText: boolean): TextBoundary {
+  if (isEndOfText) return 'sentence'
+  let i = candidate.length
+  while (i > 0) {
+    const ch = candidate[i - 1]
+    if (ch === undefined || !isCloser(ch)) break
+    i -= 1
+  }
+  const last = candidate[i - 1]
+  if (last !== undefined && SENTENCE_ENDERS.has(last) && !looksLikeAbbreviation(candidate)) {
+    return 'sentence'
+  }
+  if (last !== undefined && CLAUSE_ENDERS.has(last)) return 'clause'
+  return 'word'
+}
+
+/**
+ * Pack a prepared prompt into pieces that each fit `maxTokens`.
+ *
+ * Ported from buzz `pocket_april.rs` `split_model_at_natural_boundaries` (isolate-first
+ * off): sentence, then clause, then word, then a Unicode-scalar cut so a single oversized
+ * word cannot deadlock and cannot be dropped. Concatenating the pieces recovers `text`
+ * exactly — that is the property, not "it split".
+ *
+ * Token counts are assumed monotonic in prefix length, so the scan stops at the first
+ * overflowing candidate (buzz's note: a scan-to-end tokenizer cost landed before first
+ * audio). The engine's SentencePiece encode is not a proven monotone, but it is the same
+ * assumption the cross-read implementation ships, and the cap assertion on every returned
+ * chunk is the backstop if a prefix ever tokenizes cheaper than a shorter one.
+ */
+export function splitAtNaturalBoundaries(
+  text: string,
+  maxTokens: number,
+  tokenCount: (s: string) => number,
+): string[] {
+  if (text === '') return []
+  if (tokenCount(text) <= maxTokens) return [text]
+
+  const chunks: string[] = []
+  let start = 0
+  const len = text.length
+
+  while (start < len) {
+    while (start < len && isSpace(text[start])) start += text[start]!.length
+    if (start >= len) break
+
+    let sentenceEnd: number | undefined
+    let clauseEnd: number | undefined
+    let wordEnd: number | undefined
+    let i = start
+    overflow:
+    for (const ch of text.slice(start)) {
+      const end = i + ch.length
+      const next = text[end]
+      const atWordEnd = end === len || isSpace(next)
+      const atUnspacedDash = (ch === '—' || ch === '–') && !isCloser(next)
+      i = end
+      if (!atWordEnd && !atUnspacedDash) continue
+      if (tokenCount(text.slice(start, end)) > maxTokens) break overflow
+      wordEnd = end
+      const kind = naturalBoundary(text.slice(start, end), end === len)
+      if (kind === 'sentence') sentenceEnd = end
+      else if (kind === 'clause') clauseEnd = end
+    }
+
+    let end = sentenceEnd ?? clauseEnd ?? wordEnd
+    if (end === undefined) {
+      let scalarEnd: number | undefined
+      let j = start
+      for (const ch of text.slice(start)) {
+        if (isSpace(ch)) break
+        const next = j + ch.length
+        if (tokenCount(text.slice(start, next)) <= maxTokens) scalarEnd = next
+        else break
+        j = next
+      }
+      if (scalarEnd === undefined) {
+        throw new Error(
+          `Pocket TTS prompt cannot fit one character within the ${maxTokens}-token limit`,
+        )
+      }
+      end = scalarEnd
+    }
+
+    let nextStart = end
+    while (nextStart < len && isSpace(text[nextStart])) nextStart += text[nextStart]!.length
+    chunks.push(text.slice(start, nextStart))
+    start = nextStart
+  }
+
+  return chunks
+}
+
 /* -------------------------------------------------------------------------------- the engine */
 
 export class PocketTts {
@@ -422,51 +554,21 @@ export class PocketTts {
   }
 
   /**
-   * Split at the bundle's token cap, on sentence boundaries.
+   * Split at the bundle's token cap.
    *
    * The cap is the model's, not ours: `max_token_per_chunk` is 50 for this bundle, and a longer
-   * prompt does not error — it degrades. Splitting on sentence ends rather than mid-clause is what
-   * keeps the prosody from breaking in the middle of a phrase.
+   * prompt does not error — it degrades. Sentence ends are preferred so prosody does not break
+   * mid-phrase; when a single sentence (or a single word) still overflows, the fallback ladder
+   * in `splitAtNaturalBoundaries` cuts at a clause, then a word, then a Unicode scalar. Nothing
+   * is dropped at any rung.
    */
   splitIntoChunks(text: string): string[] {
     const { text: prepared } = this.preparePrompt(text)
-    const ids = this.tokenizer.encode(prepared)
-    if (ids.length <= this.maxTokenPerChunk) return [prepared]
-
-    const enders = new Set(['.', '!', '?', '。'])
-    const boundaryIds = new Set<number>()
-    for (const [i, piece] of this.tokenizer.byId.entries()) {
-      if (piece !== '' && [...piece].every((ch) => enders.has(ch))) boundaryIds.add(i)
-    }
-
-    const bounds = [0]
-    let prevWasBoundary = false
-    for (const [i, id] of ids.entries()) {
-      if (boundaryIds.has(id)) { prevWasBoundary = true; continue }
-      if (prevWasBoundary) bounds.push(i)
-      prevWasBoundary = false
-    }
-    bounds.push(ids.length)
-
-    const chunks: string[] = []
-    let current = ''
-    let count = 0
-    for (let i = 0; i < bounds.length - 1; i++) {
-      const from = bounds[i] ?? 0
-      const to = bounds[i + 1] ?? ids.length
-      const segLen = to - from
-      const segText = this.tokenizer.decode(ids.slice(from, to))
-      if (count + segLen > this.maxTokenPerChunk && current !== '') {
-        chunks.push(current.trim())
-        current = segText
-        count = segLen
-      } else {
-        current = current === '' ? segText : `${current} ${segText}`
-        count += segLen
-      }
-    }
-    if (current.trim() !== '') chunks.push(current.trim())
-    return chunks
+    return splitAtNaturalBoundaries(
+      prepared,
+      this.maxTokenPerChunk,
+      (s) => this.tokenizer.encode(s).length,
+    )
   }
 
   /* ---- generation ----------------------------------------------------------- */
@@ -580,9 +682,11 @@ export class PocketTts {
     const rng = makeRng(params.seed ?? 1)
     const frames: Float32Array[] = []
     for (const chunk of this.splitIntoChunks(text)) {
-      const { framesAfterEos } = this.preparePrompt(chunk)
+      const trimmed = chunk.trim()
+      if (trimmed === '') continue
+      const { framesAfterEos } = this.preparePrompt(trimmed)
       const effective = this.#meta.model_recommended_frames_after_eos ?? framesAfterEos + 2
-      for await (const frame of this.framesFor(voice, this.tokenizer.encode(chunk), {
+      for await (const frame of this.framesFor(voice, this.tokenizer.encode(trimmed), {
         temperature, lsdSteps, maxFrames: params.maxFrames ?? null, framesAfterEos: effective, rng,
       })) frames.push(frame)
     }
