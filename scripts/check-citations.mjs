@@ -847,6 +847,18 @@ const problems =
  * report, and 154 lines of "here is a pointer that is off by 40" would train the reader to scroll
  * past output that matters — the same way a permanently-red gate trains them to ignore a job.
  */
+// The REFUSAL goes first, before 686 lines of detail.
+//
+// It used to be printed at the end, and the reason to move it is not tidiness: a reader who is
+// refused needs to know THAT before they need to know which pointers drifted, and a truncated or
+// interrupted run loses whatever is last. CI proved it — the test asserting on the refusal failed
+// on the Linux leg while the checker was working correctly, because with 157 stale the run was
+// killed before reaching the tail where the refusal lived (run 32548476309).
+//
+// Same principle as the GATE FAILED block: the first thing a stranger meets should be the reason,
+// not the inventory.
+if (REFUSAL !== null) console.error(`\nREFUSED:   ${REFUSAL}\n`)
+
 if (stale.length && (problems || LIST)) {
   console.error(`\nSTALE CITATIONS (${stale.length})\n`)
   for (const { cit, r } of stale) {
