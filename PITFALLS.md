@@ -57,6 +57,24 @@ it from a generation bump.* Any future code that protects a queue entry by class
 the same class also needs protecting from barge-in, or it has built half a guarantee — and the half
 that is missing is the one that shows up as a truncated sentence rather than a missing one.
 
+## P42 — A killed suite leaks `say`, and macOS serialises speech
+**Symptom:** `T041c cancel() is observed within 50 ms` failed with **cancel took 33,823 ms**.
+That message reads exactly like a code regression against the project's sharpest claim — the
+barge-in budget — and someone will chase it.
+**Cause:** an orphaned `say -o` had been running **11 h 31 m**, writing into the temp dir of a
+long-dead run. macOS serialises speech synthesis, so one wedged process taxes every later spawn.
+Killing it moved the same probe **33,823 ms → 17,825 ms** `[measured-here]` — so the orphan was a
+*contributor, not the cause*; the residual is several agents' suites spawning `say` at once.
+Nothing was audible: `say -o <file>` never opens the device (P31 respected).
+**What to do instead:** before trusting ANY `os-synth` timing, check for leaks and check load:
+
+    ps -eo pid,etime,command | grep '[s]ay -o'
+    pkill -f 'say -o.*orca-tts'      # only when no suite is legitimately running
+
+A suite killed mid-run leaks its children, and over an eight-hour session they accumulate. The
+number this produces is not a slow system, it is a **misdiagnosis engine**: it points at the one
+budget the project defends hardest, in the units that budget is written in.
+
 ## P41 — `mutation-check` edits source in place, so it cannot share a worktree
 **Symptom:** mid-run, `packages/plugin/src/adapter/index.ts` read
 `registeredCommands: () => 1` in the SHARED tree — the `register-always-succeeds` mutant, live,
