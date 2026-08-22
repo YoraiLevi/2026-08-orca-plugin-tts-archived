@@ -352,18 +352,30 @@ describe('SC-6 — a number written in this repo survives to the listener as the
  *     normalizer mangles it on the way past, the engine never gets the chance to read it well.
  *   - **Platform half (not this file).** Whether an engine reads `1234567` as a quantity or spells
  *     seven digits. That needs the engine, so it belongs in CI on each OS:
- *     `scripts/ci/number-ceiling-probe.mjs` (J25), which renders to files only (P31) and carries a
- *     control that must differ so it cannot pass vacuously. Measured on macOS `say`; `[claimed]`
- *     on espeak-ng and SAPI until that leg runs.
+ *     `scripts/ci/number-ceiling-probe.mjs`, which renders to files only (P31) and carries a
+ *     control that must differ so it cannot pass vacuously.
+ *
+ * **THE PLATFORM HALF WAS ANSWERED, 2026-08-22, AND IT MOVED THE CEILING.** This row named the
+ * split and pointed at CI to settle it; CI settled it. `say` reads `1234567` as a number and so
+ * does espeak-ng — but **SAPI spells the digits**: 139,800 B, Δ76,716 from the spelled-out
+ * reference, run 32552614490 `[measured-here]` with the probe's own controls green.
+ *
+ * So "the engine handles them better" was true of two engines out of three, and the belief this
+ * ceiling rested on is retired. **The ceiling is now 1,000,000,000**, above which handing over is
+ * a judgement about LISTENABILITY — "nine hundred eighty seven billion, six hundred…" is worse
+ * than digits — rather than a claim about engines. The boundaries below moved with it.
  */
 describe('SC-10 — the million ceiling is a seam decision, and the numeral must cross it intact', () => {
-  const CEILING = 1_000_000
+  const CEILING = 1_000_000_000
 
   it('expands every value below the ceiling, and hands the engine the numeral at or above it', () => {
     // Restated boundaries, not derived from the constant in the code under test (P36).
     expect(normalize('It saw 999999 rows.', {})).toContain('nine hundred ninety nine thousand')
-    expect(normalize('It saw 1000000 rows.', {})).toContain('1000000')
-    expect(normalize('It saw 1234567 rows.', {})).toContain('1234567')
+    // Was asserted to stay raw. SAPI proved that unsafe, so these are spoken now.
+    expect(normalize('It saw 1000000 rows.', {})).toContain('one million')
+    expect(normalize('It saw 1234567 rows.', {})).toContain('one million two hundred thirty four')
+    // The new discontinuity, and it is still the ONLY one.
+    expect(normalize('It saw 1000000000 rows.', {})).toContain('1000000000')
   })
 
   /**
@@ -373,7 +385,10 @@ describe('SC-10 — the million ceiling is a seam decision, and the numeral must
    * the way past turns "let the engine read it" into "let the engine read something else".
    */
   it('passes an above-ceiling numeral to the engine byte for byte', () => {
-    for (const digits of ['1000000', '1234567', '9007199254740991', '1000001']) {
+    // Values above the NEW ceiling. `1000000` and `1234567` used to belong here and are now
+    // spoken, which is the point of raising it — the conservation claim only applies to numerals
+    // we still hand over.
+    for (const digits of ['1000000000', '1234567890', '9007199254740991', '1000000001']) {
       const spoken = normalize(`The count was ${digits} exactly.`, {})
       expect(spoken, digits).toContain(`was ${digits} exactly`)
     }
@@ -387,14 +402,20 @@ describe('SC-10 — the million ceiling is a seam decision, and the numeral must
   })
 
   /**
-   * VIOLATED TODAY (017 R8-22). Two numbers in ONE sentence, one either side of the ceiling, are
-   * read in two different systems in the same breath -- one spelled out by us, one handed over as
-   * digits. The ceiling itself is defensible; the audible inconsistency inside a single sentence is
-   * what a listener actually notices, and nothing announces it.
+   * CLOSED 2026-08-22 (017 R8-22). Two numbers in ONE sentence, one either side of the old
+   * ceiling, were read in two different systems in the same breath — one spelled out by us, one
+   * handed over as digits. The audible inconsistency inside a single sentence is what a listener
+   * actually notices, and nothing announced it.
    *
-   * Remove `.fails` when the seam either expands both or hands over both.
+   * It closed as a SIDE EFFECT of raising the ceiling for SAPI, not by being worked on: with the
+   * boundary at a billion, both numbers in the motivating sentence are now spoken. The `.fails`
+   * marker went red the moment that landed, which is exactly what the convention is for — an open
+   * contract that is green because it is broken, and turns red when someone fixes it.
+   *
+   * The row stays, without the marker: the inconsistency is still POSSIBLE either side of the new
+   * boundary, and this is what would catch it.
    */
-  it.fails('reads two numbers in one sentence in one system [OPEN: R8-22]', () => {
+  it('reads two numbers in one sentence in one system', () => {
     const spoken = normalize('We processed 1234567 rows and 999999 more.', {})
     const spelledOut = /nine hundred ninety nine thousand/.test(spoken)
     const handedOver = /1234567/.test(spoken)
