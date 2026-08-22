@@ -155,7 +155,16 @@ export function makeHost(
     registeredCommands: () => registered,
 
     notify(title: string, body?: string, opts: NotifyOptions = {}): void {
-      const params: Record<string, unknown> = { title: title.slice(0, 120) }
+      // ORCA's schema is `z.string().min(1).max(120)` — BOTH bounds. The clamp handled max and
+      // nothing handled min, so an empty title produced a call zod REJECTS: the announcement
+      // reached nobody while the plugin reported success, which is the exact failure every
+      // "never fail silently" path in this plugin terminates in.
+      //
+      // An empty title is not exotic. Any announcement built from a value that turned out to be
+      // empty produces one. Falling back to the body — and then to a fixed string — keeps the
+      // message audible rather than trading one silence for another.
+      const safeTitle = (title.trim() !== '' ? title : (body ?? '').trim() !== '' ? body as string : 'Read aloud')
+      const params: Record<string, unknown> = { title: safeTitle.slice(0, 120) }
       if (body !== undefined) params['body'] = body.slice(0, 1000)
       const message = body ?? title
       const undelivered = (why: string): void => {
