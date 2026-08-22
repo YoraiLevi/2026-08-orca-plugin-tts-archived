@@ -248,7 +248,18 @@ const MUTANTS = [
     from: '    if (voices.length === 0) {',
     to: '    if (false) {',
     test: 'packages/providers/src/os-synth/os-synth.test.ts',
-    only: 'finding 1'
+    only: 'finding 1',
+    // UNREACHABLE on Linux, verified at the source rather than assumed: `#prepare` returns at
+    // `os-synth/index.ts:363` — `if (this.#platform === 'linux') { await
+    // this.#resolveLinuxBackend(); this.#warm = true; return }` — before it ever reaches the
+    // `voices.length === 0` guard this mutant edits. So the mutation cannot change Linux
+    // behaviour and surviving there is correct, not a gap.
+    //
+    // The invariant itself IS still guarded on Linux, by a different mechanism:
+    // `#resolveLinuxBackend()` throws `LinuxSpeechUnavailableError` when no backend exists, so
+    // `#warm = true` is never reached. Measured on 2026-08-21: the Linux CI leg returns 503 with
+    // exactly that error and the apt remedy attached.
+    equivalentOn: ['linux']
   },
   {
     id: 'player-exit-ignored',
@@ -336,7 +347,26 @@ const MUTANTS = [
     file: 'packages/plugin/src/huddle/index.ts',
     from: '        this.#truncatedRetries.set(file, spent + 1)',
     to: '        this.#truncatedRetries.set(file, MAX_TRUNCATED_RETRIES)',
-    test: 'packages/plugin/src/huddle/huddle.test.ts'
+    test: 'packages/plugin/src/huddle/huddle.test.ts',
+    // KNOWN GAP, deliberately left FAILING on Linux rather than marked equivalent.
+    //
+    // This mutation DOES change Linux behaviour — the retry budget is exhausted immediately and a
+    // half-written final line is concluded on — so `equivalentOn: ['linux']` would be a lie that
+    // silences a real invariant. It survives there because the TEST goes vacuous on Linux, not
+    // because the code is safe.
+    //
+    // Hypothesis, from measured behaviour rather than guesswork: the test closes the watcher first
+    // so that only the scheduled re-read can find the rest of the record — that is what makes it
+    // fail for the right reason on macOS. But SC-15 measured `fs.watch` differing by platform
+    // (darwin emits ["change","rename"], linux ["change","change","rename","rename"], CI run
+    // 32505473403), so on Linux the post-dispose append is plausibly still delivered by a live
+    // watch event, and the reply is spoken with or without the fix.
+    //
+    // What would settle it: run this single test on Linux with the mutant applied and log the
+    // event sequence. Not done here — vitest will not start in the container available on this
+    // machine, because node_modules is mounted from macOS and rollup's native binary is the wrong
+    // arch. Recorded as `[claimed]` rather than asserted.
+    knownGap: 'survives on linux; the test is vacuous there, the invariant is not'
   },
   {
     id: 'status-deletes-queue',
@@ -449,7 +479,14 @@ for (const m of chosen) {
       process.exit(3)
     }
   }
-  const expected = m.equivalent === true ? 'SURVIVED' : 'killed'
+  // `equivalentOn` is NOT a weaker `equivalent`. It means the mutated line is UNREACHABLE on those
+  // platforms, so the mutation cannot change behaviour there and surviving is the correct result.
+  // Marking such a mutant `equivalent: true` outright would silently stop guarding the platforms
+  // where it IS live — which is the blind spot this script exists to find, introduced by the
+  // script's own vocabulary.
+  const equivalentHere = m.equivalent === true
+    || (Array.isArray(m.equivalentOn) && m.equivalentOn.includes(process.platform))
+  const expected = equivalentHere ? 'SURVIVED' : 'killed'
   const ok = verdict === expected
   results.push({ ...m, verdict, ok })
   const tag = ok ? '  ok  ' : ' FAIL '
