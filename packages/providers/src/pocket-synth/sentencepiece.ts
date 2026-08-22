@@ -140,7 +140,7 @@ export class SentencePieceUnigram {
     for (const [i, p] of pieces.entries()) {
       if (p.type !== PieceType.BYTE) continue
       const m = /^<0x([0-9A-Fa-f]{2})>$/.exec(p.piece)
-      if (m !== null) this.#byteId[Number.parseInt(m[1], 16)] = i
+      if (m?.[1] !== undefined) this.#byteId[Number.parseInt(m[1], 16)] = i
     }
 
     // Control, unknown and byte pieces are excluded from the lattice: SentencePiece marks them
@@ -170,6 +170,13 @@ export class SentencePieceUnigram {
     return (' ' + text).replaceAll(' ', SPACE)
   }
 
+  /** `noUncheckedIndexedAccess` is on: reads past the end are a real possibility, not a formality. */
+  #charAt(chars: readonly string[], i: number): string {
+    const c = chars[i]
+    if (c === undefined) throw new Error(`tokenizer read past the end of the input at ${i}`)
+    return c
+  }
+
   /**
    * Viterbi over code points, maximising the summed piece score.
    *
@@ -194,25 +201,26 @@ export class SentencePieceUnigram {
     best[0] = 0
 
     for (let i = 0; i < n; i++) {
-      if (best[i] === Number.NEGATIVE_INFINITY) continue
+      const here = best[i] ?? Number.NEGATIVE_INFINITY
+      if (here === Number.NEGATIVE_INFINITY) continue
       const limit = Math.min(this.#maxPieceLen, n - i)
       let candidate = ''
       for (let len = 1; len <= limit; len++) {
-        candidate += chars[i + len - 1]
+        candidate += this.#charAt(chars, i + len - 1)
         const hit = this.#usable.get(candidate)
         if (hit === undefined) continue
-        const score = best[i] + hit.score
-        if (score > best[i + len]) {
+        const score = here + hit.score
+        if (score > (best[i + len] ?? Number.NEGATIVE_INFINITY)) {
           best[i + len] = score
           from[i + len] = i
           pieceAt[i + len] = hit.id
         }
       }
-      const one = chars[i]
+      const one = this.#charAt(chars, i)
       if (!this.#usable.has(one)) {
         const bytes = Buffer.from(one, 'utf8')
-        const score = best[i] + this.#unkPenalty * bytes.length
-        if (score > best[i + 1]) {
+        const score = here + this.#unkPenalty * bytes.length
+        if (score > (best[i + 1] ?? Number.NEGATIVE_INFINITY)) {
           best[i + 1] = score
           from[i + 1] = i
           pieceAt[i + 1] = BYTE_FALLBACK
@@ -223,15 +231,18 @@ export class SentencePieceUnigram {
     const out: number[] = []
     let i = n
     while (i > 0) {
-      const prev = from[i]
+      const prev = from[i] ?? -1
       if (prev < 0) throw new Error(`no path through the tokenizer lattice at position ${i}`)
       if (pieceAt[i] === BYTE_FALLBACK) {
         const bytes = Buffer.from(chars.slice(prev, i).join(''), 'utf8')
         const ids: number[] = []
-        for (const b of bytes) ids.push(this.#byteId[b] >= 0 ? this.#byteId[b] : this.unkId)
+        for (const b of bytes) {
+          const id = this.#byteId[b] ?? -1
+          ids.push(id >= 0 ? id : this.unkId)
+        }
         out.push(...ids.reverse())
       } else {
-        out.push(pieceAt[i])
+        out.push(pieceAt[i] ?? this.unkId)
       }
       i = prev
     }
@@ -260,7 +271,7 @@ export class SentencePieceUnigram {
       if (piece === undefined) continue
       if (this.pieces[id]?.type === PieceType.BYTE) {
         const m = /^<0x([0-9A-Fa-f]{2})>$/.exec(piece)
-        if (m !== null) { pending.push(Number.parseInt(m[1], 16)); continue }
+        if (m?.[1] !== undefined) { pending.push(Number.parseInt(m[1], 16)); continue }
       }
       flush()
       out.push(Buffer.from(piece, 'utf8'))

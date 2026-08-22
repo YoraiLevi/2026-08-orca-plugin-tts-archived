@@ -39,7 +39,7 @@ export function readNpy(buf: Buffer): Npy {
   if (/'fortran_order'\s*:\s*True/.test(header)) throw new Error('fortran-ordered .npy is not supported')
 
   const shapeText = /'shape'\s*:\s*\(([^)]*)\)/.exec(header)?.[1] ?? ''
-  const shape = [...shapeText.matchAll(/\d+/g)].map((m) => Number(m[0]))
+  const shape = [...shapeText.matchAll(/\d+/g)].map((m) => Number(m[0] ?? 0))
   const count = shape.reduce((a, b) => a * b, 1)
   const body = headerStart + headerLen
   if (body + count * 4 > buf.length) {
@@ -111,7 +111,7 @@ export function writeWav(samples: Float32Array, rate: number): Buffer {
   header.writeUInt32LE(samples.length * 2, 40)
   const body = Buffer.alloc(samples.length * 2)
   for (let i = 0; i < samples.length; i++) {
-    const v = Math.max(-1, Math.min(1, samples[i]))
+    const v = Math.max(-1, Math.min(1, samples[i] ?? 0))
     body.writeInt16LE(Math.round(v * 32767), i * 2)
   }
   return Buffer.concat([header, body])
@@ -157,7 +157,7 @@ export function resample(input: Float32Array, fromRate: number, toRate: number, 
       const w = 0.42 + 0.5 * Math.cos((Math.PI * d) / half) + 0.08 * Math.cos((2 * Math.PI * d) / half)
       const x = cutoff * d
       const k = (x === 0 ? cutoff : (Math.sin(Math.PI * x) / (Math.PI * x)) * cutoff) * w
-      acc += input[j] * k
+      acc += (input[j] ?? 0) * k
       norm += k
     }
     // Normalising by the realised kernel sum keeps the gain at 1 even at the edges, where the

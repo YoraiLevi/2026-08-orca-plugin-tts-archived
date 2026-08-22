@@ -43,8 +43,8 @@ function amplitudeAt(signal: Float32Array, freq: number, rate: number): number {
   let im = 0
   for (let i = 0; i < signal.length; i++) {
     const phase = (2 * Math.PI * freq * i) / rate
-    re += signal[i] * Math.cos(phase)
-    im += signal[i] * Math.sin(phase)
+    re += (signal[i] ?? 0) * Math.cos(phase)
+    im += (signal[i] ?? 0) * Math.sin(phase)
   }
   return (2 * Math.hypot(re, im)) / signal.length
 }
@@ -141,7 +141,7 @@ describe('readWav / writeWav', () => {
     const { samples, rate } = readWav(writeWav(original, 24_000))
     expect(rate).toBe(24_000)
     expect(samples).toHaveLength(original.length)
-    for (let i = 0; i < original.length; i++) expect(samples[i]).toBeCloseTo(original[i], 3)
+    for (let i = 0; i < original.length; i++) expect(samples[i]).toBeCloseTo(original[i] ?? 0, 3)
   })
 
   it('clamps rather than wrapping', () => {
@@ -185,7 +185,7 @@ describe('resample 32 kHz -> 24 kHz, the ratio every shipped voice needs', () =>
     // Without this, "the alias is small" would also be true of a test measuring the wrong thing.
     const input = tone(14_000, 32_000, 0.5)
     const naive = new Float32Array(Math.floor((input.length * 24_000) / 32_000))
-    for (let i = 0; i < naive.length; i++) naive[i] = input[Math.floor((i * 32_000) / 24_000)]
+    for (let i = 0; i < naive.length; i++) naive[i] = input[Math.floor((i * 32_000) / 24_000)] ?? 0
     expect(amplitudeAt(naive, 10_000, 24_000)).toBeGreaterThan(0.5)
   })
 

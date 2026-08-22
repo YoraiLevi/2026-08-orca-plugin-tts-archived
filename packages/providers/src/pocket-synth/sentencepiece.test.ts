@@ -66,7 +66,7 @@ describe('SentencePiece unigram — against the Python reference', () => {
     expect(byType.get(3), 'control pieces').toBe(3)
     expect(byType.get(6), 'byte pieces').toBe(256)
     expect(byType.get(1), 'normal pieces').toBe(3740)
-    expect(pieces[0].piece).toBe('<unk>')
+    expect(pieces[0]?.piece).toBe('<unk>')
   })
 
   it.each(GOLDEN)('encodes $text exactly as the reference does', ({ text, ids }) => {
