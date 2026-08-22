@@ -18,6 +18,7 @@
     "bench:latency": "node scripts/bench-latency.mjs",
     "probe:numbers": "node scripts/ci/number-ceiling-probe.mjs",
     "bench:lab-gate": "node scripts/bench-lab-gate.mjs",
+    "probe:ui": "node scripts/ui-probe.mjs",
     "voice-lab": "node scripts/voice-lab.mjs",
     "control": "node scripts/orca-tts.mjs control"
   },
