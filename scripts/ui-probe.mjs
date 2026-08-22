@@ -47,9 +47,9 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, writeFile, rm, mkdir, readdir } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, rm, mkdir, readdir, symlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -381,6 +381,7 @@ async function playUntilDone (cdp) {
   await cdp.evaluate(`document.getElementById('btn-play').click()`)
   await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > before, 120000)
   await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 120000)
+  await waitUntil(cdp, 'window.__labEffect().provenance.backend', (v) => v != null, 10000)
   await waitUntil(cdp, 'window.__ui.speakHeads.length', (n) => Number(n) > 0, 10000)
   return JSON.parse(await cdp.evaluate(`JSON.stringify({
     bodies: window.__ui.requests.filter((r) => r.url === '/speak').map((r) => r.body),
@@ -393,7 +394,12 @@ async function playUntilDone (cdp) {
 function lastSpeak (snap) {
   const body = snap.bodies.length ? JSON.parse(snap.bodies.at(-1)) : null
   const head = snap.heads.at(-1) ?? null
-  return { body, head, requested: body?.options?.synthesize?.voice ?? null, served: head?.backend ?? snap.provenance?.backend ?? null }
+  const provenance = snap.provenance ?? { footer: '', tunedWith: 'nothing-played-yet', backend: null, reason: null }
+  return {
+    body, head, provenance,
+    requested: body?.options?.synthesize?.voice ?? null,
+    served: head?.backend ?? provenance.backend ?? null
+  }
 }
 
 /**
@@ -736,27 +742,36 @@ async function u6 (cdp) {
   const degraded = snap.head?.degradation ?? null
   const recorded = snap.provenance?.backend ?? null
 
-  if (ARM.pocketInstalled) {
-    const pass = served === 'pocket' && recorded === 'pocket' && degraded == null && requested === pocketKey
+  if (served === 'pocket' && (recorded === 'pocket' || recorded == null) && degraded == null && requested === pocketKey) {
     return {
-      pass,
-      detail: pass
-        ? `one picker lists ${machine.options.length} machine and ${pocket.options.length} Pocket voices; Play of ${pocketKey} was served by pocket (head.backend=${served})`
-        : `Pocket was installed but was not what spoke: ${JSON.stringify({ served, recorded, degraded, requested, pocketKey })}`
+      pass: true,
+      detail: `one picker lists ${machine.options.length} machine and ${pocket.options.length} Pocket voices; Play of ${pocketKey} was served by pocket (head.backend=${served})`
     }
   }
-
-  const fallbackHonest = served === 'os' && recorded === 'os' && degraded != null && requested === pocketKey
-  if (fallbackHonest) {
+  if (ARM.pocketInstalled && requested === pocketKey && degraded != null) {
     return {
       pass: false,
       inconclusive: true,
-      detail: `picker lists both backends and the request followed ${osKey} -> ${pocketKey}, but Pocket was ABSENT so the OS spoke (${degraded.code ?? 'degraded'}). This is not evidence a neural voice was heard.`
+      detail: `the picker requested ${pocketKey} but Pocket could not speak (${degraded.code}: ${degraded.reason}). Not evidence the picker is wrong, and not evidence a neural voice was heard.`
+    }
+  }
+  if (ARM.pocketInstalled) {
+    return {
+      pass: false,
+      detail: `Pocket was staged as ready but was not what spoke: ${JSON.stringify({ served, recorded, degraded, requested, pocketKey })}`
+    }
+  }
+
+  if (served === 'pocket' || recorded === 'pocket') {
+    return {
+      pass: false,
+      detail: `Pocket was ABSENT but provenance claimed it spoke: ${JSON.stringify({ served, recorded, degraded, requested, pocketKey })}`
     }
   }
   return {
     pass: false,
-    detail: `Pocket was absent and fallback was not honest: ${JSON.stringify({ served, recorded, degraded, requested, pocketKey })}`
+    inconclusive: true,
+    detail: `picker lists both backends and the request followed ${osKey} -> ${pocketKey}, but Pocket was ABSENT so Play was served by ${served ?? 'the OS'} (requested ${requested}). This is not evidence a neural voice was heard.`
   }
 }
 
@@ -945,20 +960,55 @@ async function u8 (cdp) {
   }
 }
 
-/** U9 — fallback provenance follows the completed response, not the selected Pocket option. */
+/**
+ * U9 — provenance follows the backend that completed speech, and this check plays itself.
+ *
+ * R16-05: U9 was leftover state from U8. Alone on a clean page it failed; after U8's OS fallback
+ * it passed. `--prove` ran U9 in isolation, so it went red whether or not the breakage was the
+ * one named. It also required the OS-fallback footer, so a working Pocket install would fail it.
+ *
+ * Two expected footers: OS fallback when Pocket cannot, Pocket provenance when it can. The
+ * discriminating field is provenance.backend (what spoke), not the selected option.
+ */
 async function u9 (cdp) {
-  const effect = await cdp.evaluate('window.__labEffect().provenance')
+  await muteConfirmations(cdp)
+  const keys = await pickerKeys(cdp)
+  const pocketKey = keys.pocket[0]
+  if (!pocketKey) return { pass: false, detail: 'no Pocket option to play' }
+
+  await chooseVoice(cdp, pocketKey)
+  const snap = lastSpeak(await playUntilDone(cdp))
+  const effect = snap.provenance
   const selected = await cdp.evaluate(`document.getElementById('ctl-voice.id').value`)
-  const selectedPocket = selected.startsWith('pocket:')
-  const saysRequestedPocket = /Requested Pocket TTS/i.test(effect.footer)
-  const saysActualOs = /played by this machine's system voice/i.test(effect.footer)
-  const exportedActual = /^os(?::|$)/.test(effect.tunedWith)
-  const pass = selectedPocket && saysRequestedPocket && saysActualOs && exportedActual
+  const served = effect?.backend ?? snap.served
+  const footerSaysPocket = /Played by Pocket TTS/i.test(effect.footer) && /local and offline/i.test(effect.footer)
+  const footerSaysOs = /this machine's system voice/i.test(effect.footer)
+
+  if (!selected.startsWith('pocket:')) {
+    return { pass: false, detail: `U9 must play a Pocket option itself; selected ${selected}` }
+  }
+
+  if (served === 'pocket') {
+    const pass = footerSaysPocket && effect.tunedWith.startsWith('pocket:') && !effect.reason &&
+      (effect.backend === 'pocket' || effect.backend == null)
+    return {
+      pass,
+      detail: pass
+        ? `selected ${selected}; Play was served by pocket; footer names Pocket TTS and tunedWith is ${effect.tunedWith}`
+        : `head said pocket but the footer did not: ${JSON.stringify({ selected, served, effect, head: snap.head })}`
+    }
+  }
+
+  const pass = served === 'os' &&
+    footerSaysOs &&
+    !footerSaysPocket &&
+    /^os(?::|$)/.test(effect.tunedWith) &&
+    (effect.backend === 'os' || effect.backend == null)
   return {
     pass,
     detail: pass
-      ? `selected ${selected}; footer names the OS fallback and exported tunedWith is ${effect.tunedWith}`
-      : `provenance followed selection instead of completed speech: ${JSON.stringify({ selected, effect })}`
+      ? `selected ${selected}; Play was served by the OS; footer names the system voice and tunedWith is ${effect.tunedWith}`
+      : `provenance did not name the OS as what spoke: ${JSON.stringify({ selected, served, effect, head: snap.head })}`
   }
 }
 
@@ -970,70 +1020,95 @@ const CHECKS = [
   { id: 'U3', what: 'editing the example changes what is spoken', fn: u3, provable: false },
   { id: 'U4', what: 'two plays never overlap', fn: u4, provable: true },
   { id: 'U5', what: 'one transform is one mark, and the mark is labelled', fn: u5, provable: true },
-  { id: 'U6', what: 'the voice picker lists both backends and switches synthesis', fn: u6, provable: true },
-  { id: 'U7', what: 'the neural voice download completes in place', fn: u7, provable: true },
-  { id: 'U8', what: 'a backend switch cannot replay old voice bytes', fn: u8, provable: true },
-  { id: 'U9', what: 'provenance names what actually spoke', fn: u9, provable: true }
+  { id: 'U6', what: 'Play of a Pocket voice is served by Pocket, not by the OS fallback', fn: u6, provable: true },
+  { id: 'U7', what: 'a failed neural download is named and the OS floor still speaks', fn: u7, provable: true },
+  { id: 'U8', what: 'os→pocket, pocket→os, and pocket→pocket all miss the audio cache', fn: u8, provable: true },
+  { id: 'U9', what: 'provenance names what actually spoke, and this check plays itself', fn: u9, provable: true }
 ]
 
 /**
  * The breakages `--prove` applies to a COPY of the page. Each is the exact defect the matching
  * check exists to catch, so a check that stays green here is decorative.
  */
-const BREAKAGES = {
-  U1: {
+const BREAKAGES = [
+  {
+    id: 'U1',
     what: 'render the unwired controls again',
     apply: (html) => html.replace(
       'return CONTROLS.filter((c) => c.wire !== null)',
       'return CONTROLS.slice()')
   },
-  U2: {
+  {
+    id: 'U2',
     what: 'drop the change listener from the dropdown',
     apply: (html) => html.replace(
       "s.addEventListener('change', () => setControl(c, s.value))",
       "s.addEventListener('change', () => {})")
   },
-  U5: {
+  {
+    id: 'U5',
     what: 'go back to one span per word instead of one per run',
     apply: (html) => html.replace(
       'if (last && last.stage === tok.stage && last.kind === tok.kind) { last.tokens.push(tok); continue }',
       '// merging disabled by --prove')
   },
-  U4: {
+  {
+    id: 'U4',
     what: 'remove the stopAudio() that makes play barge in',
     apply: (html) => html.replace(
       '  stopAudio()\n\n  // The warm path first',
       '  /* stopAudio() removed by --prove */\n\n  // The warm path first')
   },
-  U6: {
+  {
+    id: 'U6',
     what: 'drop the optgroup wiring from the voice picker',
     apply: (html) => html.replace(
       's.append(machineGroup, pocketGroup)',
       's.append(...machineGroup.children, ...pocketGroup.children)')
   },
-  U7: {
+  {
+    id: 'U6',
+    what: 'always bind the OS voice for synthesis, ignoring the picker',
+    apply: (html) => html.replace(
+      'return { voice: chosen?.key, rate: v[\'voice.rate\'] }',
+      'return { voice: state.voices.find((voice) => voice.backend === \'os\' && voice.available)?.key, rate: v[\'voice.rate\'] }')
+  },
+  {
+    id: 'U7',
     what: 'skip the no-reload voice refresh after download',
     apply: (html) => html.replace(
       '    await loadVoices()\n    adoptVoiceSelection(chosen)',
       '    /* loadVoices() removed by --prove */\n    adoptVoiceSelection(chosen)')
   },
-  U8: {
-    what: 'remove voice from the audio cache key',
+  {
+    id: 'U7',
+    what: 'swallow the download error sentence the listener is owed',
     apply: (html) => html.replace(
-      "const KEYED_FIELDS = ['voice', 'rate', 'pitch', 'volume']",
-      "const KEYED_FIELDS = ['rate', 'pitch', 'volume']")
+      'const sentence = `The neural voice download stopped${where}: ${state.download.error}. Your system voices still work.`',
+      'const sentence = `Download finished.`')
   },
-  U9: {
-    what: 'disconnect exported provenance from completed speech',
+  {
+    id: 'U8',
+    what: 'reuse the last Pocket voice as the cache key for later OS voices',
+    apply: (html) => {
+      const from = 'const parts = KEYED_FIELDS.map((f) => `' + '${f}=${serializeField(synth[f])}' + '`)'
+      const to = "if (synth.voice && String(synth.voice).startsWith('pocket:')) window.__lastPocketVoice = synth.voice; const __v = (synth.voice && String(synth.voice).startsWith('os:') && window.__lastPocketVoice) ? window.__lastPocketVoice : synth.voice; const parts = KEYED_FIELDS.map((f) => `" + '${f}=${serializeField(f === \'voice\' ? __v : synth[f])}' + '`)'
+      return html.replace(from, to)
+    }
+  },
+  {
+    id: 'U9',
+    what: 'invert the served backend so provenance names the other one',
     apply: (html) => html.replace(
       '  state.lastProvenance = provenance',
-      '  state.lastProvenance = null')
+      '  state.lastProvenance = Object.assign({}, provenance, { backend: provenance.backend === \'pocket\' ? \'os\' : \'pocket\' })')
   }
-}
+]
 
-async function runAgainst (pageDir, only) {
+async function runAgainst (pageDir, only, arm) {
+  ARM = { pocketInstalled: arm.pocketInstalled === true }
   const chromeDir = await mkdtemp(join(tmpdir(), 'ui-probe-chrome-'))
-  const lab = await startLab(pageDir)
+  const lab = await startLab(pageDir, arm.modelDir)
   const port = lab.port
   const chrome = await startChrome(chromeDir)
   if (chrome.bin === null) {
@@ -1132,26 +1207,84 @@ async function brokenCopy (breakage) {
   return dir
 }
 
+function parseOnly () {
+  const arg = process.argv.find((a) => a.startsWith('--only='))
+  return arg ? arg.slice('--only='.length).split(',').filter(Boolean) : null
+}
+
+/**
+ * A Pocket install we can actually play. Prefer an explicit ORCA_TTS_MODEL_DIR when it looks
+ * populated; otherwise the buzz cache the brief names. Missing files → no second arm.
+ */
+function findPocketDir () {
+  const candidates = [
+    process.env.ORCA_TTS_MODEL_DIR,
+    join(homedir(), '.buzz', 'models', 'pocket-tts')
+  ].filter((d) => typeof d === 'string' && d.length > 0)
+  for (const dir of candidates) {
+    if (existsSync(join(dir, 'tokenizer.model')) && existsSync(join(dir, 'eve.wav'))) return dir
+  }
+  return null
+}
+
+/**
+ * The Voice Lab's modelStatus requires `.orca-tts-model-manifest` with version 2. The buzz
+ * cache the brief names has the weights and the twelve clips, but buzz's own marker
+ * (`.buzz-model-manifest`). Writing into the author's cache is forbidden. Stage a temp
+ * directory of symlinks plus the one file the lab checks, so Arm B actually sees Pocket ready.
+ */
+async function stagePocketDir (source) {
+  const dir = await mkdtemp(join(tmpdir(), 'ui-probe-pocket-model-'))
+  for (const name of await readdir(source)) {
+    if (name === '.orca-tts-model-manifest') continue
+    await symlink(join(source, name), join(dir, name))
+  }
+  await writeFile(join(dir, '.orca-tts-model-manifest'), '2\n')
+  return dir
+}
+
+function printResults (results, failures) {
+  let inconclusive = 0
+  for (const r of results) {
+    const tag = r.pass ? '  ok  ' : (r.inconclusive ? 'INCONC' : ' FAIL ')
+    console.log(`[${tag}] ${r.id}  ${r.what}`)
+    console.log(`         ${r.detail}`)
+    if (!r.pass && !r.inconclusive) failures++
+    if (r.inconclusive) inconclusive++
+  }
+  return { failures, inconclusive }
+}
+
 async function main () {
   const prove = process.argv.includes('--prove')
+  const only = parseOnly()
   let failures = 0
+  let neuralHeard = false
+  let hermeticInconclusive = 0
 
-  console.log('Voice Lab UI probe — headless, muted, 127.0.0.1 only.\n')
-  const results = await runAgainst(join(ROOT, 'voice-lab'))
-  for (const r of results) {
-    console.log(`[${r.pass ? '  ok  ' : ' FAIL '}] ${r.id}  ${r.what}`)
-    console.log(`         ${r.detail}`)
-    if (!r.pass) failures++
-  }
+  const emptyDir = await mkdtemp(join(tmpdir(), 'ui-probe-empty-model-'))
+  const pocketSource = findPocketDir()
+  const stagedPocket = pocketSource ? await stagePocketDir(pocketSource) : null
+  const pocketDir = stagedPocket
+
+  console.log('Voice Lab UI probe — headless, muted, 127.0.0.1 only.')
+  console.log('Arm A — hermetic empty model (Pocket ABSENT by construction).\n')
+  const hermetic = await runAgainst(join(ROOT, 'voice-lab'), only, {
+    pocketInstalled: false, modelDir: emptyDir
+  })
+  ;({ failures, inconclusive: hermeticInconclusive } = printResults(hermetic, failures))
 
   if (prove) {
     console.log('\n--prove: each check, against a page broken in exactly the way it watches for.')
-    for (const [id, breakage] of Object.entries(BREAKAGES)) {
+    for (const breakage of BREAKAGES) {
+      if (only && !only.includes(breakage.id)) continue
       const dir = await brokenCopy(breakage)
       try {
-        const [r] = await runAgainst(dir, [id])
-        const wentRed = r && !r.pass
-        console.log(`[${wentRed ? '  ok  ' : ' FAIL '}] ${id}  went ${wentRed ? 'RED' : 'GREEN'} when we ${breakage.what}`)
+        const [r] = await runAgainst(dir, [breakage.id], {
+          pocketInstalled: false, modelDir: emptyDir
+        })
+        const wentRed = r && r.pass === false && r.inconclusive !== true
+        console.log(`[${wentRed ? '  ok  ' : ' FAIL '}] ${breakage.id}  went ${wentRed ? 'RED' : 'GREEN'} when we ${breakage.what}`)
         console.log(`         ${r?.detail ?? '(no result)'}`)
         if (!wentRed) failures++
       } finally {
@@ -1160,8 +1293,36 @@ async function main () {
     }
   }
 
-  console.log(failures === 0 ? '\nAll checks behaved as declared.' : `\n${failures} check(s) did not.`)
-  process.exit(failures === 0 ? 0 : 1)
+  if (pocketDir) {
+    const pocketOnly = only ?? ['U6', 'U8', 'U9']
+    console.log(`\nArm B — Pocket model present at ${pocketDir}.`)
+    console.log('U6 and U9 must now require that Pocket is what spoke.\n')
+    const pocket = await runAgainst(join(ROOT, 'voice-lab'), pocketOnly, {
+      pocketInstalled: true, modelDir: pocketDir
+    })
+    ;({ failures } = printResults(pocket, failures))
+    const u6 = pocket.find((r) => r.id === 'U6')
+    if (u6?.pass === true) neuralHeard = true
+  } else {
+    console.log('\nArm B skipped — no Pocket model at ORCA_TTS_MODEL_DIR or ~/.buzz/models/pocket-tts.')
+  }
+
+  await removeWhenReleased(emptyDir)
+  if (stagedPocket) await removeWhenReleased(stagedPocket)
+
+  if (failures > 0) {
+    console.log(`\n${failures} check(s) did not.`)
+    process.exit(1)
+  }
+  if (neuralHeard) {
+    console.log('\nAll checks behaved as declared. Arm B heard Pocket TTS, not the OS fallback.')
+    process.exit(0)
+  }
+  console.log('\nPage checks behaved as declared. Neural speech was INCONCLUSIVE — Pocket was not what spoke.')
+  if (hermeticInconclusive === 0 && !pocketDir) {
+    console.log('         (no INCONC row was printed either, which means U6 never ran or never reached Play.)')
+  }
+  process.exit(2)
 }
 
 await main()
