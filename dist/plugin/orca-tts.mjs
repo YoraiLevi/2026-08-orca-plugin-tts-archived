@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-#!/usr/bin/env node
 
 // packages/plugin/src/control/cli.ts
 import { watch } from "node:fs";

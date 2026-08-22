@@ -525,7 +525,15 @@ function makeHost(orca, hooks = {}) {
     /** Returns whether the write was OBSERVED to land, not whether the call returned. */
     async settingsSet(values) {
       try {
-        await orca.host.call("settings.set", { settings: values });
+        for (const [key, value] of Object.entries(values)) {
+          const r = await orca.host.call("settings.set", { key, value });
+          const ok = r?.ok;
+          if (ok === false) {
+            const why = r.error;
+            hooks.onSettingsFailure?.({ op: "set", reason: `${key}: ${String(why ?? "refused")}` });
+            return false;
+          }
+        }
       } catch (err) {
         hooks.onSettingsFailure?.({ op: "set", reason: String(err) });
         return false;
