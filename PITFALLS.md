@@ -73,6 +73,17 @@ Nothing was audible: `say -o <file>` never opens the device (P31 respected).
 **What to do instead:** before trusting ANY `os-synth` timing, check for leaks and check load:
 
     pgrep -x say                     # NOT `ps | grep 'say -o'` — see below
+
+**And the usage meter DOES have a reliable source — `--screen`.** Two monitors were built on
+guesses and deleted before this was found: a clock-based one declared wind-down at 4h15m while
+real usage was **2%**, and a limit-watch fired on day-old scrollback in dead agent terminals.
+`orca terminal read --terminal <h>` returns the STREAM, which is fragments of an ANSI-positioned
+status line. `--screen` returns the RENDERED screen, where the figures are plain text:
+
+    orca terminal read --terminal <handle> --screen --json   # -> "5h: 3% (2:55)"
+
+Percentage used and time remaining, both real. The lesson is not "check more carefully" — it is
+that `--help` was one command away for hours while three wrong monitors were built and killed.
     pkill -x say                     # only when no suite is legitimately running
 
 **`ps -eo command | grep '[s]ay -o'` counts ITSELF.** The shell wrapper that runs the grep has
