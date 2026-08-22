@@ -1,5 +1,6 @@
 // packages/plugin/src/main.ts
 import { existsSync } from "node:fs";
+import { readFile as readFile4 } from "node:fs/promises";
 
 // packages/providers/src/os-synth/index.ts
 import { spawn } from "node:child_process";
@@ -508,6 +509,46 @@ function makeHost(orca, hooks = {}) {
         hooks.onStorageFailure?.({ op: "set", key, reason: String(err) });
       }
     },
+    async settingsGet() {
+      try {
+        const r = await orca.host.call("settings.get");
+        if (r === null || typeof r !== "object") return null;
+        const env = r;
+        const inner = env["settings"] ?? env["value"];
+        const out = inner !== void 0 && inner !== null && typeof inner === "object" ? inner : env;
+        return out;
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: "get", reason: String(err) });
+        return null;
+      }
+    },
+    /** Returns whether the write was OBSERVED to land, not whether the call returned. */
+    async settingsSet(values) {
+      try {
+        await orca.host.call("settings.set", { settings: values });
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: "set", reason: String(err) });
+        return false;
+      }
+      try {
+        const back = await orca.host.call("settings.get");
+        const env = back ?? {};
+        const inner = env["settings"] ?? env["value"];
+        const rec = inner !== void 0 && inner !== null && typeof inner === "object" ? inner : env;
+        const key = "__revision";
+        if (rec[key] !== values[key]) {
+          hooks.onSettingsFailure?.({
+            op: "verify",
+            reason: `wrote ${key}=${String(values[key])} and read back ${String(rec[key])} \u2014 the mirror did not take the write`
+          });
+          return false;
+        }
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: "verify", reason: String(err) });
+        return false;
+      }
+      return true;
+    },
     onEvent(name, handler) {
       try {
         orca.events.on(name, handler);
@@ -722,6 +763,7 @@ function normalize(md, opts = {}) {
   const doUnits = opts.expandUnits ?? true;
   let s = stripFencedCode(md, codeBlocks);
   s = stripHtmlComments(s);
+  s = diagramsToLabels(s);
   s = stripInlineCode(s);
   s = expandMarkdownLinks(s);
   s = stripUrls(s);
@@ -742,14 +784,31 @@ function isFence(line) {
   const t = line.trimStart();
   return t.startsWith("```") || t.startsWith("~~~");
 }
+function fenceInfo(line) {
+  const t = line.trimStart();
+  return t.slice(3).trim().toLowerCase();
+}
+function isSpeakFence(line) {
+  const info = fenceInfo(line);
+  return info === "speak" || info.startsWith("speak ");
+}
 function stripFencedCode(src, policy) {
   const out = [];
   const lines = src.split("\n");
   let inFence = false;
+  let inSpeak = false;
   let announced = false;
   for (const line of lines) {
     if (isFence(line)) {
+      if (inSpeak) {
+        inSpeak = false;
+        continue;
+      }
       if (!inFence) {
+        if (isSpeakFence(line)) {
+          inSpeak = true;
+          continue;
+        }
         inFence = true;
         announced = false;
         if (policy === "announce") {
@@ -759,6 +818,10 @@ function stripFencedCode(src, policy) {
       } else {
         inFence = false;
       }
+      continue;
+    }
+    if (inSpeak) {
+      out.push(line);
       continue;
     }
     if (!inFence) out.push(line);
@@ -791,6 +854,102 @@ function stripHtmlComments(src) {
     i = close + 3;
   }
   return out;
+}
+var LINE_ART = /[\u2500-\u259f]/gu;
+var ART_SEPARATOR = /[\u2500-\u25ff\u2190-\u21ff]/u;
+var ART_LINE_MIN_GLYPHS = 2;
+var MAX_SPOKEN_LABELS = 6;
+var DIAGRAM_UNLABELLED = " . Here, a diagram is omitted. It has no labels to read. ";
+function artGlyphCount(line) {
+  return (line.match(LINE_ART) ?? []).length;
+}
+function wordGlyphCount(line) {
+  return (line.match(/[\p{L}\p{N}]/gu) ?? []).length;
+}
+function isArtLine(line) {
+  return artGlyphCount(line) >= ART_LINE_MIN_GLYPHS;
+}
+function labelFragments(line) {
+  const out = [];
+  const push = (from, to) => {
+    const raw = line.slice(from, to);
+    const text = raw.trim().replace(/\s+/g, " ");
+    if (text.length === 0) return;
+    out.push({
+      text,
+      start: from + (raw.length - raw.trimStart().length),
+      end: to - (raw.length - raw.trimEnd().length)
+    });
+  };
+  let start = 0;
+  for (let i = 0; i < line.length; i++) {
+    if (ART_SEPARATOR.test(line[i])) {
+      push(start, i);
+      start = i + 1;
+    }
+  }
+  push(start, line.length);
+  return out;
+}
+function diagramLabels(run) {
+  const groups = [];
+  let openOnPrev = [];
+  for (const line of run) {
+    const opened = [];
+    for (const f of labelFragments(line)) {
+      const joined = openOnPrev.find((g) => f.start < g.end && g.start < f.end);
+      if (joined === void 0) {
+        const fresh = { parts: [f.text], start: f.start, end: f.end };
+        groups.push(fresh);
+        opened.push(fresh);
+        continue;
+      }
+      joined.parts.push(f.text);
+      if (opened.includes(joined)) {
+        joined.start = Math.min(joined.start, f.start);
+        joined.end = Math.max(joined.end, f.end);
+      } else {
+        joined.start = f.start;
+        joined.end = f.end;
+        opened.push(joined);
+      }
+    }
+    openOnPrev = opened;
+  }
+  return groups.map((g) => g.parts.join(" "));
+}
+function diagramPlaceholder(labels) {
+  if (labels.length === 0) return DIAGRAM_UNLABELLED;
+  const named = labels.slice(0, MAX_SPOKEN_LABELS);
+  const more = labels.length - named.length;
+  const tail = more > 0 ? `, and ${more} more` : "";
+  return ` . Here, a diagram is omitted. It is labelled: ${named.join(", ")}${tail}. `;
+}
+function diagramsToLabels(src) {
+  const lines = src.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (!isArtLine(lines[i])) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < lines.length && isArtLine(lines[j])) j++;
+    const run = lines.slice(i, j);
+    i = j;
+    if (run.length === 1) {
+      const only = run[0];
+      if (artGlyphCount(only) < wordGlyphCount(only)) {
+        out.push(only);
+        continue;
+      }
+      if (diagramLabels(run).length === 0) continue;
+    }
+    out.push(diagramPlaceholder(diagramLabels(run)));
+  }
+  return out.join("\n");
 }
 function stripInlineCode(src) {
   let out = "";
@@ -1531,6 +1690,12 @@ var PlaybackQueue = class {
 };
 
 // packages/core/src/settings/schema.ts
+var SCHEMA_VERSION = 2;
+var MIRROR_ENVELOPE_KEYS = {
+  revision: "__revision",
+  schemaVersion: "__schemaVersion",
+  writtenAt: "__writtenAt"
+};
 var d = (x) => x;
 var SETTINGS_SCHEMA = {
   // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -2463,6 +2628,386 @@ var SETTINGS_SCHEMA = {
     since: 3
   })
 };
+function isFuture(f) {
+  return f.since > SCHEMA_VERSION;
+}
+function isWired(f) {
+  return f.wire !== null && !isFuture(f);
+}
+function schemaDefaults() {
+  const out = {};
+  for (const f of Object.values(SETTINGS_SCHEMA)) {
+    if (isFuture(f)) continue;
+    out[f.id] = Array.isArray(f.default) ? [...f.default] : f.default;
+  }
+  return out;
+}
+function wireProperty(f) {
+  return f.wire === null ? null : f.wire.split(".")[1] ?? null;
+}
+function project(s, owner) {
+  const out = {};
+  for (const f of Object.values(SETTINGS_SCHEMA)) {
+    if (f.owner !== owner || !isWired(f)) continue;
+    const prop = wireProperty(f);
+    if (prop === null) continue;
+    const v = s[f.id];
+    if (v === void 0 || v === null) continue;
+    out[prop] = v;
+  }
+  return out;
+}
+function toNormalizeOptions(s) {
+  return project(s, "normalize");
+}
+function toChunkerOptions(s) {
+  return project(s, "chunk");
+}
+function toSynthesizeOptions(s, resolveVoice) {
+  const out = project(s, "synthesize");
+  const idx = out["voice"];
+  if (typeof idx === "number") {
+    const name = resolveVoice?.(idx);
+    if (typeof name === "string" && name.length > 0) out["voice"] = name;
+    else delete out["voice"];
+  }
+  return out;
+}
+
+// packages/core/src/settings/jsonc.ts
+function stripJsonComments(text) {
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === '"') {
+      out += c;
+      i++;
+      while (i < n) {
+        const ch = text[i];
+        out += ch;
+        i++;
+        if (ch === "\\") {
+          if (i < n) {
+            out += text[i];
+            i++;
+          }
+          continue;
+        }
+        if (ch === '"') break;
+      }
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      while (i < n && text[i] !== "\n") {
+        out += " ";
+        i++;
+      }
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      out += "  ";
+      i += 2;
+      while (i < n && !(text[i] === "*" && text[i + 1] === "/")) {
+        out += text[i] === "\n" ? "\n" : " ";
+        i++;
+      }
+      if (i < n) {
+        out += "  ";
+        i += 2;
+      }
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+function stripTrailingCommas(text) {
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === '"') {
+      out += c;
+      i++;
+      while (i < n) {
+        const ch = text[i];
+        out += ch;
+        i++;
+        if (ch === "\\") {
+          if (i < n) {
+            out += text[i];
+            i++;
+          }
+          ;
+          continue;
+        }
+        if (ch === '"') break;
+      }
+      continue;
+    }
+    if (c === ",") {
+      let j = i + 1;
+      while (j < n && /\s/.test(text[j])) j++;
+      if (j < n && (text[j] === "}" || text[j] === "]")) {
+        out += " ";
+        i++;
+        continue;
+      }
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+function parseJsonc(text) {
+  const stripped = stripTrailingCommas(stripJsonComments(text));
+  try {
+    return { value: JSON.parse(stripped) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const at = /position (\d+)/.exec(message);
+    let line = null;
+    if (at) {
+      const pos = Math.min(Number(at[1]), stripped.length);
+      line = stripped.slice(0, pos).split("\n").length;
+    }
+    return { value: void 0, error: { message, line } };
+  }
+}
+
+// packages/core/src/settings/parse.ts
+var SETTINGS_KIND = "orca-tts-settings";
+function validate(f, v) {
+  switch (f.kind) {
+    case "bool":
+      return typeof v === "boolean" ? { ok: true, value: v } : { ok: false, reason: `expected true or false, got ${describe(v)}` };
+    case "enum": {
+      const values = f.values ?? [];
+      return values.includes(v) ? { ok: true, value: v } : { ok: false, reason: `expected one of ${values.map((x) => JSON.stringify(x)).join(", ")}, got ${describe(v)}` };
+    }
+    case "multi": {
+      const values = f.values ?? [];
+      if (!Array.isArray(v)) return { ok: false, reason: `expected a list, got ${describe(v)}` };
+      const bad = v.find((x) => !values.includes(x));
+      if (bad !== void 0) return { ok: false, reason: `${JSON.stringify(bad)} is not one of ${values.map((x) => JSON.stringify(x)).join(", ")}` };
+      return { ok: true, value: [...v] };
+    }
+    case "int":
+    case "float": {
+      if (typeof v !== "number" || !Number.isFinite(v)) return { ok: false, reason: `expected a number, got ${describe(v)}` };
+      if (f.kind === "int" && !Number.isInteger(v)) return { ok: false, reason: `expected a whole number, got ${v}` };
+      const r = f.range;
+      if (r && (v < r.min || v > r.max)) return { ok: false, reason: `expected ${r.min} to ${r.max}, got ${v}` };
+      return { ok: true, value: v };
+    }
+    case "string":
+    case "template":
+      return typeof v === "string" ? { ok: true, value: v } : { ok: false, reason: `expected text, got ${describe(v)}` };
+    case "map": {
+      if (v === null || typeof v !== "object" || Array.isArray(v)) return { ok: false, reason: `expected a table, got ${describe(v)}` };
+      for (const [k, val] of Object.entries(v)) {
+        if (typeof val !== "string") return { ok: false, reason: `the entry for "${k}" is ${describe(val)}, not text` };
+      }
+      return { ok: true, value: { ...v } };
+    }
+    case "voice":
+      if (v === null) return { ok: true, value: null };
+      if (typeof v === "number" && Number.isInteger(v) && v >= 0) return { ok: true, value: v };
+      return { ok: false, reason: `expected a voice index (a whole number) or null, got ${describe(v)}` };
+  }
+}
+function describe(v) {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "a list";
+  switch (typeof v) {
+    case "undefined":
+      return "nothing";
+    case "string":
+      return JSON.stringify(v);
+    case "object":
+      return "a table";
+    default:
+      return String(v);
+  }
+}
+var MIGRATIONS = {
+  1: (values, rejected) => {
+    const out = { ...values };
+    if ("synthesize.voice" in out) {
+      const name = out["synthesize.voice"];
+      delete out["synthesize.voice"];
+      out["synthesize.voiceIndex"] = null;
+      rejected.push({
+        field: "synthesize.voiceIndex",
+        reason: `your old settings named a voice (${describe(name)}); voice names do not carry between machines, so the system default is in use until you pick one again`,
+        usedDefault: null
+      });
+    }
+    return out;
+  }
+};
+function parseSettingsText(text, opts = {}) {
+  const r = parseJsonc(text);
+  if (r.error) return parse(void 0, { ...opts, fileError: r.error });
+  return parse(r.value, opts);
+}
+function parse(input, opts = {}) {
+  const rejected = [];
+  const unknownFields = [];
+  const defaults = schemaDefaults();
+  const mirror = opts.mirror ?? null;
+  let fileVersion = SCHEMA_VERSION;
+  let revision = 0;
+  let writtenAt;
+  let writtenBy;
+  let raw = {};
+  let fileError = opts.fileError;
+  let migratedFrom;
+  if (fileError === void 0 && input !== void 0 && input !== null) {
+    if (typeof input !== "object" || Array.isArray(input)) {
+      fileError = { message: "the settings file is not a JSON object", line: null };
+    } else {
+      const env = input;
+      if (typeof env["kind"] === "string" && env["kind"] !== SETTINGS_KIND) {
+        fileError = { message: `this is not a settings file \u2014 its kind is ${describe(env["kind"])}`, line: null };
+      } else {
+        const sv = env["schemaVersion"];
+        if (typeof sv === "number" && Number.isInteger(sv) && sv >= 1) fileVersion = sv;
+        else if (sv !== void 0) {
+          rejected.push({ field: "schemaVersion", reason: `expected a whole number, got ${describe(sv)}`, usedDefault: SCHEMA_VERSION });
+        }
+        const rev = env["revision"];
+        if (typeof rev === "number" && Number.isInteger(rev) && rev >= 0) revision = rev;
+        else if (rev !== void 0) {
+          rejected.push({ field: "revision", reason: `expected a whole number, got ${describe(rev)}`, usedDefault: 0 });
+        }
+        if (typeof env["writtenAt"] === "string") writtenAt = env["writtenAt"];
+        if (typeof env["writtenBy"] === "string") writtenBy = env["writtenBy"];
+        const s = env["settings"];
+        if (s !== void 0 && (typeof s !== "object" || s === null || Array.isArray(s))) {
+          fileError = { message: 'the "settings" block is not a JSON object', line: null };
+        } else if (s) {
+          raw = { ...s };
+        }
+      }
+    }
+  }
+  if (fileError === void 0 && fileVersion < SCHEMA_VERSION) {
+    migratedFrom = fileVersion;
+    for (let v = fileVersion; v < SCHEMA_VERSION; v++) {
+      const step = MIGRATIONS[v];
+      if (step) raw = step(raw, rejected);
+    }
+  }
+  if (fileError !== void 0) raw = {};
+  const out = {};
+  for (const f of Object.values(SETTINGS_SCHEMA)) {
+    if (isFuture(f)) continue;
+    const fallback = resolveFallback(f, mirror, defaults);
+    if (!(f.id in raw)) {
+      out[f.id] = fallback.value;
+      continue;
+    }
+    const v = validate(f, raw[f.id]);
+    if (v.ok) {
+      out[f.id] = v.value;
+      continue;
+    }
+    out[f.id] = fallback.value;
+    rejected.push({ field: f.id, reason: `${v.reason} \u2014 using ${fallback.from}`, usedDefault: fallback.value });
+  }
+  for (const id of Object.keys(raw)) {
+    const f = SETTINGS_SCHEMA[id];
+    if (f === void 0 || isFuture(f)) unknownFields.push(id);
+  }
+  return {
+    settings: out,
+    revision,
+    rejected,
+    unknownFields,
+    ...migratedFrom !== void 0 ? { migratedFrom } : {},
+    ...fileError !== void 0 ? { fileError } : {},
+    ...writtenAt !== void 0 ? { writtenAt } : {},
+    ...writtenBy !== void 0 ? { writtenBy } : {}
+  };
+}
+function resolveFallback(f, mirror, defaults) {
+  if (mirror && f.id in mirror.values) {
+    const m = validate(f, mirror.values[f.id]);
+    if (m.ok) return { value: m.value, from: "the last settings I had" };
+  }
+  const dv = defaults[f.id];
+  return { value: Array.isArray(dv) ? [...dv] : dv, from: "the built-in default" };
+}
+function toMirror(settings, revision, writtenAt) {
+  const out = {};
+  for (const [id, v] of Object.entries(settings)) out[id] = v;
+  out[MIRROR_ENVELOPE_KEYS.revision] = revision;
+  out[MIRROR_ENVELOPE_KEYS.schemaVersion] = SCHEMA_VERSION;
+  if (writtenAt !== void 0) out[MIRROR_ENVELOPE_KEYS.writtenAt] = writtenAt;
+  return out;
+}
+function fromMirror(kv) {
+  if (!kv) return null;
+  const rev = kv[MIRROR_ENVELOPE_KEYS.revision];
+  if (typeof rev !== "number" || !Number.isInteger(rev)) return null;
+  const sv = kv[MIRROR_ENVELOPE_KEYS.schemaVersion];
+  const values = {};
+  for (const [k, v] of Object.entries(kv)) {
+    if (k.startsWith("__")) continue;
+    values[k] = v;
+  }
+  return { values, revision: rev, schemaVersion: typeof sv === "number" ? sv : SCHEMA_VERSION };
+}
+function promote(current, next) {
+  if (current !== null && next.revision <= current.revision) {
+    return {
+      promoted: false,
+      code: "stale_revision",
+      reason: `revision ${next.revision} is not newer than the ${current.revision} already loaded`
+    };
+  }
+  return { promoted: true, snapshot: next };
+}
+function reportDestination(channel, evidence) {
+  switch (channel) {
+    case "always-spoken":
+      return "speak-now";
+    case "on-request-only":
+      return "on-request-only";
+    default:
+      return evidence.huddleOn || evidence.speakRequestThisSession ? "speak-now" : "hold-for-first-utterance";
+  }
+}
+function settingsReportSentence(r) {
+  const parts = [];
+  if (r.fileError) {
+    const where = r.fileError.line === null ? "" : ` on or near line ${r.fileError.line}`;
+    parts.push(`Your settings file could not be read${where}. I am using the last good settings.`);
+  }
+  if (r.rejected.length > 0) {
+    const names = r.rejected.map((x) => SETTINGS_SCHEMA[x.field]?.label ?? x.field);
+    const shown = names.slice(0, 2);
+    const rest = names.length - shown.length;
+    const list = rest > 0 ? `${shown.join(", ")}, and ${rest} ${rest === 1 ? "other" : "others"}` : shown.join(" and ");
+    const n = r.rejected.length;
+    parts.push(`${n === 1 ? "One setting" : `${n} settings`} could not be read and ${n === 1 ? "is" : "are"} using ${n === 1 ? "its" : "their"} defaults: ${list}.`);
+  }
+  if (r.unknownFields.length > 0) {
+    const n = r.unknownFields.length;
+    parts.push(`${n === 1 ? "One setting" : `${n} settings`} in your file ${n === 1 ? "is" : "are"} newer than this version and ${n === 1 ? "was" : "were"} ignored.`);
+  }
+  if (r.migratedFrom !== void 0) {
+    parts.push(`Your settings file is from an older version and was read forward. It has not been changed.`);
+  }
+  if (parts.length === 0) return null;
+  parts.push("Say status to hear the rest.");
+  return parts.join(" ");
+}
 
 // packages/plugin/src/speech-service.ts
 var DEFAULT_MAX_QUEUED = 20;
@@ -2510,7 +3055,20 @@ var SpeechService = class {
   }
   /** What is being read right now, if the caller labelled it. */
   get nowReading() {
-    return this.#current;
+    return this.#current?.sessionLabel ?? null;
+  }
+  /** A fresh value object: consumers never receive the service's mutable queue. */
+  status() {
+    return {
+      generation: this.#playback.generation,
+      nowReading: this.#current,
+      queueDepth: this.#pending.length,
+      queue: this.#pending.map((entry) => ({
+        sessionId: entry.sessionId ?? null,
+        sessionLabel: entry.label ?? (entry.announcement === true ? "Read Aloud" : "Unlabelled speech"),
+        textPreview: entry.text.trim().replace(/\s+/g, " ").slice(0, 120)
+      }))
+    };
   }
   /** Abandon the current utterance and move to the next queued one. */
   async skip() {
@@ -2531,10 +3089,14 @@ var SpeechService = class {
       this.#skip = true;
       this.#observe(this.#playback.bargeIn(), "stop the current sentence");
     }
+    const entry = { text, announcement: true };
+    const snap = this.#deps.settings?.();
+    if (snap !== void 0) entry.snapshot = snap;
     let at = 0;
     while (this.#pending[at]?.announcement === true) at++;
-    this.#pending.splice(at, 0, { text, announcement: true });
+    this.#pending.splice(at, 0, entry);
     this.#cancelled = false;
+    this.#emitStatus();
     this.#observe(this.#drain(), "read that text");
   }
   /**
@@ -2553,10 +3115,11 @@ var SpeechService = class {
     let bytes = 0;
     let error = null;
     try {
-      const spokenText = normalize(phrase, this.#deps.normalizeOptions ?? {});
-      const chunker = new Chunker({});
+      const snapshot = this.#deps.settings?.();
+      const spokenText = normalize(phrase, this.#normalizeOptions(snapshot));
+      const chunker = new Chunker(this.#chunkerOptions(snapshot));
       for (const chunk of [...chunker.addText(spokenText), ...chunker.finish()]) {
-        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
+        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions(snapshot))) {
           chunks++;
           bytes += audio.data.length;
           await this.#deps.sink.enqueue(audio);
@@ -2582,6 +3145,8 @@ var SpeechService = class {
     const entry = { text };
     if (label !== void 0) entry.label = label;
     if (sessionId !== void 0) entry.sessionId = sessionId;
+    const snap = this.#deps.settings?.();
+    if (snap !== void 0) entry.snapshot = snap;
     this.#pending.push(entry);
     const max = this.#deps.maxQueued ?? DEFAULT_MAX_QUEUED;
     const replies = this.#pending.filter((p) => p.announcement !== true);
@@ -2593,6 +3158,7 @@ var SpeechService = class {
       this.#noteDropped(dropped);
     }
     this.#cancelled = false;
+    this.#emitStatus();
     void this.#drain();
   }
   /**
@@ -2665,6 +3231,7 @@ var SpeechService = class {
   async stop() {
     this.#cancelled = true;
     this.#pending = [];
+    this.#current = null;
     if (this.#dropTimer !== null) {
       clearTimeout(this.#dropTimer);
       this.#dropTimer = null;
@@ -2676,6 +3243,7 @@ var SpeechService = class {
     this.#losses.clear();
     this.#reattributed.clear();
     this.#droppedPendingAnnounce = 0;
+    this.#emitStatus();
     await this.#playback.bargeIn();
   }
   async #drain() {
@@ -2686,12 +3254,18 @@ var SpeechService = class {
         const next = this.#pending.shift();
         if (next === void 0) break;
         const attribution = next.announcement === true ? null : this.#reattribute(next);
-        this.#current = attribution?.label ?? next.label ?? null;
         this.#skip = false;
         const outcome = await this.#speakOne(
-          attribution === null ? next.text : attribution.prefix + next.text
+          attribution === null ? next.text : attribution.prefix + next.text,
+          next.snapshot,
+          {
+            sourceText: next.text,
+            sessionId: next.sessionId ?? null,
+            sessionLabel: attribution?.label ?? next.label ?? (next.announcement === true ? "Read Aloud" : "Unlabelled speech")
+          }
         );
         this.#current = null;
+        this.#emitStatus();
         if (next.announcement !== true) {
           if (outcome === "empty") this.#noteLoss("unspeakable");
           else if (outcome === "synthesis-failed") this.#noteLoss("synthesis-failed");
@@ -2700,6 +3274,8 @@ var SpeechService = class {
       }
     } finally {
       this.#draining = false;
+      this.#current = null;
+      this.#emitStatus();
     }
   }
   /**
@@ -2743,10 +3319,27 @@ var SpeechService = class {
    * Built fresh per utterance and omitting undefined fields, so "nothing passed" stays byte-for-
    * byte the request the provider received before.
    */
-  #synthesizeOptions() {
+  #synthesizeOptions(snapshot) {
+    if (snapshot !== void 0) {
+      return toSynthesizeOptions(snapshot.values, this.#deps.resolveVoice);
+    }
     const opts = {};
     if (this.#deps.voice !== void 0) opts.voice = this.#deps.voice;
     if (this.#deps.rate !== void 0) opts.rate = this.#deps.rate;
+    return opts;
+  }
+  /** Normalizer options for one utterance: the item's own snapshot, else the constructor's. */
+  #normalizeOptions(snapshot) {
+    return snapshot === void 0 ? this.#deps.normalizeOptions ?? {} : toNormalizeOptions(snapshot.values);
+  }
+  /** Chunker options for one utterance, same rule. */
+  #chunkerOptions(snapshot) {
+    if (snapshot !== void 0) return toChunkerOptions(snapshot.values);
+    const opts = {};
+    if (this.#deps.maxUnits !== void 0) opts.maxUnits = this.#deps.maxUnits;
+    if (this.#deps.isolateFirstSentence !== void 0) {
+      opts.isolateFirstSentence = this.#deps.isolateFirstSentence;
+    }
     return opts;
   }
   /**
@@ -2754,27 +3347,43 @@ var SpeechService = class {
    * all arrived at one indistinguishable early return, so the caller could not tell a loss the
    * listener should hear about from a control the listener just pressed.
    */
-  async #speakOne(text) {
-    const spoken = normalize(text, this.#deps.normalizeOptions ?? {});
+  async #speakOne(text, snapshot, identity) {
+    const spoken = normalize(text, this.#normalizeOptions(snapshot));
     if (spoken.length === 0) {
       this.#deps.log?.("nothing speakable in that text");
       return "empty";
     }
-    const chunkerOpts = {};
-    if (this.#deps.maxUnits !== void 0) chunkerOpts.maxUnits = this.#deps.maxUnits;
-    if (this.#deps.isolateFirstSentence !== void 0) {
-      chunkerOpts.isolateFirstSentence = this.#deps.isolateFirstSentence;
-    }
-    const chunker = new Chunker(chunkerOpts);
+    const chunker = new Chunker(this.#chunkerOptions(snapshot));
     const chunks = [...chunker.addText(spoken), ...chunker.finish()];
     if (chunks.some((c) => c.boundary === "scalar")) this.#noteLoss("cut-mid-word");
     const generation = this.#playback.begin();
-    for (const chunk of chunks) {
+    const startedAtEpochMs = Date.now();
+    this.#current = {
+      sessionId: identity.sessionId,
+      sessionLabel: identity.sessionLabel,
+      gen: generation,
+      sourceText: identity.sourceText,
+      spokenText: spoken,
+      sourceMap: null,
+      cursor: null,
+      chunkIndex: chunks.length === 0 ? 0 : 1,
+      chunkCount: chunks.length,
+      startedAtEpochMs,
+      estimatedMs: null
+    };
+    this.#emitStatus();
+    const synthOpts = this.#synthesizeOptions(snapshot);
+    for (let index = 0; index < chunks.length; index++) {
+      const chunk = chunks[index];
+      if (this.#current !== null && this.#current.chunkIndex !== index + 1) {
+        this.#current = { ...this.#current, chunkIndex: index + 1 };
+        this.#emitStatus();
+      }
       if (this.#cancelled) return "cancelled";
       if (this.#skip) return "skipped";
       if (generation !== this.#playback.generation) return "superseded";
       try {
-        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions())) {
+        for await (const audio of this.#deps.provider.generate(chunk.text, synthOpts)) {
           if (!this.#playback.push(generation, audio)) return "superseded";
         }
       } catch (err) {
@@ -2783,6 +3392,14 @@ var SpeechService = class {
       }
     }
     return "spoken";
+  }
+  /** Status reporting is supplementary; a dashboard failure must never stop speech. */
+  #emitStatus() {
+    try {
+      this.#deps.onStatus?.(this.status());
+    } catch (err) {
+      this.#deps.log?.(`could not publish dashboard status: ${String(err)}`);
+    }
   }
 };
 
@@ -3068,8 +3685,8 @@ var MAX_TRUNCATED_RETRIES = 6;
 function sessionLabel(file) {
   const parts = file.split(/[/\\]/);
   const name = (parts[parts.length - 1] ?? "").replace(/\.jsonl$/, "");
-  const project = (parts[parts.length - 2] ?? "").replace(/^-+/, "").split("-").slice(-3).join(" ");
-  return `${project}, session ${name.slice(0, 8)}`;
+  const project2 = (parts[parts.length - 2] ?? "").replace(/^-+/, "").split("-").slice(-3).join(" ");
+  return `${project2}, session ${name.slice(0, 8)}`;
 }
 var HuddleController = class {
   #deps;
@@ -3078,6 +3695,28 @@ var HuddleController = class {
   #lastReply = null;
   #locked = null;
   // the ONE session we are following
+  /**
+   * M16 presence. ADDITIVE to `#locked`, never a replacement for it.
+   *
+   * `#locked` is P22's remedy and it is load-bearing: it survives a re-fork precisely because
+   * losing it made the next `agent.status.changed` re-pick "whatever was touched last", which is
+   * P22 fault 1 (see C4 above). Presence answers a DIFFERENT question — "who else is here" — and
+   * must not answer it by widening what gets spoken.
+   *
+   * So the roster records every session we have SEEN produce a reply, while the lock still decides
+   * whose replies are read. That keeps G5 ("show who is in the room") honest without reopening the
+   * fault the lock closed.
+   */
+  #roster = /* @__PURE__ */ new Map();
+  /**
+   * Sessions whose replies must never reach the audio stream.
+   *
+   * Enforced at the ONE `speech.speak` call site, not at the surface. A mute that only hides a row
+   * is a lie to a listener who cannot see the row — he would still hear the agent he silenced.
+   */
+  #muted = /* @__PURE__ */ new Set();
+  /** The file whose reply was most recently handed to speech — "who is talking". */
+  #talking = null;
   #watcher = null;
   #watching = null;
   #stopTimer = null;
@@ -3188,6 +3827,43 @@ var HuddleController = class {
   }
   dispose() {
     this.#stopWatching();
+  }
+  /**
+   * G5: who is in the room, who is talking, and who is silenced.
+   *
+   * Returns data, not a rendering — the surface (M13) decides how to say it, and a test can assert
+   * against state it set itself rather than against a formatted string.
+   */
+  presence() {
+    const inRoom = [...this.#roster.entries()].sort((a, b) => b[1].lastReplyAt - a[1].lastReplyAt).map(([file, r]) => ({
+      file,
+      label: r.label,
+      replies: r.replies,
+      muted: this.#muted.has(file),
+      following: this.#locked === file
+    }));
+    return { inRoom, talking: this.#talking };
+  }
+  /**
+   * Silence one session. Returns the announcement, because a control that changes what the listener
+   * hears must say so IN the audio stream — he cannot see a muted row (P30).
+   */
+  mute(file) {
+    this.#muted.add(file);
+    if (this.#talking === file) this.#talking = null;
+    return `Muted ${sessionLabel(file)}. Its replies will not be read.`;
+  }
+  /**
+   * Unmute. Deliberately does NOT replay what was missed: the backlog was marked spoken while
+   * muted, so unmuting resumes rather than catching up. Replaying it would be P22's whole-history
+   * dump arriving by a new route.
+   */
+  unmute(file) {
+    const was = this.#muted.delete(file);
+    return was ? `Unmuted ${sessionLabel(file)}. New replies will be read; what it said while muted is not replayed.` : `${sessionLabel(file)} was not muted.`;
+  }
+  isMuted(file) {
+    return this.#muted.has(file);
   }
   /**
    * Follow a different session, announcing the switch so the listener is never disoriented.
@@ -3333,9 +4009,22 @@ var HuddleController = class {
       await this.#persistSpoken();
       return;
     }
+    const seen = this.#roster.get(file);
+    this.#roster.set(file, {
+      label: sessionLabel(file),
+      replies: (seen?.replies ?? 0) + fresh.length,
+      lastReplyAt: Date.now()
+    });
+    if (this.#muted.has(file)) {
+      for (const r of fresh) this.#spoken.add(r.id);
+      this.#deps.log(`read-aloud: ${fresh.length} repl${fresh.length === 1 ? "y" : "ies"} from ${sessionLabel(file)} not spoken (muted)`);
+      await this.#persistSpoken();
+      return;
+    }
     for (const r of fresh) {
       this.#spoken.add(r.id);
       this.#lastReply = r.text;
+      this.#talking = file;
       this.#deps.speech.speak(r.text, "queue", sessionLabel(file), file);
     }
     this.#deps.log(`read-aloud: spoke ${fresh.length} new repl${fresh.length === 1 ? "y" : "ies"}`);
@@ -3450,6 +4139,14 @@ var HuddleController = class {
       return { file: null, reason: skipped > 0 ? "root-unreadable" : "no-transcripts" };
     }
     files.sort((a, b) => b.mtime - a.mtime);
+    for (const f of files) {
+      const seen = this.#roster.get(f.path);
+      this.#roster.set(f.path, {
+        label: sessionLabel(f.path),
+        replies: seen?.replies ?? 0,
+        lastReplyAt: seen?.lastReplyAt ?? f.mtime
+      });
+    }
     const [first, second] = files;
     if (first !== void 0 && second !== void 0 && first.mtime - second.mtime < 2e3) {
       const pair = `${first.path}\0${second.path}`;
@@ -3513,11 +4210,437 @@ var HuddleController = class {
   }
 };
 
+// packages/plugin/src/settings/index.ts
+var INBOX_FILENAME = "settings.jsonc";
+var INBOX_DIRNAME = "orca-tts";
+function inboxDir(env, platform) {
+  const override = env["ORCA_TTS_CONFIG_DIR"];
+  if (override !== void 0 && override.length > 0) return override;
+  const home = env["HOME"] ?? env["USERPROFILE"] ?? ".";
+  if (platform === "win32") {
+    const appData = env["APPDATA"];
+    return join4(appData !== void 0 && appData.length > 0 ? appData : join4(home, "AppData", "Roaming"), INBOX_DIRNAME);
+  }
+  if (platform === "darwin") return join4(home, "Library", "Application Support", INBOX_DIRNAME);
+  const xdg = env["XDG_CONFIG_HOME"];
+  return join4(xdg !== void 0 && xdg.length > 0 ? xdg : join4(home, ".config"), INBOX_DIRNAME);
+}
+function inboxPath(env, platform) {
+  return join4(inboxDir(env, platform), INBOX_FILENAME);
+}
+function join4(...parts) {
+  return parts.join("/");
+}
+function nativeInboxPath(env, platform) {
+  const p = inboxPath(env, platform);
+  return platform === "win32" ? p.replaceAll("/", "\\") : p;
+}
+function isAbsent(err) {
+  const code = err?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+async function loadSettings(io, path, evidence) {
+  let mirror = null;
+  try {
+    mirror = fromMirror(await io.mirrorGet());
+  } catch (err) {
+    io.log?.(`read-aloud: settings mirror unreadable: ${String(err)}`);
+  }
+  let text = null;
+  let inboxFailure = null;
+  try {
+    text = await io.readInbox(path);
+  } catch (err) {
+    inboxFailure = isAbsent(err) ? { kind: "absent" } : { kind: "unreadable", reason: String(err) };
+  }
+  const result = text === null ? parse(void 0, { mirror }) : parseSettingsText(text, { mirror });
+  const wholeFileRefused = inboxFailure !== null || result.fileError !== void 0;
+  const source = !wholeFileRefused ? "inbox" : mirror !== null ? "mirror" : "defaults";
+  return {
+    snapshot: { revision: result.revision, values: result.settings },
+    result,
+    source,
+    path,
+    inboxFailure,
+    sentence: sentenceFor(result, inboxFailure, source, path),
+    destination: reportDestination(result.settings["announce.reportChannel"], evidence),
+    mirrorable: !wholeFileRefused
+  };
+}
+function sentenceFor(result, failure, source, path) {
+  const parts = [];
+  if (failure?.kind === "absent") {
+    if (source === "mirror") {
+      parts.push(
+        `I could not find your settings file at ${path}, so I am using the last settings I had. Save from the Voice Lab to write it again.`
+      );
+    }
+  } else if (failure?.kind === "unreadable") {
+    parts.push(
+      `Your settings file at ${path} could not be opened: ${failure.reason}. I am using ${source === "mirror" ? "the last settings I had" : "the built-in defaults"}.`
+    );
+  }
+  const fromParser = settingsReportSentence(result);
+  if (fromParser !== null) parts.push(fromParser);
+  return parts.length === 0 ? null : parts.join(" ");
+}
+var SettingsRuntime = class {
+  #snapshot;
+  #source = "defaults";
+  #path;
+  #rejected = 0;
+  #unknown = 0;
+  #writtenAt = null;
+  #writtenBy = null;
+  /** The host's runtime voice list. Empty until the provider answers; never guessed (P28). */
+  #voices = [];
+  /**
+   * The load's report sentence, kept for the LIFE of the session.
+   *
+   * 011 section 4.3a's correctness half: *the report is never dropped*, in any configuration.
+   * `on-request-only` is a channel, not a silence — so `status` must still be able to answer with
+   * the same sentence an hour later, which means it cannot be consumed by whoever reads it first.
+   */
+  #report = null;
+  /** ...and whether it is ALSO owed to the first utterance the listener asks for (4.3a). */
+  #owedToFirstUtterance = false;
+  constructor(path) {
+    this.#path = path;
+    this.#snapshot = { revision: 0, values: schemaDefaults() };
+  }
+  get snapshot() {
+    return this.#snapshot;
+  }
+  get values() {
+    return this.#snapshot.values;
+  }
+  get source() {
+    return this.#source;
+  }
+  get path() {
+    return this.#path;
+  }
+  get rejectedCount() {
+    return this.#rejected;
+  }
+  /**
+   * Adopt a load, if it is newer. Refused as `stale_revision` by the same rule the write path uses
+   * — and the FIRST promotion of a session is never refused, because there is nothing to be stale
+   * against (011 1.2a).
+   */
+  adopt(outcome, first = true) {
+    const r = promote(first ? null : this.#snapshot, outcome.snapshot);
+    if (!r.promoted) return false;
+    this.#snapshot = r.snapshot;
+    this.#source = outcome.source;
+    this.#path = outcome.path;
+    this.#rejected = outcome.result.rejected.length;
+    this.#unknown = outcome.result.unknownFields.length;
+    this.#writtenAt = outcome.result.writtenAt ?? null;
+    this.#writtenBy = outcome.result.writtenBy ?? null;
+    return true;
+  }
+  setVoices(voices) {
+    this.#voices = voices;
+  }
+  voiceName(index) {
+    return this.#voices[index];
+  }
+  normalizeOptions() {
+    return toNormalizeOptions(this.values);
+  }
+  chunkerOptions() {
+    return toChunkerOptions(this.values);
+  }
+  synthesizeOptions() {
+    return toSynthesizeOptions(this.values, (i) => this.voiceName(i));
+  }
+  /** The flat record written to ORCA's KV. Callers must only do this for a mirrorable load. */
+  mirrorRecord() {
+    return toMirror(this.values, this.#snapshot.revision, this.#writtenAt ?? void 0);
+  }
+  /** Record the report. Kept whether or not anything speaks it unprompted. */
+  setReport(sentence) {
+    this.#report = sentence;
+  }
+  get report() {
+    return this.#report;
+  }
+  /** Also owe it to the first requested utterance — the `when-audio-in-use` hold (011 4.3a). */
+  hold() {
+    if (this.#report !== null) this.#owedToFirstUtterance = true;
+  }
+  /**
+   * Take the report if it is owed to an utterance, ONCE. Returns `null` when nothing is owed —
+   * including when a report exists but its channel said "not unprompted", which is the whole
+   * distinction `on-request-only` buys.
+   */
+  takeHeld() {
+    if (!this.#owedToFirstUtterance) return null;
+    this.#owedToFirstUtterance = false;
+    return this.#report;
+  }
+  get hasHeld() {
+    return this.#owedToFirstUtterance;
+  }
+  /**
+   * R7-32's status clause. Four values, each chosen because it separates a specific confusion the
+   * listener has no other way to resolve: an unchanged `revision` means the plugin never saw their
+   * edit; a relative age separates "my edit landed" from "I am hearing last week's file";
+   * `writtenBy` separates "the lab overwrote my hand edit" from "my hand edit won"; the rejected
+   * count is the settings-health answer.
+   *
+   * Relative, never absolute: an absolute timestamp read aloud is a sentence nobody can parse.
+   */
+  statusClause(now) {
+    if (this.#source !== "inbox") {
+      const why = this.#source === "mirror" ? "I am using the last settings I had" : "I am using the built-in defaults";
+      return `No settings file was read from ${this.#path}, so ${why}.`;
+    }
+    const age = this.#writtenAt === null ? null : relativeAge(this.#writtenAt, now);
+    const by = this.#writtenBy === null ? "" : `, by ${writerPhrase(this.#writtenBy)}`;
+    const when = age === null ? "" : `, written ${age}`;
+    const counts = [];
+    if (this.#rejected > 0) {
+      counts.push(`${this.#rejected} field${this.#rejected === 1 ? " is" : "s are"} using defaults`);
+    }
+    if (this.#unknown > 0) {
+      counts.push(`${this.#unknown} ${this.#unknown === 1 ? "is" : "are"} newer than this version`);
+    }
+    const health = counts.length === 0 ? "" : ` ${counts.join(" and ")}.`;
+    return `Settings revision ${this.#snapshot.revision}${when}${by}, from ${this.#path}.${health}`;
+  }
+};
+function writerPhrase(writtenBy) {
+  const who = (writtenBy.split("/")[0] ?? writtenBy).trim();
+  if (who === "hand") return "hand";
+  if (who === "voice-lab") return "the Voice Lab";
+  if (who === "read-aloud") return writtenBy.includes("(restored)") ? "Read Aloud, rebuilt from the last good settings" : "Read Aloud";
+  return who.replaceAll("/", " ");
+}
+function relativeAge(writtenAt, now) {
+  const then = Date.parse(writtenAt);
+  if (Number.isNaN(then)) return null;
+  const secs = Math.max(0, Math.round((now - then) / 1e3));
+  if (secs < 90) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 90) return `${mins} minutes ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 36) return `${hours} hours ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
+// packages/plugin/src/control/dashboard.ts
+import { createConnection, createServer } from "node:net";
+import { mkdir, readFile as readFile3, rename, writeFile as writeFile2 } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { join as join5 } from "node:path";
+var DASHBOARD_FILE = "dashboard.json";
+var COMMAND_MAX_BYTES = 4096;
+var COMMAND_MAX_AGE_MS = 5e3;
+var EMPTY_SPEECH_STATUS = {
+  generation: 0,
+  nowReading: null,
+  queueDepth: 0,
+  queue: []
+};
+function defaultControlDir(env = process.env, platform = process.platform) {
+  if (env["ORCA_TTS_CONTROL_DIR"]) return env["ORCA_TTS_CONTROL_DIR"];
+  if (platform === "win32") {
+    return join5(env["LOCALAPPDATA"] ?? env["APPDATA"] ?? homedir2(), "orca-tts", "control");
+  }
+  if (platform === "darwin") return join5(homedir2(), "Library", "Application Support", "orca-tts", "control");
+  return join5(env["XDG_STATE_HOME"] ?? join5(homedir2(), ".local", "state"), "orca-tts", "control");
+}
+var endpointFor = (dir) => process.platform === "win32" ? `\\\\.\\pipe\\orca-tts-${process.pid}` : join5(dir, `control-${process.pid}.sock`);
+var responseLine = (socket, response) => {
+  socket.end(`${JSON.stringify(response)}
+`);
+};
+var parseEnvelope = (line) => {
+  let value;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return { ok: false, code: "invalid_envelope", message: "That control message was not valid JSON." };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, code: "invalid_envelope", message: "That control message was not an object." };
+  }
+  const record = value;
+  if (record["v"] !== 1 || typeof record["id"] !== "string" || record["id"].length === 0 || typeof record["verb"] !== "string" || typeof record["gen"] !== "number" || !Number.isSafeInteger(record["gen"]) || typeof record["at"] !== "number" || !Number.isFinite(record["at"])) {
+    return { ok: false, code: "invalid_envelope", message: "That control message was missing a required field." };
+  }
+  if (record["verb"] !== "stop") {
+    return { ok: false, code: "unknown_verb", message: `The ${record["verb"]} control has no plugin consumer.` };
+  }
+  return { v: 1, id: record["id"], verb: "stop", gen: record["gen"], at: record["at"] };
+};
+var DashboardRuntime = class {
+  #dir;
+  #path;
+  #endpoint;
+  #handlers;
+  #log;
+  #seen = [];
+  #server = null;
+  #writeSerial = Promise.resolve();
+  #speech = EMPTY_SPEECH_STATUS;
+  #engine = { state: "starting", name: "starting", rung: null, reason: null };
+  constructor(dir, handlers, log = () => {
+  }) {
+    this.#dir = dir;
+    this.#path = join5(dir, DASHBOARD_FILE);
+    this.#endpoint = endpointFor(dir);
+    this.#handlers = handlers;
+    this.#log = log;
+  }
+  get path() {
+    return this.#path;
+  }
+  async start() {
+    await mkdir(this.#dir, { recursive: true, mode: 448 });
+    await new Promise((resolve, reject) => {
+      const server = createServer((socket) => {
+        this.#accept(socket);
+      });
+      this.#server = server;
+      server.once("error", reject);
+      server.listen(this.#endpoint, () => {
+        server.off("error", reject);
+        server.on("error", (err) => {
+          this.#log(`dashboard control server failed: ${String(err)}`);
+        });
+        server.unref();
+        resolve();
+      });
+    });
+    await this.#publish();
+    this.#log(`read-aloud: dashboard listening at ${this.#endpoint}`);
+  }
+  updateSpeech(status) {
+    this.#speech = status;
+    void this.#publish();
+  }
+  updateEngine(engine) {
+    this.#engine = engine;
+    void this.#publish();
+  }
+  async close() {
+    const server = this.#server;
+    this.#server = null;
+    if (server === null) return;
+    await new Promise((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
+  }
+  #document() {
+    return {
+      status: {
+        version: 1,
+        updatedAtEpochMs: Date.now(),
+        engine: this.#engine,
+        ...this.#speech
+      },
+      control: { endpoint: this.#endpoint, pid: process.pid }
+    };
+  }
+  async #publish() {
+    const document = this.#document();
+    const json = `${JSON.stringify(document, null, 2)}
+`;
+    this.#writeSerial = this.#writeSerial.then(async () => {
+      const temp = `${this.#path}.${process.pid}.tmp`;
+      await writeFile2(temp, json, { encoding: "utf8", mode: 384 });
+      await rename(temp, this.#path);
+    }).catch((err) => {
+      this.#log(`could not publish dashboard status: ${String(err)}`);
+    });
+    await this.#writeSerial;
+  }
+  #accept(socket) {
+    socket.setEncoding("utf8");
+    let buffer = "";
+    socket.on("data", (part) => {
+      buffer += part;
+      if (Buffer.byteLength(buffer, "utf8") > COMMAND_MAX_BYTES) {
+        const response = {
+          ok: false,
+          code: "invalid_envelope",
+          message: "That control message was too large."
+        };
+        this.#handlers.announceRefusal(response.message);
+        responseLine(socket, response);
+        return;
+      }
+      const newline = buffer.indexOf("\n");
+      if (newline === -1) return;
+      const line = buffer.slice(0, newline);
+      buffer = "";
+      void this.#dispatch(line, socket);
+    });
+    socket.on("error", (err) => {
+      this.#log(`dashboard control connection failed: ${String(err)}`);
+    });
+  }
+  async #dispatch(line, socket) {
+    const parsed = parseEnvelope(line);
+    if ("ok" in parsed) {
+      this.#handlers.announceRefusal(parsed.message);
+      responseLine(socket, parsed);
+      return;
+    }
+    if (this.#seen.includes(parsed.id)) {
+      responseLine(socket, { ok: true, code: "duplicate" });
+      return;
+    }
+    this.#seen.push(parsed.id);
+    if (this.#seen.length > 64) this.#seen.shift();
+    if (Date.now() - parsed.at > COMMAND_MAX_AGE_MS) {
+      const response = {
+        ok: false,
+        code: "expired",
+        message: "That Stop control arrived too late and was not applied."
+      };
+      this.#handlers.announceRefusal(response.message);
+      responseLine(socket, response);
+      return;
+    }
+    const currentGeneration = this.#speech.nowReading?.gen ?? this.#speech.generation;
+    if (parsed.gen < currentGeneration) {
+      const response = {
+        ok: false,
+        code: "stale_generation",
+        message: "That Stop control belonged to an earlier reply and was not applied."
+      };
+      this.#handlers.announceRefusal(response.message);
+      responseLine(socket, response);
+      return;
+    }
+    try {
+      await this.#handlers.stop();
+      responseLine(socket, { ok: true, code: "stopped" });
+    } catch (err) {
+      const response = {
+        ok: false,
+        code: "action_failed",
+        message: `Stop did not reach speech: ${String(err)}`
+      };
+      this.#handlers.announceRefusal(response.message);
+      responseLine(socket, response);
+    }
+  }
+};
+
 // packages/plugin/src/main.ts
 var EXPECTED_COMMANDS = 9;
 function activate(orca, options = {}) {
   let announce = () => {
   };
+  const settingsPath = options.settingsDir === void 0 ? nativeInboxPath(process.env, process.platform) : `${options.settingsDir}/settings.jsonc`;
+  const settings = new SettingsRuntime(settingsPath);
   const host = makeHost(orca, {
     // 006 section 19 rank 2: `{ delivered }` was computed by ORCA and discarded here, so a muted
     // tray, focus assist or a revoked permission silenced every announcement in this plugin while
@@ -3538,6 +4661,10 @@ function activate(orca, options = {}) {
     // and is waiting to find out whether anything happened.
     onCommandFailed: (id, reason) => {
       announce(`That control did not work: ${id.replace("read-aloud.", "")}. ${reason}`, "now");
+    },
+    // Logged, answerable by `status`, and deliberately not spoken — see the hook's own comment.
+    onSettingsFailure: (f) => {
+      host.log(`read-aloud: settings mirror ${f.op} failed: ${f.reason}`);
     }
   });
   host.log("read-aloud: activating");
@@ -3566,6 +4693,25 @@ function activate(orca, options = {}) {
     else if (deferredAnnouncements.length < MAX_DEFERRED) deferredAnnouncements.push(message);
     else deferredDropped++;
   };
+  const dashboardDisabled = options.controlDir === false || options.controlDir === void 0 && options.settingsDir !== void 0;
+  const dashboard = dashboardDisabled ? null : new DashboardRuntime(options.controlDir ?? defaultControlDir(), {
+    // The control server awaits the REAL effect. A transport receipt is not success: stop()
+    // returns only after synthesis cancellation and sink flush have both been requested.
+    stop: async () => {
+      if (speech === null) throw new Error("the speech engine is still starting");
+      await speech.stop();
+    },
+    // A received control with no consumer is said in the audio stream, never discarded as an
+    // inert message or left only in a log (P30 and the G2 brief).
+    announceRefusal: (message) => {
+      announce(message, "now");
+    }
+  }, host.log);
+  if (dashboard !== null) {
+    void dashboard.start().catch((err) => {
+      announce(`The Read Aloud control pane could not connect: ${String(err)}.`, "next");
+    });
+  }
   registry.register(
     options.provider ?? new OsSynthProvider({ notify: (m) => {
       announce(m);
@@ -3577,6 +4723,7 @@ function activate(orca, options = {}) {
       const detail = registry.lastFailureDetail;
       const why = detail === null ? registry.lastFailure ?? "no speech engine is available on this system" : `no speech engine is available on this system (${detail.kind}) \u2014 ${detail.reason}`;
       engineError = why;
+      dashboard?.updateEngine({ state: "failed", name: "unavailable", rung: null, reason: why });
       host.log(`read-aloud: ${why}`);
       host.notify("Read Aloud", why);
       return;
@@ -3586,6 +4733,13 @@ function activate(orca, options = {}) {
       sink,
       log: host.log,
       maxQueued: 8,
+      // 011 section 2.3: a GETTER, not values. The service is constructed once and lives for the
+      // session; the listener's file can change at any point inside it.
+      settings: () => settings.snapshot,
+      resolveVoice: (i) => settings.voiceName(i),
+      ...dashboard === null ? {} : { onStatus: (status) => {
+        dashboard.updateSpeech(status);
+      } },
       ...options.announceDelayMs === void 0 ? {} : { announceDelayMs: options.announceDelayMs },
       // Supplement only. The spoken sentence naming the count comes from SpeechService itself, so
       // it cannot be lost by a notification channel that is muted, denied, or simply not looked at.
@@ -3599,7 +4753,19 @@ function activate(orca, options = {}) {
         host.notify("Read Aloud", `Skipped ${n2} older repl${n2 === 1 ? "y" : "ies"} to keep up`);
       }
     });
+    dashboard?.updateSpeech(speech.status());
+    dashboard?.updateEngine({
+      state: "ready",
+      name: resolved.provider.displayName,
+      rung: resolved.status.rung,
+      reason: resolved.status.reason ?? null
+    });
     host.log(`read-aloud: engine ready (${resolved.provider.displayName}, rung=${resolved.status.rung})`);
+    void Promise.resolve(resolved.provider.listVoices()).then((voices) => {
+      settings.setVoices(voices);
+    }).catch((err) => {
+      host.log(`read-aloud: could not list voices: ${String(err)}`);
+    });
     for (const m of deferredAnnouncements.splice(0)) speech.announce(m, "next");
     if (deferredDropped > 0) {
       speech.announce(
@@ -3611,9 +4777,18 @@ function activate(orca, options = {}) {
     if (resolved.status.reason !== void 0) announce(resolved.status.reason);
   }).catch((err) => {
     engineError = String(err);
+    dashboard?.updateEngine({ state: "failed", name: "unavailable", rung: null, reason: engineError });
     host.log(`read-aloud: engine resolution failed: ${engineError}`);
     host.notify("Read Aloud", `speech engine failed to start: ${engineError}`);
   });
+  let speakRequestThisSession = false;
+  const flushHeldReport = (s) => {
+    const held = settings.takeHeld();
+    if (held === null) return false;
+    s.announce(`Before that. ${held}`, "next");
+    return true;
+  };
+  const modeAfter = (flushed) => flushed ? "queue" : "replace";
   const withSpeech = async (fn) => {
     if (speech === null) {
       host.notify("Read Aloud", engineError ?? "still starting up, try again in a moment");
@@ -3622,6 +4797,7 @@ function activate(orca, options = {}) {
     await fn(speech);
   };
   host.registerCommand("read-aloud.speak-clipboard", async () => {
+    speakRequestThisSession = true;
     await withSpeech(async (s) => {
       if (s.isSpeaking) {
         await s.stop();
@@ -3633,7 +4809,7 @@ function activate(orca, options = {}) {
           announce("The clipboard is empty.", "now");
           return;
         }
-        s.speak(text);
+        s.speak(text, modeAfter(flushHeldReport(s)));
         if (truncated) announce("That clipboard was long, so you heard the first part of it.", "next");
       } catch (err) {
         announce(err instanceof ClipboardUnavailableError ? err.message : `Could not read the clipboard: ${String(err)}`, "now");
@@ -3672,7 +4848,39 @@ function activate(orca, options = {}) {
     store: { get: host.storageGet, set: host.storageSet },
     ...options.projectsDir === void 0 ? {} : { projectsDir: options.projectsDir }
   });
-  void huddle.restore().then((on) => {
+  const huddleRestored = huddle.restore();
+  void (async () => {
+    const huddleOn = await huddleRestored.catch(() => false);
+    const outcome = await loadSettings(
+      {
+        readInbox: (path) => readFile4(path, "utf8"),
+        mirrorGet: () => host.settingsGet(),
+        log: host.log
+      },
+      settingsPath,
+      { huddleOn, speakRequestThisSession }
+    );
+    settings.adopt(outcome);
+    settings.setReport(outcome.sentence);
+    host.log(
+      `read-aloud: settings loaded from ${outcome.source} (revision ${outcome.snapshot.revision}, ${outcome.result.rejected.length} rejected, ${outcome.result.unknownFields.length} unknown) at ${outcome.path}`
+    );
+    if (outcome.mirrorable) void host.settingsSet(settings.mirrorRecord());
+    if (outcome.sentence === null) return;
+    switch (outcome.destination) {
+      case "speak-now":
+        announce(outcome.sentence, "next");
+        break;
+      case "hold-for-first-utterance":
+        settings.hold();
+        host.notify("Read Aloud", outcome.sentence);
+        break;
+      case "on-request-only":
+        host.notify("Read Aloud", outcome.sentence);
+        break;
+    }
+  })();
+  void huddleRestored.then((on) => {
     host.log(`read-aloud: huddle mode restored to ${on ? "on" : "off"}`);
     const again = huddle.restoredAnnouncement();
     if (again !== null) announce(again, "next");
@@ -3693,6 +4901,10 @@ function activate(orca, options = {}) {
       if (now !== null) parts.push(`Now reading ${now}.`);
       if (s.queued > 0) parts.push(`${s.queued} more waiting.`);
       else if (now === null) parts.push("Nothing is being read.");
+      parts.push(settings.statusClause(Date.now()));
+      const report = settings.report;
+      if (report !== null) parts.push(report);
+      settings.takeHeld();
       s.announce(parts.join(" "), "now");
     });
   });
@@ -3714,13 +4926,14 @@ function activate(orca, options = {}) {
     if (!huddle.enabled) announce("Huddle mode is off, so replies will not be spoken yet.", "next");
   });
   host.registerCommand("read-aloud.speak-last-reply", async () => {
+    speakRequestThisSession = true;
     await withSpeech(async (s) => {
       const text = await huddle.lastReply();
       if (text === null) {
         announce("There is no agent reply to read yet.", "now");
         return;
       }
-      s.speak(text);
+      s.speak(text, modeAfter(flushHeldReport(s)));
     });
   });
   let malformedEvents = 0;

@@ -46,7 +46,22 @@ The three mutations are permanent named entries in `scripts/mutation-check.mjs`:
 
 ## Detached verification
 
-To be filled from the pinned detached-worktree run before handoff.
+Pinned detached worktree at `f029e6f`, after `pnpm install --frozen-lockfile`:
+
+- `pnpm typecheck` — PASS; `pnpm lint` — PASS with pre-existing warnings only; `pnpm build` —
+  PASS; `pnpm size-gate` — **4 files / 0.18 MB**; built-artifact activation smoke — PASS with
+  **9 commands** and `agent.status.changed`; load average **6.42** at start `[measured-here]`.
+- Targeted G2 oracle — **1/1 PASS**, 318 ms test duration, load average 6.23 at end
+  `[measured-here]`.
+- Full `pnpm test` — **RED for one unrelated G5/M16 failure**, at load average **7.77**
+  `[measured-here]`: `packages/plugin/src/huddle/presence.test.ts` says unmute replayed
+  `must never be heard`. G2 itself passed in that run. This worker did not change M16-owned code;
+  the exact pinned failure was escalated to the coordinator.
+- `node scripts/mutation-check.mjs` — **40/40 behaved as declared**, including all three new G2
+  mutants, at load average **15.12 → 7.06** `[measured-here]`. This is **+3 declarations and +6
+  behaving declarations versus the contract baseline 34/37 at `6049c26`, load 11.01**: the three
+  old survivors are now killed and the three new G2 claims are killed. Equivalent mutants retain
+  their declared SURVIVED verdicts.
 
 ## Deferred, with reasons
 

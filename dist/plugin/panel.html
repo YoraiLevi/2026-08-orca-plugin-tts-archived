@@ -18,10 +18,10 @@
 </style>
 <h1>Read Aloud</h1>
 <div class="note" style="border-color:var(--accent)">
-  <strong>Press <code>Mod+Shift+U</code> to hear the current status.</strong>
+  <strong>Live status is in the Read Aloud terminal dashboard.</strong>
   This panel cannot show live state: ORCA has no channel from a plugin's worker to its panel
-  (<em>orca#15638</em>), so anything shown here would be a guess. Speech is the honest indicator —
-  the plugin says its own state out loud.
+  (<em>orca#15638</em>), so anything shown here would be a guess. Open a terminal in this worktree
+  and run <code>orca-tts control</code>, or press <code>Mod+Shift+U</code> to hear the status.
 </div>
 <div class="row"><span class="k">Say status</span><span class="v"><code>Mod+Shift+U</code></span></div>
 <div class="row"><span class="k">Speak clipboard</span><span class="v"><code>Mod+Shift+S</code></span></div>
@@ -29,8 +29,8 @@
 <div class="row"><span class="k">Toggle huddle</span><span class="v"><code>Mod+Shift+H</code></span></div>
 <div class="note" style="border-color:var(--accent)">
   <strong>Shortcuts need app focus.</strong> Click the sidebar or a settings pane first — with a
-  terminal focused, ORCA does not deliver plugin shortcuts at all. For terminal-heavy work use
-  huddle mode, which needs no shortcut once it is on.
+  terminal focused, ORCA does not deliver plugin shortcuts at all. The terminal dashboard's
+  <code>s</code> Stop control remains reachable there and acts directly on the plugin.
 </div>
 <div class="note">
   <strong>Other limits.</strong> ORCA exposes no way for a plugin to read your editor selection, so

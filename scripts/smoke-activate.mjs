@@ -11,6 +11,9 @@
  */
 const mod = await import('../dist/plugin/main.mjs')
 const activate = mod.default
+const { mkdtemp } = await import('node:fs/promises')
+const { tmpdir } = await import('node:os')
+const { join } = await import('node:path')
 
 if (typeof activate !== 'function') {
   console.error('FAIL: dist/plugin/main.mjs must default-export activate')
@@ -19,12 +22,17 @@ if (typeof activate !== 'function') {
 
 const registered = []
 const events = []
+const isolated = await mkdtemp(join(tmpdir(), 'orca-tts-smoke-'))
 activate({
   commands: { register: (id) => registered.push(id) },
   events: { on: (name) => events.push(name) },
   host: { call: async () => ({}) },
   log: (m) => console.log('  [plugin]', m)
-}, { controlDir: false })
+}, {
+  controlDir: false,
+  projectsDir: join(isolated, 'projects'),
+  settingsDir: join(isolated, 'settings')
+})
 
 await new Promise((r) => setTimeout(r, 2000))
 
