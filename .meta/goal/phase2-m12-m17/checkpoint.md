@@ -275,3 +275,35 @@ The checks were all present. None could be heard.
    in the ledger; it broke macOS and was reverted.
 3. Round 14. The counter is 0 of 3 after thirteen rounds.
 4. **G4 is the author's** and blocks M14b: the D002 Q5 policy needs to be chosen in the Voice Lab.
+
+## Window 2 wind-down — the author used it, and it broke
+
+**The session that mattered most produced the worst experience.** He ran `pnpm voice-lab`, got an
+`EADDRINUSE` stack trace, and every press then failed with a message repaired that morning —
+including an Ubuntu `apt install` hint on a Mac.
+
+**Cause: he was talking to a Voice Lab from ten hours earlier.** The port was held, the new process
+died, the OLD one kept answering. Nothing in the output suggested he had reached a different
+program. Fixed: `EADDRINUSE` now names what is probably holding the port, why it matters, and the
+three ways out.
+
+**His actual complaint, verbatim, and it is right:** *"i don't understand the buttons i see nor i
+understand what all the ui dues, don't scatter me around to edit config files locally. make the
+webui editable in place for both settings and examples, allow me to make new examples too."*
+
+The Lab was built to settle taste by ear and then asked him to read 52 controls named after schema
+fields and hand-edit a JSONC file. That is a form, not an instrument.
+
+**Done this window:** examples are writable from the page — `PUT /fixtures/<name>` and `DELETE`,
+guarded by `safeJoin` containment AND a charset rule. The charset test earned its keep: its first
+version could not fail for the guard it named, because containment caught `../../evil` alone.
+
+**NEXT, and it is the priority above everything else:**
+
+1. **In-place settings editing in the page.** No config file, no restart.
+2. **An example editor** — edit the loaded example, save, hear it; create a new one from a phrase.
+3. **Controls that explain themselves.** 52 of them named after schema fields is the problem he
+   actually reported. Group by what a listener hears, not by which options object they live in.
+
+Everything else — the remaining milestones, the review protocol — is behind this. An instrument he
+cannot use is worth less than one milestone he can hear.
