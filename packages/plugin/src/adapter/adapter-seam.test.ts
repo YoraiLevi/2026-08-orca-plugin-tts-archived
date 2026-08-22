@@ -44,12 +44,13 @@ describe('SC-20 — the adapter never sends params ORCA would reject', () => {
     const host = makeHost(orca, {})
     host.notify('x'.repeat(400), 'y'.repeat(4000))
     await new Promise((r) => setTimeout(r, 20))
-    const p = calls.find((c) => c.m === 'notifications.show')?.p
-    expect(p, 'no notification was attempted at all').toBeDefined()
-    expect((p?.['title'] as string).length,
+    const found = calls.find((c) => c.m === 'notifications.show')
+    expect(found, 'no notification was attempted at all').toBeDefined()
+    const p = found?.p ?? {}
+    expect(String(p['title'] ?? '').length,
       `title exceeds ORCA's max(${TITLE_MAX}); zod rejects the call and the announcement is silent`)
       .toBeLessThanOrEqual(TITLE_MAX)
-    expect((p?.['body'] as string).length,
+    expect(String(p['body'] ?? '').length,
       `body exceeds ORCA's max(${BODY_MAX})`).toBeLessThanOrEqual(BODY_MAX)
   })
 
@@ -64,7 +65,7 @@ describe('SC-20 — the adapter never sends params ORCA would reject', () => {
     await new Promise((r) => setTimeout(r, 20))
     const p = calls.find((c) => c.m === 'notifications.show')?.p
     if (p === undefined) return   // refusing to send is a legitimate answer
-    expect((p['title'] as string).length,
+    expect(String(p['title'] ?? '').length,
       `sent title="" — ORCA's schema is z.string().min(${TITLE_MIN}), so this call is REJECTED and `
       + 'the announcement reaches nobody while the plugin reports success')
       .toBeGreaterThanOrEqual(TITLE_MIN)
