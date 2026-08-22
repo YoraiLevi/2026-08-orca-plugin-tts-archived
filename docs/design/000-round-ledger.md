@@ -425,3 +425,35 @@ That is the finding to carry into round 14: **the protocol is now better at find
 instruments than broken code**, which is what a converging codebase should look like — and it is
 also why the counter has not started. An instrument that cannot fail is invisible to every method
 except deliberately breaking it.
+
+### Round 13's follow-ons, resolved 2026-08-22
+
+**R13-03 (G8 ticked from one platform) produced a real product fix.** The Windows leg's probe
+reported that **SAPI spells `1234567` digit by digit** — 139,800 B, Δ76,716 from the spelled-out
+reference, controls green. `013` Q64 named that exact risk and it had been called retired when
+espeak-ng came back clean. **Two platforms agreeing is not three.** `numberToWords` now runs to
+just under a billion; above that the numeral is still handed over, and that is now stated as a
+judgement about **listenability** rather than a claim about engines.
+
+**R8-22 closed as a side effect, not by being worked on.** Two numbers either side of the old
+ceiling were read in two different systems in one breath. At a billion, both are spoken. Its
+`it.fails` marker went red the moment the ceiling landed — the convention doing exactly its job:
+an open contract green *because* it is broken, turning red when someone fixes it.
+
+**And the ceiling fix broke three files, because the architect verified narrowly.** 175/175 on one
+directory looked like confirmation; `SC-10` and two other rows asserted the old ceiling. CI caught
+it on all three OSes. The full suite in a pinned worktree is **790/790**. SC-10 is the redeeming
+part: it had *already* split "core half decides where the ceiling is" from "platform half decides
+whether an engine reads a bare numeral, and that belongs in CI on each OS". CI answered, and the
+row that predicted the answer moved with it.
+
+**The probe then went stale and had to be re-pointed.** It was right about `1234567`, which is why
+that value is now spoken — so it would have kept failing about a case the product no longer
+produces. It now tests the boundary the product actually crosses, above a billion, because that is
+where the hand-over judgement now lives. **An indicator that outlives its premise reports a true
+thing about the world and a false one about us.**
+
+**Still open:** `half-written-line-concluded-on` survives on Linux. Two fixes attempted — one
+changed the timing and broke macOS (reverted); one changed the assertion from outcome to code
+path, which is right in principle and did not take. Being settled with evidence rather than a
+third guess.
