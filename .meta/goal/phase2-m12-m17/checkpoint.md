@@ -146,3 +146,32 @@ releases.
 **Consequence for the 8-hour plan:** wave 2 (M13 dashboard, M16 huddle presence) cannot be
 dispatched in-process. Either bind a Run and dispatch through ORCA, or the architect does the
 work directly. Do not silently drop the milestones.
+
+## Dispatch state 04:22 — two mechanisms degraded, work rerouted
+
+**In-process `Agent` dispatch: dead.** `TMUX` names an agent-team directory that does not exist.
+
+**ORCA orchestration: partially working, and it is the route that survived.**
+Run **`run_6cacb5c5f4f2`**, coordinator handle `term_197efdbd` (this terminal).
+
+| Task | Gate | State |
+|---|---|---|
+| `task_1d8cb1712962` | G2, M13 dashboard | **dispatched**, codex worker |
+| `task_13b2e15aa4e2` | G5, M16 huddle presence | **failed twice** — `Agent startup blocked: codex-update-prompt` |
+
+`--agent claude` is refused outright: `agent_unconfigured — Agent launcher claude is disabled or
+unavailable`. `--agent codex` works, but the codex updater prompt blocks startup after the first
+launch, and it blocked both M16 attempts.
+
+**Decision: the architect builds M16 directly.** Two identical failures is a mechanism problem,
+and a milestone must not stall on a launcher prompt with the author away until 12:00. This
+departs from "the architect orchestrates and never does deep work" deliberately and for a stated
+reason — the doctrine exists to keep the architect's context disposable, and that is preserved by
+the same discipline it always was: checkpoint before each step, commit continuously, push.
+
+**Still live from the pre-break dispatch:** M14-spoken (normalizer, five-file renumber staged)
+and G8-mutants. Both were created before the tmux break and still take messages.
+
+**File ownership while M16 is mine:** `packages/plugin/src/huddle/**` and its tests. M14 holds
+`packages/core/src/normalizer/**`, `scripts/voice-lab*`, `voice-lab/**`. M13's codex worker holds
+the panel/TUI surface. Disjoint.
