@@ -500,6 +500,7 @@ for (const m of chosen) {
   const path = abs(m.file)
   const original = readFileSync(path, 'utf8')
   const edits = m.edits ?? [[m.from, m.to]]
+  let lastOutput = ''
   let verdict
   try {
     writeFileSync(path, applyEdits(original, edits))
@@ -507,6 +508,11 @@ for (const m of chosen) {
     if (m.only !== undefined) args.push('-t', m.only)
     const r = spawnSync('npx', args, { cwd: ROOT, encoding: 'utf8' })
     verdict = r.status === 0 ? 'SURVIVED' : 'killed'
+    // Keep the output. It was thrown away, and that made an UNEXPECTED verdict unanswerable:
+    // `half-written-line-concluded-on` survives on CI's Linux and is killed in a container built
+    // to match it, across repeated runs — and there was no way to see what CI's run actually did.
+    // Three separate hypotheses were built and discarded on that missing evidence.
+    lastOutput = `${r.stdout ?? ''}${r.stderr ?? ''}`
   } catch (err) {
     verdict = `ERROR: ${err.message}`
   } finally {
@@ -530,6 +536,13 @@ for (const m of chosen) {
   console.log(`[${tag}] ${m.id.padEnd(30)} ${verdict.padEnd(9)} ${m.claim}`)
   if (!ok && verdict === 'SURVIVED') {
     console.log(`         ^ nothing in ${m.test} noticed. That test cannot fail for this reason.`)
+    // The last 25 lines of what the suite actually said, so an unexpected survival can be
+    // diagnosed from the run that produced it rather than reproduced somewhere else first.
+    const tail = lastOutput.split('\n').filter((l) => l.trim() !== '').slice(-25)
+    if (tail.length > 0) {
+      console.log('         --- test output (tail) ---')
+      for (const line of tail) console.log(`         | ${line}`)
+    }
   }
   if (!ok && verdict === 'killed') {
     console.log(`         ^ marked equivalent but it DID break a test — the note is wrong: ${m.note}`)
