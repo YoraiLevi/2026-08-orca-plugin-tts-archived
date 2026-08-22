@@ -18,22 +18,32 @@
  *   U3  editing the example changes the spoken text — with a no-op control
  *   U4  two plays in succession never overlap: at most one audio source is live at a time
  *   U5  one transform is one continuous, labelled mark
- *   U6  the voice picker exposes both backends, and switching backend changes synthesis
- *   U7  an absent Pocket model downloads and becomes ready without navigation
- *   U8  switching backend cannot replay cached bytes from the preceding voice
- *   U9  provenance follows the backend that completed speech, including fallback
+ *   U6  the voice picker exposes both backends, and Play of a Pocket voice is served by Pocket
+ *       (INCONCLUSIVE when Pocket is absent — a green fallback is not a neural voice)
+ *   U7  an absent Pocket model: a failed download names the error and keeps the OS floor, then a
+ *       successful stub download becomes ready without navigation
+ *   U8  switching voice cannot replay cached bytes — os→pocket, pocket→os, AND pocket→pocket
+ *   U9  provenance follows the backend that completed speech: OS fallback when Pocket cannot,
+ *       Pocket when it can. This check plays itself; leftover state from U8 is not evidence.
  *
  * EACH CHECK CAN FAIL, and `--prove` demonstrates it: it re-runs every provable check against a
  * deliberately broken copy of the page and requires them to go red. A check that could not have
  * failed is not a check.
+ *
+ * TWO ARMS. The default is a hermetic empty model directory, so U7's download button exists and
+ * U9 can see the OS fallback. If a Pocket install is on disk (`ORCA_TTS_MODEL_DIR` or
+ * `~/.buzz/models/pocket-tts`), a second arm re-runs U6/U8/U9 against it and REQUIRES Pocket to
+ * be what spoke. A probe that cannot say "I could not tell" reports acceptable under conditions
+ * it never tested — that is R16-05.
  *
  * SILENT — P31, the author is at this machine. Chrome runs headless with `--mute-audio` and
  * `--disable-audio-output`, and the injected probe additionally pins a zero gain node between
  * every source and the destination. Four mechanisms, same as `bench-lab-gate.mjs`.
  *
  * Usage:
- *   node scripts/ui-probe.mjs            # run all checks
- *   node scripts/ui-probe.mjs --prove    # also prove each one can go red
+ *   node scripts/ui-probe.mjs            # hermetic arm, plus Pocket arm if the model is on disk
+ *   node scripts/ui-probe.mjs --prove    # also prove each check can go red
+ *   node scripts/ui-probe.mjs --only=U9  # one check (U9 must stand alone; it plays itself)
  */
 
 import { spawn } from 'node:child_process'
@@ -106,41 +116,78 @@ const PROBE = String.raw`
 (() => {
   const nativeFetch = window.fetch.bind(window);
   const p = {
-    live: 0, maxLive: 0, started: 0, errors: [], requests: [],
-    stubDownload: false, downloadComplete: false
+    live: 0, maxLive: 0, started: 0, errors: [], requests: [], speakHeads: [],
+    stubDownload: false, stubDownloadError: false, downloadComplete: false
   };
   window.__ui = p;
 
+  function ndjsonBody (records, onLast) {
+    const enc = new TextEncoder();
+    return new ReadableStream({
+      start (controller) {
+        controller.enqueue(enc.encode(JSON.stringify(records[0]) + String.fromCharCode(10)));
+        setTimeout(() => controller.enqueue(enc.encode(JSON.stringify(records[1]) + String.fromCharCode(10))), 120);
+        setTimeout(() => {
+          if (onLast) onLast();
+          controller.enqueue(enc.encode(JSON.stringify(records[2]) + String.fromCharCode(10)));
+          controller.close();
+        }, 520);
+      }
+    });
+  }
+
+  function recordSpeakHead (response) {
+    const cloned = response.clone();
+    const type = response.headers.get('content-type') || '';
+    cloned.text().then((text) => {
+      try {
+        if (type.includes('ndjson')) {
+          for (const line of text.split(String.fromCharCode(10))) {
+            if (!line.trim()) continue;
+            const rec = JSON.parse(line);
+            if (rec.kind === 'head' || rec.backend || rec.degradation) p.speakHeads.push(rec);
+          }
+        } else if (text) {
+          p.speakHeads.push(JSON.parse(text));
+        }
+      } catch (e) { p.errors.push(String(e)); }
+    }).catch((e) => { p.errors.push(String(e)); });
+  }
+
   // PV-042's independent control. The real endpoint is a 173.8 MB network action, so the probe
   // must never press it. When explicitly armed by U7/U8, this substitutes a tiny NDJSON download
-  // and makes the NEXT /voices response report the same twelve entries as ready. Normal page runs
-  // and every other endpoint still reach the real 127.0.0.1 server.
+  // and makes the NEXT /voices response report the same twelve entries as ready. U7 also arms
+  // stubDownloadError to emit kind: 'error' — without that arm, deleting the catch in
+  // downloadVoices() cannot turn U7 red. Normal page runs and every other endpoint still reach
+  // the real 127.0.0.1 server.
   window.fetch = async function (input, init = {}) {
     const url = new URL(typeof input === 'string' ? input : input.url, location.href);
     p.requests.push({ url: url.pathname, method: init.method || 'GET', body: init.body || null });
 
+    if (p.stubDownloadError && url.pathname === '/model/download') {
+      const records = [
+        { kind: 'start', backend: 'pocket', fileCount: 20, totalBytes: 173764082 },
+        { kind: 'progress', backend: 'pocket', file: 'bundle.json', received: 24381, total: 24381, fileIndex: 0, fileCount: 20 },
+        { kind: 'error', ok: false, error: 'model_download_failed', backend: 'pocket',
+          file: 'bundle.json', name: 'Error', cause: 'injected download failure',
+          message: 'injected download failure' }
+      ];
+      return new Response(ndjsonBody(records), { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+    }
+
     if (p.stubDownload && url.pathname === '/model/download') {
-      const enc = new TextEncoder();
       const records = [
         { kind: 'start', backend: 'pocket', fileCount: 20, totalBytes: 173764082 },
         { kind: 'progress', backend: 'pocket', file: 'bundle.json', received: 24381, total: 24381, fileIndex: 0, fileCount: 20 },
         { kind: 'complete', ok: true, backend: 'pocket', fileCount: 20, totalBytes: 173764082 }
       ];
-      const body = new ReadableStream({
-        start (controller) {
-          controller.enqueue(enc.encode(JSON.stringify(records[0]) + String.fromCharCode(10)));
-          setTimeout(() => controller.enqueue(enc.encode(JSON.stringify(records[1]) + String.fromCharCode(10))), 120);
-          setTimeout(() => {
-            p.downloadComplete = true;
-            controller.enqueue(enc.encode(JSON.stringify(records[2]) + String.fromCharCode(10)));
-            controller.close();
-          }, 520);
-        }
+      return new Response(ndjsonBody(records, () => { p.downloadComplete = true; }), {
+        status: 200, headers: { 'content-type': 'application/x-ndjson' }
       });
-      return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
     }
 
     const response = await nativeFetch(input, init);
+    if (url.pathname === '/speak') recordSpeakHead(response);
     if (p.stubDownload && p.downloadComplete && url.pathname === '/voices') {
       const json = await response.json();
       json.voices = (json.voices || []).map((voice) => voice.backend === 'pocket'
@@ -249,10 +296,14 @@ async function attach (devtoolsPort) {
  * `--port 0` lets the OS pick a free one, and the URL is taken from THIS child's own stdout.
  * There is no port for a stranger to be squatting on.
  */
-async function startLab (pageDir) {
+async function startLab (pageDir, modelDir) {
   const child = spawn(process.execPath, [
     join(ROOT, 'scripts/voice-lab.mjs'), '--port', '0', '--page', pageDir
-  ], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] })
+  ], {
+    cwd: ROOT,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, ORCA_TTS_MODEL_DIR: modelDir }
+  })
   let out = ''
   child.stdout.on('data', (b) => { out += b })
   child.stderr.on('data', (b) => { out += b })
@@ -274,6 +325,9 @@ async function startLab (pageDir) {
 
 const spoken = 'document.getElementById("pane-spoken").textContent.trim()'
 
+/** Which arm is running. Hermetic empty cache is the default; the Pocket arm sets this true. */
+let ARM = { pocketInstalled: false }
+
 async function waitUntil (cdp, expr, predicate, timeoutMs = 15000) {
   const t0 = Date.now()
   let last
@@ -283,6 +337,63 @@ async function waitUntil (cdp, expr, predicate, timeoutMs = 15000) {
     await sleep(120)
   }
   return last
+}
+
+async function muteConfirmations (cdp) {
+  const muteText = await cdp.evaluate(`document.getElementById('btn-mute').textContent`)
+  if (!/on/i.test(muteText)) return
+  const beforeMute = await cdp.evaluate('window.__lab.utterances.length')
+  await cdp.evaluate(`document.getElementById('btn-mute').click()`)
+  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforeMute, 120000)
+  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 30000)
+}
+
+function chooseVoice (cdp, key) {
+  return cdp.evaluate(`(() => {
+    const s = document.getElementById('ctl-voice.id');
+    s.value = ${JSON.stringify(key)};
+    s.dispatchEvent(new Event('change', { bubbles: true }));
+    return s.value;
+  })()`)
+}
+
+async function pickerKeys (cdp) {
+  return await cdp.evaluate(`(() => {
+    const select = document.getElementById('ctl-voice.id');
+    const group = (label) => [...select.querySelectorAll('optgroup')].find((g) => g.label === label);
+    const values = (g) => g ? [...g.querySelectorAll('option')].map((o) => o.value) : [];
+    return {
+      os: values(group("This machine's voices")),
+      pocket: values(group('Pocket TTS (neural)'))
+    };
+  })()`)
+}
+
+/**
+ * Press Play and wait until the utterance is delivered. Captures the /speak REQUEST (what the
+ * page asked for) and the /speak HEAD (what the server says actually spoke). Those are different
+ * values when Pocket is absent: the request is pocket:anna, the head is os + degradation.
+ * Asserting only the request is how U6 passed while the OS was speaking (R16-05).
+ */
+async function playUntilDone (cdp) {
+  await cdp.evaluate('window.__ui.requests = []; window.__ui.speakHeads = []')
+  const before = await cdp.evaluate('window.__lab.utterances.length')
+  await cdp.evaluate(`document.getElementById('btn-play').click()`)
+  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > before, 120000)
+  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 120000)
+  await waitUntil(cdp, 'window.__ui.speakHeads.length', (n) => Number(n) > 0, 10000)
+  return JSON.parse(await cdp.evaluate(`JSON.stringify({
+    bodies: window.__ui.requests.filter((r) => r.url === '/speak').map((r) => r.body),
+    heads: window.__ui.speakHeads,
+    replayDisabled: document.getElementById('btn-replay').disabled,
+    provenance: window.__labEffect().provenance
+  })`))
+}
+
+function lastSpeak (snap) {
+  const body = snap.bodies.length ? JSON.parse(snap.bodies.at(-1)) : null
+  const head = snap.heads.at(-1) ?? null
+  return { body, head, requested: body?.options?.synthesize?.voice ?? null, served: head?.backend ?? snap.provenance?.backend ?? null }
 }
 
 /**
@@ -549,12 +660,17 @@ async function u5 (cdp) {
 }
 
 /**
- * U6 — one voice picker, both backends, and a backend switch that reaches synthesis.
+ * U6 — one voice picker, both backends, and Play of a Pocket voice is served by Pocket.
  *
- * Counting optgroups alone would repeat U1's first mistake: a correctly shaped picker whose
- * options all send the same voice is still dead. This check therefore requires BOTH the grouping
- * contract and the effect: selecting an `os:*` option and then a `pocket:*` option must put those
- * exact qualified keys into the options bound for the synthesizer.
+ * Counting optgroups alone would repeat U1's first mistake. Asserting only
+ * `__labEffect().speak.synthesize.voice` (the REQUEST) is R16-05: that object moves to
+ * pocket:anna while the OS synthesizer is what actually speaks. The discriminating signal is
+ * the /speak HEAD's `backend` (and `__labEffect().provenance.backend`, the same value the
+ * footer is built from).
+ *
+ * When Pocket is absent this check is INCONCLUSIVE, not ok. A green fallback is not a neural
+ * voice, and reporting it as success is how "all nine UI checks pass" was cited as evidence
+ * the picker works.
  */
 async function u6 (cdp) {
   const shape = await cdp.evaluate(`(() => {
@@ -589,20 +705,14 @@ async function u6 (cdp) {
 
   const osKey = machine.options.find((o) => o.value.startsWith('os:')).value
   const pocketKey = pocket.options.find((o) => o.value.startsWith('pocket:')).value
-  const select = (value) => cdp.evaluate(`(() => {
-    const s = document.getElementById('ctl-voice.id');
-    s.value = ${JSON.stringify(value)};
-    s.dispatchEvent(new Event('change', { bubbles: true }));
-    return s.value;
-  })()`)
 
-  const osApplied = await select(osKey)
+  const osApplied = await chooseVoice(cdp, osKey)
   const osEffect = await waitUntil(
     cdp,
     'window.__labEffect().speak.synthesize.voice ?? null',
     (v) => v === osKey
   )
-  const pocketApplied = await select(pocketKey)
+  const pocketApplied = await chooseVoice(cdp, pocketKey)
   const pocketEffect = await waitUntil(
     cdp,
     'window.__labEffect().speak.synthesize.voice ?? null',
@@ -611,11 +721,42 @@ async function u6 (cdp) {
 
   const moved = osApplied === osKey && pocketApplied === pocketKey &&
     osEffect === osKey && pocketEffect === pocketKey && osEffect !== pocketEffect
+  if (!moved) {
+    return {
+      pass: false,
+      detail: `the picker moved in the DOM but the request did not follow: os=${osEffect}, pocket=${pocketEffect}`
+    }
+  }
+
+  await muteConfirmations(cdp)
+  await chooseVoice(cdp, pocketKey)
+  const snap = lastSpeak(await playUntilDone(cdp))
+  const served = snap.served
+  const requested = snap.requested
+  const degraded = snap.head?.degradation ?? null
+  const recorded = snap.provenance?.backend ?? null
+
+  if (ARM.pocketInstalled) {
+    const pass = served === 'pocket' && recorded === 'pocket' && degraded == null && requested === pocketKey
+    return {
+      pass,
+      detail: pass
+        ? `one picker lists ${machine.options.length} machine and ${pocket.options.length} Pocket voices; Play of ${pocketKey} was served by pocket (head.backend=${served})`
+        : `Pocket was installed but was not what spoke: ${JSON.stringify({ served, recorded, degraded, requested, pocketKey })}`
+    }
+  }
+
+  const fallbackHonest = served === 'os' && recorded === 'os' && degraded != null && requested === pocketKey
+  if (fallbackHonest) {
+    return {
+      pass: false,
+      inconclusive: true,
+      detail: `picker lists both backends and the request followed ${osKey} -> ${pocketKey}, but Pocket was ABSENT so the OS spoke (${degraded.code ?? 'degraded'}). This is not evidence a neural voice was heard.`
+    }
+  }
   return {
-    pass: moved,
-    detail: moved
-      ? `one picker lists ${machine.options.length} machine and ${pocket.options.length} Pocket voices; synthesis moved ${osEffect} -> ${pocketEffect}`
-      : `the picker moved in the DOM but synthesis did not follow: os=${osEffect}, pocket=${pocketEffect}`
+    pass: false,
+    detail: `Pocket was absent and fallback was not honest: ${JSON.stringify({ served, recorded, degraded, requested, pocketKey })}`
   }
 }
 
@@ -654,8 +795,20 @@ async function ensurePocketReady (cdp) {
   return { progressSeen, ready }
 }
 
-/** U7 — absent voices stay selectable, then a stubbed download makes them ready without reload. */
+/** U7 — absent voices stay selectable; a failed download names the error and keeps the OS floor; a stubbed success becomes ready without reload. */
 async function u7 (cdp) {
+  if (ARM.pocketInstalled) {
+    const button = await cdp.evaluate(`document.getElementById('btn-download-voices')?.textContent || ''`)
+    if (!button) {
+      return {
+        pass: false,
+        inconclusive: true,
+        detail: 'Pocket is already installed; the download path was not exercised. Not a pass for U7.'
+      }
+    }
+    return { pass: false, detail: `Pocket was installed but the download button still reads ${JSON.stringify(button)}` }
+  }
+
   const before = await cdp.evaluate(`(() => {
     const group = document.getElementById('ctl-voice.id')
       .querySelector('optgroup[label="Pocket TTS (neural)"]');
@@ -678,6 +831,38 @@ async function u7 (cdp) {
   }
   if (problems.length > 0) return { pass: false, detail: problems.join('; ') }
 
+  // Failed-download arm. R16-05: the stub had no kind:'error', so deleting the catch in
+  // downloadVoices() could not turn U7 red. Demand the named error sentence AND that the OS
+  // floor still speaks afterwards.
+  await cdp.evaluate('window.__ui.stubDownloadError = true')
+  const confirmShown = await cdp.evaluate(`(() => {
+    document.getElementById('btn-download-voices').click();
+    return !!document.getElementById('btn-confirm-download');
+  })()`)
+  if (!confirmShown) return { pass: false, detail: 'the download confirmation never appeared (error arm)' }
+  await cdp.evaluate(`document.getElementById('btn-confirm-download').click()`)
+  const errorSentence = await waitUntil(cdp, `(() => ({
+    status: document.getElementById('status')?.textContent || '',
+    voice: document.getElementById('voice-status')?.textContent || ''
+  }))()`, (t) => /Your system voices still work/i.test(t.status + t.voice) && /download stopped/i.test(t.status + t.voice), 10000)
+  const errorSeen = errorSentence &&
+    /Your system voices still work/i.test(errorSentence.status + errorSentence.voice) &&
+    /download stopped/i.test(errorSentence.status + errorSentence.voice)
+  await muteConfirmations(cdp)
+  const keys = await pickerKeys(cdp)
+  const osKey = keys.os[0]
+  if (!osKey) return { pass: false, detail: 'no OS voice after a failed download — the floor is gone' }
+  await chooseVoice(cdp, osKey)
+  const osSnap = lastSpeak(await playUntilDone(cdp))
+  const osFloor = osSnap.served === 'os' && osSnap.requested === osKey
+  if (!errorSeen || !osFloor) {
+    return {
+      pass: false,
+      detail: `failed-download arm: errorSeen=${errorSeen} osFloor=${osFloor} ${JSON.stringify({ errorSentence, os: { served: osSnap.served, requested: osSnap.requested } })}`
+    }
+  }
+
+  await cdp.evaluate('window.__ui.stubDownloadError = false')
   const result = await ensurePocketReady(cdp)
   const after = await cdp.evaluate(`(() => ({
     selected: document.getElementById('ctl-voice.id')?.value || null,
@@ -688,28 +873,27 @@ async function u7 (cdp) {
   }))()`)
   if (result.error) return { pass: false, detail: result.error }
   const pass = result.progressSeen === true && result.ready === true && after.ready === 12 &&
-    after.navigations === before.navigations && after.selected === before.selected
+    after.navigations === before.navigations
   return {
     pass,
     detail: pass
-      ? '12 selectable absent voices showed 173.8 MB; progress named its file; all 12 became ready with the same selection and no navigation'
+      ? 'failed download named the error and kept the OS floor; then 12 voices became ready with no navigation'
       : `download transition failed: ${JSON.stringify({ before, result, after })}`
   }
 }
 
-/** U8 — changing backend cannot reach the old voice's cached bytes. */
+/**
+ * U8 — changing voice cannot reach the old voice's cached bytes, in either direction.
+ *
+ * R16-06: os→pocket was checked; pocket→os was not. A reverse-only cache key (OS voices reuse
+ * the last Pocket key) left U8 green. `--prove` used to drop `voice` from KEYED_FIELDS entirely,
+ * which breaks both directions and cannot catch a one-way key.
+ */
 async function u8 (cdp) {
   const ready = await ensurePocketReady(cdp)
   if (ready.error || ready.ready === false) return { pass: false, detail: ready.error ?? 'Pocket voices never became ready' }
 
-  // Turn automatic confirmations off, then wait out the one forced sentence that says it is off.
-  const muteText = await cdp.evaluate(`document.getElementById('btn-mute').textContent`)
-  if (/on/i.test(muteText)) {
-    const beforeMute = await cdp.evaluate('window.__lab.utterances.length')
-    await cdp.evaluate(`document.getElementById('btn-mute').click()`)
-    await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforeMute, 120000)
-    await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 30000)
-  }
+  await muteConfirmations(cdp)
 
   await cdp.evaluate(`(() => {
     const input = document.getElementById('example-text');
@@ -718,46 +902,46 @@ async function u8 (cdp) {
   })()`)
   await sleep(900)
 
-  const osKey = await cdp.evaluate(`document.getElementById('ctl-voice.id').querySelector('optgroup[label="This machine\\'s voices"] option').value`)
-  const pocketKey = await cdp.evaluate(`document.getElementById('ctl-voice.id').querySelector('optgroup[label="Pocket TTS (neural)"] option').value`)
-  const choose = (key) => cdp.evaluate(`(() => {
-    const select = document.getElementById('ctl-voice.id');
-    select.value = ${JSON.stringify(key)};
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`)
+  const keys = await pickerKeys(cdp)
+  const osKey = keys.os[0]
+  const pocketA = keys.pocket[0]
+  const pocketB = keys.pocket.find((k) => k !== pocketA)
+  if (!osKey || !pocketA || !pocketB) {
+    return { pass: false, detail: `need one OS voice and two Pocket voices, got os=${keys.os.length} pocket=${keys.pocket.length}` }
+  }
 
-  await choose(osKey)
-  await cdp.evaluate('window.__ui.requests = []')
-  const beforePrime = await cdp.evaluate('window.__lab.utterances.length')
-  await cdp.evaluate(`document.getElementById('btn-play').click()`)
-  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforePrime, 120000)
-  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 120000)
-  const prime = await cdp.evaluate(`window.__ui.requests.filter((r) => r.url === '/speak').map((r) => r.body)`)
-  if (prime.length === 0) return { pass: false, detail: 'the OS prime made no /speak request' }
+  async function switchAndSpeak (from, to) {
+    await chooseVoice(cdp, from)
+    const prime = lastSpeak(await playUntilDone(cdp))
+    if (prime.body === null) return { from, to, error: `prime ${from} made no /speak request` }
+    await chooseVoice(cdp, to)
+    const replayDisabled = await cdp.evaluate(`document.getElementById('btn-replay').disabled`)
+    const snap = lastSpeak(await playUntilDone(cdp))
+    return {
+      from, to, replayDisabled,
+      spoke: snap.body !== null,
+      requested: snap.requested,
+      primeRequested: prime.requested
+    }
+  }
 
-  await cdp.evaluate('window.__ui.requests = []')
-  await choose(pocketKey)
-  const replayDisabled = await cdp.evaluate(`document.getElementById('btn-replay').disabled`)
-  const beforePocket = await cdp.evaluate('window.__lab.utterances.length')
-  await cdp.evaluate(`document.getElementById('btn-play').click()`)
-  const requested = await waitUntil(cdp,
-    `window.__ui.requests.filter((r) => r.url === '/speak').map((r) => r.body)`,
-    (bodies) => bodies.length > 0,
-    30000)
-  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforePocket, 120000)
-  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 120000)
-
-  const osBody = JSON.parse(prime.at(-1))
-  const pocketBody = requested.length ? JSON.parse(requested.at(-1)) : null
-  const pass = replayDisabled === true && pocketBody !== null &&
-    osBody.text === pocketBody.text &&
-    osBody.options?.synthesize?.voice === osKey &&
-    pocketBody.options?.synthesize?.voice === pocketKey
+  const fwd = await switchAndSpeak(osKey, pocketA)
+  const rev = await switchAndSpeak(pocketA, osKey)
+  const sibling = await switchAndSpeak(pocketA, pocketB)
+  const problems = []
+  for (const row of [fwd, rev, sibling]) {
+    if (row.error) problems.push(row.error)
+    else {
+      if (row.replayDisabled !== true) problems.push(`${row.from} -> ${row.to}: Replay was not invalidated`)
+      if (row.spoke !== true) problems.push(`${row.from} -> ${row.to}: no /speak (cache served the previous voice)`)
+      if (row.requested !== row.to) problems.push(`${row.from} -> ${row.to}: requested ${row.requested}`)
+    }
+  }
   return {
-    pass,
-    detail: pass
-      ? `same text made a new /speak request after ${osKey} -> ${pocketKey}; Replay was invalidated`
-      : `cache invalidation failed: ${JSON.stringify({ replayDisabled, osBody, pocketBody })}`
+    pass: problems.length === 0,
+    detail: problems.length === 0
+      ? `cache missed on ${osKey}->${pocketA}, ${pocketA}->${osKey}, and ${pocketA}->${pocketB}; Replay invalidated each time`
+      : `cache invalidation failed: ${problems.join('; ')} ${JSON.stringify({ fwd, rev, sibling })}`
   }
 }
 

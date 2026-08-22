@@ -1619,7 +1619,13 @@ window.__labEffect = () => ({
     footer: $('provenance').textContent,
     // This is the same value save() and exportCopy() hand to toSettingsFile(). The probe reads it
     // without opening a tab or writing a settings file.
-    tunedWith: tunedWith()
+    tunedWith: tunedWith(),
+    // The server-authoritative fields, not the request. U6/U9 must be able to tell "Pocket
+    // spoke" from "the OS spoke because Pocket was unavailable" without scraping footer prose.
+    backend: state.lastProvenance?.backend ?? null,
+    voice: state.lastProvenance?.voice ?? null,
+    requestedBackend: state.lastProvenance?.requestedBackend ?? null,
+    reason: state.lastProvenance?.reason ?? null
   }
 })
 
