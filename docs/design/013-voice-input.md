@@ -113,6 +113,28 @@ T170's conclusion holds and its stated reason was right: **reachability, not the
 its cost is push-to-talk plumbing plus T173's close condition, not a model. M17b (option C, a
 recognizer behind a setting) is unchanged. M17c moves from *refused on size* to *unscored*.
 
+## 0b. MEASURED 2026-08-22 — the million ceiling IS a defect on Windows
+
+The probe built to answer this finally ran on the platform nobody could test locally, and the
+answer is the one the ceiling's defenders did not want.
+
+    macOS  say    1234567 renders byte-identical to the spelled-out words   -> reads it as a NUMBER
+    Linux  espeak-ng  same, and `-q -x` phonemises it to "one million, two hundred-and…"
+    Windows SAPI  "1234567" is 139,800 B, Δ76,716 from the words reference   -> reads it as DIGITS
+
+CI run **32552614490** `[measured-here]`, with the probe's own controls green: `STABLE` (three
+re-renders byte-identical), `NOISE` 0 B, and `"1000000" === "one million"` PASSING — so the
+comparison could tell utterances apart and its verdict is not vacuous.
+
+**So `numberToWords`'s 999,999 ceiling is a live defect on Windows.** Any number at or above a
+million is handed to SAPI and spoken digit by digit. This is exactly the failure Q64 named — *"a
+platform-specific defect hiding behind a macOS-only probe"* — and it was called retired when
+espeak-ng came back clean. Two platforms agreeing is not three.
+
+**Not fixed here.** Extending `numberToWords` past 999,999 is real work with its own tests and its
+own review, and it was found at a usage-window boundary. The probe stays RED on the Windows leg,
+deliberately: it is reporting a true thing about the product.
+
 ## 1. What voice input actually has to do here
 
 It is worth being precise, because the milestone's name hides a split that decides everything.
