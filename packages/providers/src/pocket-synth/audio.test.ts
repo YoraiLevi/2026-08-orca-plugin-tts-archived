@@ -31,9 +31,9 @@ function makeWav(samples: number[], rate = 24_000, channels = 1, bits = 16): Buf
   return Buffer.concat([header, body])
 }
 
-function tone(freq: number, rate: number, seconds: number): Float32Array {
+function tone(freq: number, rate: number, seconds: number, phase = 0): Float32Array {
   const out = new Float32Array(Math.floor(rate * seconds))
-  for (let i = 0; i < out.length; i++) out[i] = Math.sin((2 * Math.PI * freq * i) / rate)
+  for (let i = 0; i < out.length; i++) out[i] = Math.sin((2 * Math.PI * freq * i) / rate + phase)
   return out
 }
 
@@ -47,6 +47,33 @@ function amplitudeAt(signal: Float32Array, freq: number, rate: number): number {
     im += (signal[i] ?? 0) * Math.sin(phase)
   }
   return (2 * Math.hypot(re, im)) / signal.length
+}
+
+/** Total signal energy, used where a rejected tone must not turn into any boundary sound. */
+function rms(signal: Float32Array): number {
+  let energy = 0
+  for (const sample of signal) energy += sample * sample
+  return Math.sqrt(energy / signal.length)
+}
+
+function naiveDecimate(input: Float32Array, fromRate: number, toRate: number): Float32Array {
+  const out = new Float32Array(Math.floor((input.length * toRate) / fromRate))
+  for (let i = 0; i < out.length; i++) out[i] = input[Math.floor((i * fromRate) / toRate)] ?? 0
+  return out
+}
+
+function meanAbsolute(signal: Float32Array): number {
+  let total = 0
+  for (const sample of signal) total += Math.abs(sample)
+  return total / signal.length
+}
+
+function edgeToMiddleGain(signal: Float32Array, edgeSamples: number): number {
+  const middleStart = Math.floor((signal.length - edgeSamples) / 2)
+  const middle = meanAbsolute(signal.subarray(middleStart, middleStart + edgeSamples))
+  const head = meanAbsolute(signal.subarray(0, edgeSamples))
+  const tail = meanAbsolute(signal.subarray(signal.length - edgeSamples))
+  return Math.min(head, tail) / middle
 }
 
 /* ------------------------------------------------------------------------------------- .npy */
@@ -166,40 +193,107 @@ describe('resample 32 kHz -> 24 kHz, the ratio every shipped voice needs', () =>
     expect(out.length).toBe(24_000)
   })
 
-  it('PRESERVES a tone that fits under the new Nyquist, at the same amplitude', () => {
-    // The property that matters: a 1 kHz tone is still a 1 kHz tone at full level. A resampler
-    // that halved the gain would make every cloned voice quieter and nothing would say so.
-    const out = resample(tone(1000, 32_000, 0.5), 32_000, 24_000)
-    expect(amplitudeAt(out, 1000, 24_000)).toBeCloseTo(1, 1)
+  it('PRESERVES the promised pass band through 9 kHz, at the same amplitude', () => {
+    // One 1 kHz point admitted a filter whose cutoff was gutted to 6 kHz. Measure the voice band,
+    // away from the finite-record boundaries, so losing consonant detail cannot stay green. The
+    // contract permits at most 5% loss through 9 kHz; 9–14 kHz is the transition band.
+    for (const freq of [1_000, 4_000, 8_000, 9_000]) {
+      for (const phase of [0, Math.PI / 4, Math.PI / 2, 3 * Math.PI / 4]) {
+        const out = resample(tone(freq, 32_000, 0.5, phase), 32_000, 24_000)
+        const middle = out.subarray(2_400, out.length - 2_400)
+        expect(amplitudeAt(middle, freq, 24_000), `${freq} Hz pass-band gain`).toBeGreaterThan(0.95)
+      }
+    }
+  })
+
+  it('CONTROL: the pass-band measurement detects severe high-frequency deletion', () => {
+    const out = resample(tone(8_000, 32_000, 0.5), 32_000, 24_000)
+    const deleted = new Float32Array(out.length)
+    // A three-sample moving average has a zero at 8 kHz when the output rate is 24 kHz.
+    for (let i = 1; i < out.length - 1; i++) {
+      deleted[i] = ((out[i - 1] ?? 0) + (out[i] ?? 0) + (out[i + 1] ?? 0)) / 3
+    }
+    const middle = deleted.subarray(2_400, deleted.length - 2_400)
+    expect(amplitudeAt(middle, 8_000, 24_000)).toBeLessThan(0.05)
   })
 
   it('REJECTS a tone above the new Nyquist instead of folding it down', () => {
-    // 14 kHz cannot exist at 24 kHz sample rate. Decimating without a filter would alias it to
-    // 10 kHz — a loud tone that was never in the recording, baked into the speaker's timbre.
-    const out = resample(tone(14_000, 32_000, 0.5), 32_000, 24_000)
-    const aliasAt = amplitudeAt(out, 24_000 - 14_000, 24_000)
-    expect(aliasAt).toBeLessThan(0.05)
+    // The stop band begins at 14 kHz. Decimating without a filter would alias these tones below
+    // 12 kHz — energy that was never there, baked into the cloned speaker's timbre.
+    for (const freq of [14_000, 15_000]) {
+      for (const phase of [0, Math.PI / 4, Math.PI / 2, 3 * Math.PI / 4]) {
+        const out = resample(tone(freq, 32_000, 0.5, phase), 32_000, 24_000)
+        const middle = out.subarray(2_400, out.length - 2_400)
+        const aliasAt = amplitudeAt(middle, 24_000 - freq, 24_000)
+        expect(aliasAt, `${freq} Hz alias amplitude`).toBeLessThan(0.05)
+        expect(rms(middle), `${freq} Hz stop-band RMS`).toBeLessThan(0.01)
+      }
+    }
   })
 
   it('CONTROL: naive decimation DOES fold it down, so the check above can fail', () => {
     // Without this, "the alias is small" would also be true of a test measuring the wrong thing.
     const input = tone(14_000, 32_000, 0.5)
-    const naive = new Float32Array(Math.floor((input.length * 24_000) / 32_000))
-    for (let i = 0; i < naive.length; i++) naive[i] = input[Math.floor((i * 32_000) / 24_000)] ?? 0
+    const naive = naiveDecimate(input, 32_000, 24_000)
     expect(amplitudeAt(naive, 10_000, 24_000)).toBeGreaterThan(0.5)
+    expect(rms(naive.subarray(2_400, naive.length - 2_400))).toBeGreaterThan(0.5)
   })
 
-  it('does not fade the edges', () => {
-    // Normalising by the realised kernel sum is what keeps the gain at 1 where the kernel is
-    // clipped. Without it the first and last milliseconds fade, which reads as a click.
-    const out = resample(tone(500, 32_000, 0.2), 32_000, 24_000)
-    const head = amplitudeAt(out.subarray(0, 480), 500, 24_000)
-    const middle = amplitudeAt(out.subarray(2400, 2880), 500, 24_000)
-    expect(head).toBeGreaterThan(middle * 0.8)
+  it('keeps DC gain exact at both edges as well as the middle', () => {
+    // A constant input makes edge gain directly observable. Averaging 480 samples hid the first
+    // 17 affected samples and let removal of kernel normalisation survive.
+    const level = 0.5
+    const out = resample(new Float32Array(3_200).fill(level), 32_000, 24_000)
+    expect(out[0]).toBeCloseTo(level, 6)
+    expect(out[out.length - 1]).toBeCloseTo(level, 6)
+    expect(edgeToMiddleGain(out, 17)).toBeCloseTo(1, 6)
+  })
+
+  it('CONTROL: the edge-gain measurement detects a boundary fade', () => {
+    const faded = new Float32Array(2_400).fill(0.5)
+    for (let i = 0; i < 17; i++) {
+      faded[i] = (faded[i] ?? 0) * 0.5
+      const tail = faded.length - 1 - i
+      faded[tail] = (faded[tail] ?? 0) * 0.5
+    }
+    expect(edgeToMiddleGain(faded, 17)).toBeLessThan(0.75)
+  })
+
+  it('REJECTS stop-band energy at the first and last kernel radii across phase', () => {
+    // The middle rejects 14 kHz almost completely. A clipped signed-kernel normaliser used to
+    // turn that same tone into a phase-dependent boundary transient with a 0.45 peak.
+    let worstBoundaryRms = 0
+    for (const freq of [14_000, 14_500, 15_000, 15_500]) {
+      for (let p = 0; p < 16; p++) {
+        const phase = (2 * Math.PI * p) / 16
+        const out = resample(tone(freq, 32_000, 0.1, phase), 32_000, 24_000)
+        worstBoundaryRms = Math.max(
+          worstBoundaryRms,
+          rms(out.subarray(0, 17)),
+          rms(out.subarray(out.length - 17)),
+        )
+      }
+    }
+    expect(worstBoundaryRms).toBeLessThan(0.08)
+  })
+
+  it('CONTROL: an unfiltered boundary retains the stop-band energy', () => {
+    let worstBoundaryRms = 0
+    for (let p = 0; p < 16; p++) {
+      const phase = (2 * Math.PI * p) / 16
+      const out = naiveDecimate(tone(14_000, 32_000, 0.1, phase), 32_000, 24_000)
+      worstBoundaryRms = Math.max(
+        worstBoundaryRms,
+        rms(out.subarray(0, 17)),
+        rms(out.subarray(out.length - 17)),
+      )
+    }
+    expect(worstBoundaryRms).toBeGreaterThan(0.5)
   })
 
   it('handles empty input and refuses nonsense rates', () => {
     expect(resample(new Float32Array(0), 32_000, 24_000)).toHaveLength(0)
+    expect([...resample(Float32Array.of(0.5, 0.5), 32_000, 24_000)]).toEqual([0.5])
     expect(() => resample(tone(440, 32_000, 0.01), 0, 24_000)).toThrow(/positive/)
   })
 })

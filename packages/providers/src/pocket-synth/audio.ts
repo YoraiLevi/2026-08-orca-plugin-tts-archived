@@ -119,6 +119,15 @@ export function writeWav(samples: Float32Array, rate: number): Buffer {
 
 /* -------------------------------------------------------------------------------- resampling */
 
+/** Even reflection supplies real kernel support without inventing a discontinuous zero edge. */
+function reflectedIndex(index: number, length: number): number {
+  if (index >= 0 && index < length) return index
+  if (length === 1) return 0
+  const period = 2 * (length - 1)
+  const wrapped = ((index % period) + period) % period
+  return wrapped < length ? wrapped : period - wrapped
+}
+
 /**
  * Band-limited resampling by windowed sinc.
  *
@@ -130,7 +139,7 @@ export function writeWav(samples: Float32Array, rate: number): Buffer {
  * Bit-parity with any particular reference is explicitly NOT the goal, and could not be: the
  * Python reference uses `scipy.signal.resample_poly` while buzz uses sherpa-onnx's
  * `LinearResampler`, and those two do not agree with each other either. What is required is that
- * the result be band-limited and gain-correct, which `resample.test.ts` checks by measuring a
+ * the result be band-limited and gain-correct, which `audio.test.ts` checks by measuring a
  * swept tone rather than by comparing bytes.
  */
 export function resample(input: Float32Array, fromRate: number, toRate: number, width = 16): Float32Array {
@@ -147,8 +156,8 @@ export function resample(input: Float32Array, fromRate: number, toRate: number, 
 
   for (let i = 0; i < outLen; i++) {
     const centre = i / ratio
-    const first = Math.max(0, Math.ceil(centre - half))
-    const last = Math.min(input.length - 1, Math.floor(centre + half))
+    const first = Math.ceil(centre - half)
+    const last = Math.floor(centre + half)
     let acc = 0
     let norm = 0
     for (let j = first; j <= last; j++) {
@@ -157,11 +166,13 @@ export function resample(input: Float32Array, fromRate: number, toRate: number, 
       const w = 0.42 + 0.5 * Math.cos((Math.PI * d) / half) + 0.08 * Math.cos((2 * Math.PI * d) / half)
       const x = cutoff * d
       const k = (x === 0 ? cutoff : (Math.sin(Math.PI * x) / (Math.PI * x)) * cutoff) * w
-      acc += (input[j] ?? 0) * k
+      acc += (input[reflectedIndex(j, input.length)] ?? 0) * k
       norm += k
     }
-    // Normalising by the realised kernel sum keeps the gain at 1 even at the edges, where the
-    // kernel is clipped. Without it the first and last milliseconds fade, which reads as a click.
+    // Reflecting supplies the complete kernel at a finite record boundary. Clipping it and then
+    // dividing by its signed partial sum preserves DC but amplifies phase-dependent stop-band
+    // transients. The complete-kernel normalisation below keeps DC gain exactly one without that
+    // unstable boundary mechanism.
     out[i] = norm === 0 ? 0 : acc / norm
   }
   return out
