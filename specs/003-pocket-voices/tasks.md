@@ -103,30 +103,30 @@ can hear; that is Phase 4.
 
 **Purpose**: make it a `TtsProvider`, and make its absence a sentence rather than a crash.
 
-- [ ] **PV-020** [US3] Write the degradation test FIRST: load the provider with the ORT import
+- [x] **PV-020** [US3] Write the degradation test FIRST: load the provider with the ORT import
       forced to fail, assert `prepare()` rejects with a named reason and the registry reports
       `prepare-failed` naming `pocket`.
       **Verify**: it fails before PV-021 exists, and the message names the missing module rather
       than saying "provider unavailable".
 
-- [ ] **PV-021** [US3] `PocketSynthProvider` → `pocket-synth/index.ts`, with a LAZY dynamic import
+- [x] **PV-021** [US3] `PocketSynthProvider` → `pocket-synth/index.ts`, with a LAZY dynamic import
       of `onnxruntime-node` so the module can be imported on a machine that lacks it.
       **Verify**: PV-020 passes; and `import('./pocket-synth/index.js')` succeeds with ORT absent.
 
-- [ ] **PV-022** [P] [US3] `capabilities`: `needsModelDownload` = the real byte total, `offline`
+- [x] **PV-022** [P] [US3] `capabilities`: `needsModelDownload` = the real byte total, `offline`
       true, `needsApiKey` false, `cloning` true, licence CC-BY-4.0.
       **Verify**: a test asserts `needsModelDownload` equals `MODEL_TOTAL_BYTES` rather than a
       literal — a hand-typed number drifts from the manifest silently.
 
-- [ ] **PV-023** [US3] `generate()` yields `AudioChunk`s and opens no player (R023).
+- [x] **PV-023** [US3] `generate()` yields `AudioChunk`s and opens no player (R023).
       **Verify**: the no-audio recorder (`scripts/ci/no-audio-recorder.mjs`) stays green across a
       full synthesis, and goes red if a player is spawned.
 
-- [ ] **PV-024** [P] [US3] `cancel()` is two-sided and awaited (R022 / 006 C6).
+- [x] **PV-024** [P] [US3] `cancel()` is two-sided and awaited (R022 / 006 C6).
       **Verify**: cancel mid-utterance; assert the frame loop stopped, by effect, within the
       existing cancel budget. Add it to `scripts/mutation-check.mjs` as a declared mutant.
 
-- [ ] **PV-025** [US3] Register beside the OS provider; OS stays preferred.
+- [x] **PV-025** [US3] Register beside the OS provider; OS stays preferred.
       **Verify**: with both registered and no explicit preference, the OS provider serves — this
       feature must not change what anybody hears by default.
 
@@ -139,20 +139,20 @@ declared mutants and by nothing else (P24's shape, applied to the registry).
 
 **Purpose**: the page needs to know what exists and be able to ask for the download.
 
-- [ ] **PV-030** [US1] `GET /voices` returns backend-qualified entries: `key`, `displayName`,
+- [x] **PV-030** [US1] `GET /voices` returns backend-qualified entries: `key`, `displayName`,
       `backend`, and the backend's availability with its reason when absent.
       **Verify**: the OS shape is unchanged for OS voices (the Lab's existing voice control must
       not regress), and a `pocket` entry appears with `available: false` when no model is present.
 
-- [ ] **PV-031** [P] [US2] `GET /model/status` → `modelStatus()`, naming missing files.
+- [x] **PV-031** [P] [US2] `GET /model/status` → `modelStatus()`, naming missing files.
       **Verify**: an empty directory reports `absent` and lists `mimi_encoder.onnx` by name.
 
-- [ ] **PV-032** [US2] `POST /model/download` streams NDJSON progress, one record per file.
+- [x] **PV-032** [US2] `POST /model/download` streams NDJSON progress, one record per file.
       **Verify**: a fixture-backed fetch produces one progress record per artifact in order, and
       an induced failure yields a terminal record naming the file and the cause — never a stream
       that just stops.
 
-- [ ] **PV-033** [P] [US2] Refuse to start a second concurrent download.
+- [x] **PV-033** [P] [US2] Refuse to start a second concurrent download.
       **Verify**: two overlapping requests; the second is refused by name, and the first still
       completes. Two writers racing an atomic swap is how a half-model gets published.
 
@@ -165,31 +165,38 @@ declared mutants and by nothing else (P24's shape, applied to the registry).
 **Purpose**: the author opens the page and hears a neural voice. Until this lands, phases 0–3 are
 worth nothing to him.
 
-- [ ] **PV-040** [US1] **Which voice** becomes one `<select>` with two `<optgroup>`s — *This
+- [x] **PV-040** [US1] **Which voice** becomes one `<select>` with two `<optgroup>`s — *This
       machine's voices* and *Pocket TTS (neural)* — carrying backend-qualified values.
       **Verify**: `scripts/ui-probe.mjs` U1 must still pass, i.e. moving this control must still
       change what would be synthesized. Extend the probe's breakage list with "drop the optgroup
       wiring" and confirm U1 goes red.
 
-- [ ] **PV-041** [US2] When the model is absent, the Pocket group renders selectable options
+- [x] **PV-041** [US2] When the model is absent, the Pocket group renders selectable options
       labelled with the download size, and a **Download the neural voices (166 MB)** button
       appears beside the control.
       **Verify**: with an empty `ORCA_TTS_MODEL_DIR`, the probe finds the button and the honest
       label; with a model present, neither appears.
 
-- [ ] **PV-042** [US2] The button streams progress into the page and enables the voices on
+- [x] **PV-042** [US2] The button streams progress into the page and enables the voices on
       completion, without a reload.
       **Verify**: drive it in the probe against a stubbed server; assert the voice list gains
       twelve entries with no navigation.
 
-- [ ] **PV-043** [P] [US1] Selecting a Pocket voice invalidates the audio cache keyed by
+- [x] **PV-043** [P] [US1] Selecting a Pocket voice invalidates the audio cache keyed by
       `keyFor(text, synth)` (FR-023's rule), so no stale audio is replayed.
       **Verify**: play, switch backend, play the same text; assert a `/speak` request was made.
       This is the exact bug FR-023 already caught once — 41 ms and confidently wrong.
 
-- [ ] **PV-044** [US1] The footer's provenance line names the backend and voice actually used.
+- [x] **PV-044** [US1] The footer's provenance line names the backend and voice actually used.
       **Verify**: the rendered text changes with the backend. `provenance.tunedWith` in the
       exported settings must follow it, or a settings file records a voice that never spoke.
+
+**Checkpoint 4 — LANDED, and NOT yet believed.** `bdd9c92`. All nine UI-probe checks pass, including
+U6 (both backends listed, switching changes synthesis), U7 (download completes in place), U8 (a
+backend switch cannot replay old bytes) and U9 (provenance names what spoke). **Round 15 then found
+nine confirmed defects underneath a green probe and a green suite, two of them critical, and one of
+them is that `/speak` still hands `pocket:eve` to the OS provider (R15-03) — the exact thing the
+commit an hour earlier claimed to fix.** Green checks are not the gate; Phase 6 is.
 
 **Checkpoint 4 — the falsifier**: with the model present, the author selects *Eve*, presses Play,
 and hears it. No file, no terminal, no rebuild. **If this is not true, this feature is not done.**
@@ -227,10 +234,10 @@ plan entirely.
       **Verify**: the two `it.fails` rows go GREEN, and the 11,344-input differential corpus reaches
       zero disagreements. **Do not attempt a third guess at a comparison operator** — `>` and `>=`
       have both been measured and neither is it.
-- [ ] **PV-066** R14-09 — the resampler suite admits pass-band deletion and edge-normalisation
+- [x] **PV-066** R14-09 — the resampler suite admits pass-band deletion and edge-normalisation
       removal, and the filter emits a boundary transient.
       **Verify**: each mutation goes red; each new check has a control.
-- [ ] **PV-067** R14-03 / R14-10 — the backend key reaches no dispatch, and the falsifier could pass
+- [x] **PV-067** R14-03 / R14-10 — the backend key reaches no dispatch, and the falsifier could pass
       from a developer-preseeded cache.
       **Verify**: `POST /speak` with `pocket:eve` is routed by backend and the bare name reaches the
       provider; a preseeded cache is distinguishable from an installed one.
@@ -312,3 +319,70 @@ other way round.** None of the following blocks any task above.
 | PV-020…PV-025 | **T091/T092** ("Piper via sherpa-onnx-node", "Model manager") — same shape, different engine. Those tasks should be re-pointed at Pocket or closed with a reason. |
 | PV-040…PV-044 | extends M11's control surface; no new milestone |
 | PV-050…PV-053 | **T097c** (quality comparison and latency regression guard) |
+
+
+---
+
+## Phase 6: Round 15 — nine confirmed, and the oracle is one of them
+
+Round 15 attacked what round 14's fixes left behind and found **9 findings, 9 confirmed, 2
+critical**. It is the twelfth appearance of this project's one recurring defect, and this time it
+reached the instrument: **the oracle everything else rests on passes a wrong transcript.**
+
+Ordered by what has to be trusted first, not by severity. **PV-070 comes before everything** — until
+the oracle is sound, no verdict from it means anything, including every "the engine says what it was
+asked to say" already reported.
+
+- [ ] **PV-070** [P0] **R15-05 — the semantic oracle admits wrong words.** Nine words at WER ≤ 0.25
+      means *two deletions pass*: `"The brown fox jumps over the dog."` scores 0.222 and is accepted.
+      It also misses two load-bearing numerical engine mutants.
+      **Verify**: the reviewer's exact wrong transcript must FAIL; the two named engine mutations
+      must turn `--prove` red. Several sentences, not one, and a threshold that cannot swallow a
+      dropped word.
+      **Everything below waits on this, because everything below is checked by it.**
+
+- [ ] **PV-071** [P0] **R15-06 — the production import fails under plain Node, and my own resolver
+      hook in `pocket-e2e.mjs` HIDES it.** P37/SC-14's species, and I built the thing that conceals
+      it — the oracle runs the shipping source under a resolver the shipping code does not have.
+      **Verify**: SC-14 covers the engine's import path; the oracle either drops the hook or proves
+      the same load works without it.
+
+- [ ] **PV-072** [P1] **R15-01 — `cancel()` stops delivery, not synthesis.** It wins an output race
+      while the ONNX frame loop keeps running. Principle VII is NON-NEGOTIABLE and says barge-in is
+      two-sided; R014 says the same.
+      **Verify**: cancel mid-utterance and assert by effect that the frame loop stopped — a declared
+      mutant in `scripts/mutation-check.mjs`, not a timing assertion.
+
+- [ ] **PV-073** [P1] **R15-02 — the swap survives exceptions but not process death or a second
+      process.** A hard signal removes the live model; two Labs both acquire the supposed
+      single-writer slot. My R14-06 fix addressed the exception path and I described it as
+      "reversible at every step", which was more than I had checked.
+      **Verify**: kill -9 during the window and assert a usable model remains; two concurrent
+      downloads and assert one is refused.
+
+- [ ] **PV-074** [P1] **R15-03 — `/speak` advertises Pocket and invokes the OS provider**, returning
+      200. `3a4db83` claimed this fixed.
+      **Verify**: the reviewer's exact payload; assert the PROVIDER that ran, not the status code.
+
+- [ ] **PV-075** [P1] **R15-09 — a cache with no upstream `LICENSE` still reports `ready`.** R14-08
+      made the fetch required and left the STATUS check unaware, so the repair is half-done and the
+      half that ships is the unaware one.
+      **Verify**: delete `LICENSE` from a ready cache; status must not say ready.
+
+- [ ] **PV-076** [P1] **R15-07 — `SynthesizeOptions.rate` is discarded**, so the Voice Lab's speed
+      control is INERT for Pocket voices. That is P47 exactly — a control that changes nothing —
+      shipped again, in the feature built to end it.
+      **Verify**: U1 in `scripts/ui-probe.mjs` must fail with a Pocket voice selected. If it does
+      not, U1 is the defect.
+
+- [ ] **PV-077** [P2] **R15-04 — the splitter has no fallback below sentence boundaries.** A
+      260-token sentence comes back as one chunk against a 50-token cap.
+      **Verify**: a single long sentence with no full stop splits, and nothing is lost.
+
+- [ ] **PV-078** [P2] **R15-08 — capabilities understate the download by twelve voice clips**:
+      165,232,420 advertised against 173,764,082 required.
+      **Verify**: derived from `INSTALL_TOTAL_BYTES`, never typed.
+
+- [ ] **PV-079** [P3] **R14-04's remainder** — `Zggggg`, 1 in 11,344. Open, measured, `it.fails`.
+
+**Checkpoint 6**: round 16 runs against these fixes and is the first candidate for a DRY round.
