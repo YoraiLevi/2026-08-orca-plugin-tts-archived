@@ -49,7 +49,7 @@ because there is work here.
 
 **Purpose**: text and a voice in, correct audio out, in this repo, with an oracle.
 
-- [ ] **PV-010** [US1] Write the end-to-end oracle FIRST → `scripts/pocket-e2e.mjs`. It synthesizes
+- [x] **PV-010** [US1] Write the end-to-end oracle FIRST → `scripts/pocket-e2e.mjs`. It synthesizes
       a known sentence and transcribes the result with an independent STT model, asserting the
       transcript against the INPUT TEXT.
       **Verify**: run it against a deliberately corrupted engine (e.g. skip the flow integration
@@ -58,32 +58,44 @@ because there is work here.
       *Note: proven viable — the spike's output transcribed exactly, with a control showing the
       reference clip transcribes to different words.*
 
-- [ ] **PV-011** [US1] Port the engine → `pocket-synth/engine.ts`: state init from the bundle
+- [x] **PV-011** [US1] Port the engine → `pocket-synth/engine.ts`: state init from the bundle
       manifests, voice conditioning, text conditioning, the per-frame flow loop with the EOS
       logit rule, and batched Mimi decoding.
       **Verify**: PV-010 passes. Then break the NaN state fill to zeros and confirm PV-010 fails —
       the `fill` field is load-bearing and a zero-filled cache produces plausible wrong audio.
 
-- [ ] **PV-012** [P] [US1] Seeded RNG for the latent sampling.
+- [x] **PV-012** [P] [US1] Seeded RNG for the latent sampling.
       **Verify**: same seed twice → identical samples; two seeds → different. Without this every
       later regression is a judgement call.
 
-- [ ] **PV-013** [P] [US1] Chunk splitting at `max_token_per_chunk`.
+- [x] **PV-013** [P] [US1] Chunk splitting at `max_token_per_chunk`.
       **Verify**: a 300-token input splits, and the decoded segments rejoin to the prepared prompt
       exactly. Feed a single 60-token sentence with no boundary and confirm it does not silently
       truncate.
 
-- [ ] **PV-014** [US1] Voice-state cache.
+- [x] **PV-014** [US1] Voice-state cache.
       **Verify**: instrument `mimi_encoder` calls; the second use of a voice makes zero
       `[measured-here]`. Spike showed 746 ms → 7 ms.
 
-- [ ] **PV-015** [P] [US1] Engine tests gated behind `POCKET_MODEL_DIR`, skipped by default with a
+- [x] **PV-015** [P] [US1] Engine tests gated behind `POCKET_MODEL_DIR`, skipped by default with a
       printed reason.
       **Verify**: `pnpm test` on a machine with no model stays green and SAYS the tier was skipped.
       A silent skip is P42's shape.
 
-**Checkpoint 1**: `node scripts/pocket-e2e.mjs` transcribes its own output correctly. Still nothing
-the author can hear.
+**Checkpoint 1 — PASSED** 2026-08-22 at `96db064` / `5a3dd6c`.
+
+```
+[  ok  ] CONTROL B  silence transcribes to ""
+[  ok  ] CONTROL A  the reference clip says something else (WER 3.78)
+  synthesized 3.04 s in 758 ms (0.25x realtime) [measured-here]
+[  ok  ] PV-010     our audio says what we asked (WER 0.00, gate 0.25)
+[  ok  ] PV-010     went RED when the recurrent state is zero-filled (WER 0.67)
+                    heard "The quick brown fox jumps over the qu brown fox jumps over the lazy dog."
+```
+
+The broken arm is the important line: plausible speech, stuttering, saying the wrong thing — the
+exact failure this oracle exists for, demonstrated rather than asserted. Still nothing the author
+can hear; that is Phase 4.
 
 ---
 
