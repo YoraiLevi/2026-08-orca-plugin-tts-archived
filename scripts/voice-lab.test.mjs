@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { mkdtemp, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import {
@@ -664,6 +664,11 @@ describe('static serving is confined to its root', () => {
   it('rejects traversal, encoded or not', () => {
     expect(safeJoin('/srv/page', '/../../etc/passwd')).toBeNull()
     expect(safeJoin('/srv/page', '/%2e%2e%2f%2e%2e%2fetc/passwd')).toBeNull()
-    expect(safeJoin('/srv/page', '/lib/diff.mjs')).toBe(join('/srv/page', 'lib/diff.mjs'))
+    // `resolve`, not `join`, and the difference only shows on Windows. `safeJoin` resolves to an
+    // ABSOLUTE path because its whole job is a containment check — `full.startsWith(rootAbs)` is
+    // meaningless against a relative path. On Windows `join('/srv/page','lib/diff.mjs')` gives
+    // `\srv\page\lib\diff.mjs` with no drive, while the implementation correctly returns
+    // `D:\srv\page\lib\diff.mjs`. The expectation was wrong, not the code — CI run 32545094360.
+    expect(safeJoin('/srv/page', '/lib/diff.mjs')).toBe(resolve('/srv/page', 'lib/diff.mjs'))
   })
 })

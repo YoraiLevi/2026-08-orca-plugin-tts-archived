@@ -76,7 +76,7 @@
 
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { resolve, join, dirname, relative } from 'node:path'
+import { resolve, join, dirname, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -126,7 +126,11 @@ function walkMarkdown(dir, out = []) {
     if (e.name === 'node_modules' || e.name === '.git') continue
     const abs = join(dir, e.name)
     if (e.isDirectory()) walkMarkdown(abs, out)
-    else if (e.name.endsWith('.md')) out.push(relative(REPO, abs))
+    // POSIX separators on every platform. `relative()` returns `docs\\note.md` on Windows, and a
+    // citation is WRITTEN as `docs/note.md:1` in the markdown — so a backslashed report cannot be
+    // matched against the thing it describes, by a reader or by a test. The path is a citation
+    // here, not a filesystem argument; it is never passed back to `fs`.
+    else if (e.name.endsWith('.md')) out.push(relative(REPO, abs).split(sep).join('/'))
   }
   return out
 }

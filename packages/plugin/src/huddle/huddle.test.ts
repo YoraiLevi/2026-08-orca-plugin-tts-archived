@@ -168,6 +168,16 @@ describe('006 TT1/sites 1-7 — silence always has a spoken reason', () => {
   it('distinguishes an UNREADABLE root from an empty one — different causes, different sentences', async () => {
     const { chmod } = await import('node:fs/promises')
     if (process.getuid?.() === 0) return   // root can read anything; the probe cannot fail
+    // Same reason, different platform: Node's `chmod` on Windows maps only the read-only bit, so
+    // `0o000` leaves the directory readable and the precondition CANNOT BE ESTABLISHED. The probe
+    // would then assert on a state it never created — a test failing for a reason unrelated to the
+    // invariant, which is the shape this repo keeps finding (CI run 32545094360).
+    //
+    // KNOWN GAP, stated rather than hidden: the invariant itself — an unreadable root must not be
+    // reported as an empty one — is REAL on Windows, where ACLs can produce exactly that. It is
+    // simply not guarded here, because this harness cannot make it happen. Closing it needs an
+    // injected fs seam rather than a chmod.
+    if (process.platform === 'win32') return
     const root = await mkdtemp(join(tmpdir(), 'orca-tts-noperm-'))
     await chmod(root, 0o000)
     const notify: string[] = []
