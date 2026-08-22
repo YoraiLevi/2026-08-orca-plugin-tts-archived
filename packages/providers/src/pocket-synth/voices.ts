@@ -27,10 +27,24 @@ export interface PocketVoice {
   readonly key: string
   /** What a person calls it. */
   readonly displayName: string
-  /** The reference clip in the model directory. */
+  /** The reference clip's name in the model directory. */
   readonly file: string
-  /** The VCTK speaker this clip is, so the provenance is inspectable rather than folklore. */
+  /** The upstream file it is fetched from, in `kyutai/tts-voices`. */
+  readonly upstream: string
+  /** Pinned, like every other artifact. R14-02: `ready` must mean the voices work. */
+  readonly sha256: string
+  readonly bytes: number
+  /** The VCTK speaker, so the provenance is inspectable rather than folklore. */
   readonly source: string
+}
+
+/** The revision of `kyutai/tts-voices` these clips come from. Never a branch. */
+export const VOICES_REPO = 'kyutai/tts-voices'
+export const VOICES_REVISION = '323332d33f997de8394f24a193e1a76df720e01a'
+
+/** Where a reference clip is fetched from. */
+export function voiceUrl(upstream: string): string {
+  return `https://huggingface.co/${VOICES_REPO}/resolve/${VOICES_REVISION}/vctk/${upstream}`
 }
 
 /**
@@ -41,18 +55,30 @@ export interface PocketVoice {
  * because "Anna" is not a fact about the world and the speaker id is.
  */
 export const POCKET_VOICES: readonly PocketVoice[] = [
-  { key: 'pocket:anna', displayName: 'Anna', file: 'anna.wav', source: 'VCTK p228' },
-  { key: 'pocket:vera', displayName: 'Vera', file: 'vera.wav', source: 'VCTK p229' },
-  { key: 'pocket:fantine', displayName: 'Fantine', file: 'fantine.wav', source: 'VCTK p244' },
-  { key: 'pocket:charles', displayName: 'Charles', file: 'charles.wav', source: 'VCTK' },
-  { key: 'pocket:paul', displayName: 'Paul', file: 'paul.wav', source: 'VCTK' },
-  { key: 'pocket:eponine', displayName: 'Eponine', file: 'eponine.wav', source: 'VCTK' },
-  { key: 'pocket:azelma', displayName: 'Azelma', file: 'azelma.wav', source: 'VCTK' },
-  { key: 'pocket:george', displayName: 'George', file: 'george.wav', source: 'VCTK' },
-  { key: 'pocket:mary', displayName: 'Mary', file: 'reference_sample.wav', source: 'VCTK p333' },
-  { key: 'pocket:jane', displayName: 'Jane', file: 'jane.wav', source: 'VCTK' },
-  { key: 'pocket:michael', displayName: 'Michael', file: 'michael.wav', source: 'VCTK' },
-  { key: 'pocket:eve', displayName: 'Eve', file: 'eve.wav', source: 'VCTK' },
+  { key: 'pocket:anna', displayName: 'Anna', file: 'anna.wav',
+    upstream: 'p228_023_enhanced.wav', sha256: '0a6de25cf12bf1540beb85979f306a92be81fecc051c547c5395e7e5237a3856', bytes: 804630, source: 'VCTK p228' },
+  { key: 'pocket:vera', displayName: 'Vera', file: 'vera.wav',
+    upstream: 'p229_023_enhanced.wav', sha256: '309cf91a895830f15842b398f69a4962cb1f7e0bfab10e25dd27838e826c204b', bytes: 691416, source: 'VCTK p229' },
+  { key: 'pocket:fantine', displayName: 'Fantine', file: 'fantine.wav',
+    upstream: 'p244_023_enhanced.wav', sha256: '5f07d4e2a3f20a15572aae885156b43ef3fc12ef3812996fd135680d9956448b', bytes: 674852, source: 'VCTK p244' },
+  { key: 'pocket:charles', displayName: 'Charles', file: 'charles.wav',
+    upstream: 'p254_023_enhanced.wav', sha256: '6b681a429198f16e378d53bccb08d06939da7b00144a7696111d4f8f76be7756', bytes: 639272, source: 'VCTK p254' },
+  { key: 'pocket:paul', displayName: 'Paul', file: 'paul.wav',
+    upstream: 'p259_023_enhanced.wav', sha256: '7aba504fe0b3b16478b69eb27ce6007e3cb42b0c1915b5f1c6a6024ae37d679b', bytes: 717182, source: 'VCTK p259' },
+  { key: 'pocket:eponine', displayName: 'Eponine', file: 'eponine.wav',
+    upstream: 'p262_023_enhanced.wav', sha256: 'a13c27fb47627b05223691a0ef2974358a18c886e6c2f9d2762ff1d02c20926b', bytes: 716330, source: 'VCTK p262' },
+  { key: 'pocket:azelma', displayName: 'Azelma', file: 'azelma.wav',
+    upstream: 'p303_023_enhanced.wav', sha256: '60e3d26cdf2efdec5df712152c839928f4d5522821e6554ae11fd96c57ab1026', bytes: 823852, source: 'VCTK p303' },
+  { key: 'pocket:george', displayName: 'George', file: 'george.wav',
+    upstream: 'p315_023_enhanced.wav', sha256: '29a41f93bf5236e5b21501091d7774c255d5f3d4e62fa4f9fdf0a92a793c84ae', bytes: 642692, source: 'VCTK p315' },
+  { key: 'pocket:mary', displayName: 'Mary', file: 'reference_sample.wav',
+    upstream: 'p333_023_enhanced.wav', sha256: 'a35b0468382218e9f37a9a7494d1e4b74deaf18d7ced22265b4e325bb55c183f', bytes: 639084, source: 'VCTK p333' },
+  { key: 'pocket:jane', displayName: 'Jane', file: 'jane.wav',
+    upstream: 'p339_023_enhanced.wav', sha256: '2f12e7f155eb3118f55425394f1b049e5b1b67bdc9b3932c8ba4521420aeb84a', bytes: 759340, source: 'VCTK p339' },
+  { key: 'pocket:michael', displayName: 'Michael', file: 'michael.wav',
+    upstream: 'p360_023_enhanced.wav', sha256: 'b6743e9195e5e3fd34fe9d1633ae93f7ffab787b249e45f6467d7d6f7a6ee6ad', bytes: 751140, source: 'VCTK p360' },
+  { key: 'pocket:eve', displayName: 'Eve', file: 'eve.wav',
+    upstream: 'p361_023_enhanced.wav', sha256: '396e7cbd066b0f3fb6d67fa26e7904076958239d736d4390f15b5fe88feb14cd', bytes: 671872, source: 'VCTK p361' },
 ]
 
 /** The one used when nothing has been chosen. Mary is the bundle's own reference sample. */

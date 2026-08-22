@@ -16,12 +16,13 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, MODEL_REVISION, MANIFEST_FILE, MANIFEST_VERSION,
-  LICENSE_FILE, downloadModel, modelDir, modelStatus, requiredFiles, sha256, urlFor,
+  LICENSE_FILE, VOICE_ARTIFACTS, VOICES_TOTAL_BYTES, INSTALL_TOTAL_BYTES,
+  downloadModel, modelDir, modelStatus, requiredFiles, sha256, urlFor,
   type ModelArtifact,
 } from './models.js'
 import {
   POCKET_VOICES, POCKET_DEFAULT_VOICE, parseVoiceKey, formatVoiceKey, resolveVoiceForBackend,
-  OS_BACKEND, POCKET_BACKEND,
+  OS_BACKEND, POCKET_BACKEND, VOICES_REVISION, voiceUrl,
 } from './voices.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -356,5 +357,77 @@ describe('R14-06 — the swap is reversible at every step', () => {
     await expect(downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch({ failLicence: true }) }))
       .rejects.toThrow(/CC-BY-4\.0|LICENSE could not be fetched/)
     expect(stillPrevious(dir)).toBe(true)
+  })
+})
+
+
+/* --------------------------------------------- R14-02: ready must mean the voices actually work */
+
+describe('R14-02 — a reference clip is an artifact, not an assumption', () => {
+  it('every voice in the registry is a file the install requires', () => {
+    // THE MUTANT THAT EXPOSED THIS: renaming Eve's file to `does-not-exist.wav` left 20/20 green,
+    // because nothing connected the registry to the manifest. `modelStatus()` could say READY
+    // while not one voice had a conditioning clip to load, and `ready` is what every caller uses
+    // to decide whether it can speak.
+    const required = new Set(requiredFiles())
+    for (const v of POCKET_VOICES) {
+      expect(required.has(v.file), `${v.key} needs ${v.file}, which nothing requires`).toBe(true)
+    }
+  })
+
+  it('pins all twelve clips by digest and length', () => {
+    expect(VOICE_ARTIFACTS).toHaveLength(12)
+    for (const a of VOICE_ARTIFACTS) {
+      expect(a.sha256, a.file).toMatch(/^[0-9a-f]{64}$/)
+      expect(a.bytes, a.file).toBeGreaterThan(100_000)
+    }
+    // Measured from the twelve files on disk, not estimated.
+    expect(VOICES_TOTAL_BYTES).toBe(8_531_662)
+  })
+
+  it('advertises the WHOLE install, not just the weights', () => {
+    // Understating someone's download is its own small dishonesty, and the UI reads this number
+    // before it spends their bandwidth.
+    expect(INSTALL_TOTAL_BYTES).toBe(MODEL_TOTAL_BYTES + VOICES_TOTAL_BYTES)
+    expect(INSTALL_TOTAL_BYTES).toBeGreaterThan(MODEL_TOTAL_BYTES)
+  })
+
+  it('fetches each clip from the voices repo at its own pinned revision', () => {
+    // Different repository from the weights, so a single revision constant would have been wrong.
+    expect(VOICES_REVISION).toMatch(/^[0-9a-f]{40}$/)
+    const url = urlFor('eve.wav')
+    expect(url).toContain('kyutai/tts-voices')
+    expect(url).toContain(VOICES_REVISION)
+    // Renamed on disk, so the engine's filename stays stable if upstream renames the speaker file.
+    expect(url).toContain('p361_023_enhanced.wav')
+    expect(url).not.toContain('/main/')
+    expect(voiceUrl('p228_023_enhanced.wav')).toContain(VOICES_REVISION)
+  })
+
+  it('still routes model artifacts to the model repo', () => {
+    // A control: the voice branch above must not have swallowed everything.
+    expect(urlFor('bundle.json')).toContain('pocket-tts-onnx')
+    expect(urlFor('bundle.json')).toContain(MODEL_REVISION)
+  })
+
+  it('reports a weights-only directory as ABSENT and names a missing voice', async () => {
+    // This is exactly a version-1 cache: every model artifact present, no clips. It used to read
+    // as ready and could not speak.
+    const dir = scratch()
+    for (const a of MODEL_ARTIFACTS) writeFileSync(join(dir, a.file), 'x')
+    writeFileSync(join(dir, LICENSE_FILE), 'x')
+    writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+    const s = await modelStatus(dir)
+    expect(s.kind).toBe('absent')
+    if (s.kind === 'absent') expect(s.missing).toContain('eve.wav')
+  })
+
+  it('treats a version-1 cache as stale rather than adopting it', async () => {
+    const dir = scratch()
+    for (const f of requiredFiles()) writeFileSync(join(dir, f), 'x')
+    writeFileSync(join(dir, MANIFEST_FILE), '1\n')
+    const s = await modelStatus(dir)
+    expect(s.kind).toBe('stale')
+    if (s.kind === 'stale') expect(s.found).toBe('1')
   })
 })

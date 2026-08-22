@@ -26,6 +26,11 @@ import { mkdir, readFile, writeFile, rename, rm, readdir } from 'node:fs/promise
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
+// `.ts`, not `.js`, and the extension is load-bearing rather than a style choice. The Voice Lab
+// imports this module under PLAIN NODE, whose resolver does not rewrite `.js` to `.ts` — vitest
+// does, which is exactly how a suite goes green over a tree that cannot boot (P37, SC-14). The
+// repo already sets `allowImportingTsExtensions`, and SC-14 proves this file still loads.
+import { POCKET_VOICES, voiceUrl } from './voices.ts'
 
 /* ------------------------------------------------------------------------------- the manifest */
 
@@ -36,8 +41,14 @@ export const MODEL_REVISION = '58a6d00cf13d239b6748cb0769f35c580a8f606c'
 /** The language bundle. 6-layer English; the `*_24l` bundles are much larger and slower. */
 export const BUNDLE_ID = 'english_2026-04'
 
-/** Bump when the artifact list or any hash changes; a mismatched on-disk manifest refetches. */
-export const MANIFEST_VERSION = 1
+/**
+ * Bump when the artifact list or any hash changes; a mismatched on-disk manifest refetches.
+ *
+ * 1 -> 2: the twelve reference clips joined the required set (R14-02). A version-1 cache holds
+ * weights and no voices, which is precisely the state that used to report ready and could not
+ * speak, so it MUST be treated as stale rather than adopted.
+ */
+export const MANIFEST_VERSION = 2
 
 export interface ModelArtifact {
   readonly file: string
@@ -106,9 +117,41 @@ export function modelDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(base, 'orca-tts', 'models', 'pocket-tts')
 }
 
-/** Every file that must be present for the model to be usable. */
+/**
+ * The twelve reference clips, as manifest entries.
+ *
+ * R14-02: these were NOT in the manifest, so `modelStatus()` could say **ready** while not one
+ * Pocket voice had a conditioning clip to load — and a mutant renaming Eve's file to
+ * `does-not-exist.wav` left 20/20 tests green. `ready` has to mean "the voices work", because that
+ * is what every caller uses it for.
+ *
+ * They come from a DIFFERENT repository than the weights (`kyutai/tts-voices`, also CC-BY-4.0), at
+ * its own pinned revision, and are pinned by digest and length like everything else. All twelve
+ * digests were verified against the bytes on this machine before being written down.
+ */
+export const VOICE_ARTIFACTS: readonly ModelArtifact[] = POCKET_VOICES.map((v) => ({
+  file: v.file, sha256: v.sha256, bytes: v.bytes,
+}))
+
+/** What the reference clips weigh — 8.5 MB, small beside the weights but not nothing. */
+export const VOICES_TOTAL_BYTES = VOICE_ARTIFACTS.reduce((n, a) => n + a.bytes, 0)
+
+/**
+ * What a complete install weighs, which is what a person must be told before it is spent.
+ *
+ * The UI previously advertised the model total alone. R14-02: that is not the install the feature
+ * needs, and understating someone's download is its own small dishonesty.
+ */
+export const INSTALL_TOTAL_BYTES = MODEL_TOTAL_BYTES + VOICES_TOTAL_BYTES
+
+/** Every file that must be present for the model to be usable — weights AND voices. */
 export function requiredFiles(): string[] {
-  return [...MODEL_ARTIFACTS.map((a) => a.file), LICENSE_FILE, MANIFEST_FILE]
+  return [
+    ...MODEL_ARTIFACTS.map((a) => a.file),
+    ...VOICE_ARTIFACTS.map((a) => a.file),
+    LICENSE_FILE,
+    MANIFEST_FILE,
+  ]
 }
 
 export type ModelStatus =
@@ -135,6 +178,9 @@ export async function modelStatus(dir = modelDir()): Promise<ModelStatus> {
 
 export function urlFor(file: string): string {
   if (file === 'LICENSE') return `https://huggingface.co/${MODEL_REPO}/resolve/${MODEL_REVISION}/onnx/LICENSE`
+  // A reference clip lives in the voices repo, under its upstream name, at its own revision.
+  const voice = POCKET_VOICES.find((v) => v.file === file)
+  if (voice !== undefined) return voiceUrl(voice.upstream)
   return `https://huggingface.co/${MODEL_REPO}/resolve/${MODEL_REVISION}/onnx/${BUNDLE_ID}/${file}`
 }
 
@@ -207,7 +253,9 @@ export interface DownloadOptions {
 export async function downloadModel(options: DownloadOptions = {}): Promise<string> {
   const dir = options.dir ?? modelDir()
   const doFetch = options.fetchImpl ?? fetch
-  const artifacts = options.artifacts ?? MODEL_ARTIFACTS
+  // Weights AND voices. Fetching one without the other produces a directory that reports ready
+  // and cannot speak (R14-02).
+  const artifacts = options.artifacts ?? [...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS]
   const hooks = options.hooks ?? {}
 
   // Siblings, not `tmpdir()`: same filesystem, so the renames below cannot fail with EXDEV.
