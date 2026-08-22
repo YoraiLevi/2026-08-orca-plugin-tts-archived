@@ -231,3 +231,47 @@ worth it unattended.
   now better at finding those than broken code. That is what convergence looks like and is also
   why the counter has not started.
 - `docs/USABILITY.md` is written and is what the author should open first.
+
+
+## WIND-DOWN at 4h16m — clean, and what the next window should do
+
+Tree clean, **0 unpushed**, HEAD `f38779f`, 0 leaked `say`, load 2.71. Nothing was in flight to
+rescue: the in-process agents finished hours ago and the ORCA-dispatched M13 worker completed.
+
+### The last hour produced one real product defect and three instrument findings
+
+**PRODUCT — the million ceiling is a live defect on Windows.** SAPI reads `1234567` DIGIT BY
+DIGIT: 139,800 B, Δ76,716 from the spelled-out reference, with the probe's own controls green
+(`STABLE`, `NOISE` 0 B, `"1000000" === "one million"` PASS) so the verdict is not vacuous. macOS
+and espeak-ng both read it as a number. **Q64 named this exact risk** — a platform-specific defect
+hiding behind a macOS-only probe — and I called it retired when espeak-ng came back clean. **Two
+platforms agreeing is not three.** Left RED deliberately; extending `numberToWords` past 999,999
+is the first real job of the next window.
+
+**INSTRUMENTS — three variants of one shape, all mine:**
+
+1. `until` in the seam file **returned silently** at its ceiling, so a condition that never arrived
+   produced no error — only a confusing assertion later or an anonymous "Test timed out".
+2. Making it throw broke a row that was RIGHT to time out: the runaway detector waits for a thing
+   that must never happen, and reaching the ceiling IS its pass. **Two opposite intentions shared
+   one spelling.** Now `until` and `watchFor`.
+3. The helpers in `main.test.ts` already threw naming the stuck wait — at a 30 s backstop. I set
+   the test budget to **30 s as well**, so vitest's anonymous kill won the race every time and
+   three CI runs reported nothing useful. **A diagnostic that loses to the timeout it explains is
+   not a diagnostic.** 45 s now; the gap is the point.
+
+The checks were all present. None could be heard.
+
+### Corrections to my own earlier claims, so they are not inherited
+
+- **"30 s firing means a hang"** — wrong. Windows was genuinely that slow; the suite passes at
+  45 s. The budget was right for a different reason than I gave.
+- **"The espeak result retires the ceiling risk"** — wrong, as above.
+
+### First jobs of the next window, in order
+
+1. **Extend `numberToWords` past 999,999.** A live defect on a shipped platform, now measured.
+2. `half-written-line-concluded-on` on Linux — the documented gap. My attempted fix is described
+   in the ledger; it broke macOS and was reverted.
+3. Round 14. The counter is 0 of 3 after thirteen rounds.
+4. **G4 is the author's** and blocks M14b: the D002 Q5 policy needs to be chosen in the Voice Lab.
