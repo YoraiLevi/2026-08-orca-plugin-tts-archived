@@ -93,9 +93,14 @@ export class ProviderRegistry {
         this.#lastFailure = why
         continue
       }
+      const unavailable = [
+        ...failures,
+        ...unknown.map((missing) => `${missing}: no provider with that id is registered`),
+      ]
       const reason = rung === 'preferred'
         ? undefined
-        : `${requestedId ?? this.#preferredId ?? 'preferred engine'} was unavailable; using ${p.displayName}`
+        : `${requestedId ?? this.#preferredId ?? 'preferred engine'} was unavailable` +
+          `${unavailable.length === 0 ? '' : ` (${unavailable.join('; ')})`}; using ${p.displayName}`
       return { provider: p, status: reason === undefined ? { providerId: p.id, rung } : { providerId: p.id, rung, reason } }
     }
     this.#lastFailureDetail = this.#describeFailure(tried, unknown, failures)
