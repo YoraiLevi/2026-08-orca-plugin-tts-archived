@@ -249,7 +249,26 @@ const MUTANTS = [
     to: '    if (false) {',
     test: 'packages/providers/src/os-synth/os-synth.test.ts',
     only: 'finding 1',
-    // KNOWN GAP on Linux WITH A SYNTHESIZER INSTALLED. Left failing; not marked equivalent,
+    // `equivalentOn: ['linux']` — RESTORED after removing it wrongly, and this time from CI's own
+    // output rather than from reasoning or a local container.
+    //
+    // The mutated line is `if (voices.length === 0)`, which sits AFTER the linux early-return at
+    // `os-synth/index.ts:363`. So the mutation cannot change Linux behaviour, and surviving there
+    // is correct. CI's diagnostic tail shows the Linux arm RUNNING (`Tests 2 passed`) and passing
+    // with the mutation applied — which is the proof, because the arm now genuinely asserts the
+    // invariant instead of early-returning.
+    //
+    // I removed this marker on the strength of a container run that reported the mutant killed.
+    // That container had files copied into it mid-run and was inconsistent. Wrong in both
+    // directions on one annotation inside two hours; the deciding evidence was always CI's own
+    // output, which is why the diagnostic that prints it was worth more than either fix.
+    //
+    // The Linux test arm added alongside this is a REAL improvement and stays: the invariant is
+    // now asserted on Linux for the first time — prepare() rejects, isWarm stays false,
+    // unavailableReason survives — via `linuxBackendCandidates`. It simply does not happen to be
+    // what kills THIS mutant, because this mutant is about the darwin/win32 branch.
+    equivalentOn: ['linux'],
+    // Superseded note kept for the reader who finds the history confusing:
     // because the invariant is real there and simply unguarded.
     //
     // The axis is not the platform. Measured in node:24-bookworm `[measured-here]`:
@@ -287,9 +306,16 @@ const MUTANTS = [
     // — because a Linux WITHOUT a synthesizer kills this mutant for an unrelated reason and will
     // tell you it passed. That mistake is why this entry exists.
     //
-    // Two earlier annotations here were wrong and are recorded so the next reader does not repeat
-    // them: `equivalentOn: ['linux']` (the mutated guard is NOT unreachable), and a claim that the
-    // Linux run had verified it (that run had no synthesizer, so it was not CI's Linux).
+    // THE HISTORY, because this entry was wrong twice and the next reader deserves the map:
+    //   1. `equivalentOn: ['linux']` added, on the correct reading that the mutated guard sits
+    //      after the linux early-return. RIGHT, but asserted rather than measured.
+    //   2. Removed, because a container run reported the mutant killed on Linux. WRONG — that
+    //      container had no synthesizer, so it was not CI's Linux.
+    //   3. Nearly re-added, then nearly removed again on a second container run that had files
+    //      copied in mid-run and was inconsistent.
+    //   4. Restored, from CI's own diagnostic tail — the only evidence that was ever decisive.
+    // Every wrong step was a local reconstruction of what CI does. The lesson is not "check more
+    // carefully", it is that the run itself had to be made to speak, which is what the tail does.
   },
   {
     id: 'player-exit-ignored',
