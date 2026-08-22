@@ -62,6 +62,78 @@ Cap 3-4 concurrent agents. v1 decisions reopenable with evidence.
       *Oracle:* `gh run view`. **Local green is not evidence** — it was wrong seven times in
       two hours on 2026-08-21.
 
+## Operating autonomously across the 5-hour limit and compaction
+
+Written for whoever manages this next. All of it is shell-accessible, so a `Monitor` can use it
+— which matters, because a monitor runs bash and cannot make an MCP call.
+
+### Reading your own state
+
+| Command | What it gives |
+|---|---|
+| `orca terminal read --terminal <h> --json` | your own live screen. `result.terminal.tail` is a line list; the status row reads e.g. `permission2 on · 2 monitors · ← 1 agent` |
+| `orca terminal send` | **types into a live terminal, including your own.** This is how a `/compact` gets self-issued rather than waited for |
+| `orca terminal wait --terminal <h> --for tui-idle --timeout-ms N` | block until an agent terminal is idle instead of polling |
+| `orca terminal list --json` | every terminal with a `preview` — one call scans the whole fleet |
+| ORCA Usage meter, via cua `get_window_state` on the ORCA window, `query: "% used"` | the real numbers: element 50 is the **5-hour** figure, 53 the weekly |
+
+`orca status --json` first; `orca skills get orchestration` prints the version-matched guide.
+Do not guess subcommands — they change between releases.
+
+### The limit is directly detectable
+
+A terminal that hit it reads, in plain text with the reset time:
+
+    ⎿  You've hit your session limit · resets 2:20pm (Asia/Jerusalem)
+
+**Prime a baseline before watching for it.** A monitor that alerts on first sight fires forever
+on yesterday's scrollback — this exact monitor was built, fired within seconds on a stale
+message while the live meter read 6 %, and had to be rebuilt. A permanently-red indicator
+carries no information and will camouflage the real event. **Cross-check any signal against
+the meter before acting on it.**
+
+### When to compact — the rule that matters
+
+**Compact at a wave boundary, never mid-wave.** The boundary is the moment your context is
+genuinely disposable: every agent in the wave has reported, the ledger and checkpoint are
+current, the tree is committed and pushed. Compacting there costs nothing, because everything
+load-bearing is on disk and the next wave starts from files rather than from memory.
+
+Compacting mid-wave loses the one thing that is not yet written down: the in-flight agent
+reports you have read but not yet folded into the ledger. That is how a resumed session forks
+a second attempt at a job already running.
+
+**The checklist, all four before compacting:**
+
+1. No unreported agent results in flight.
+2. `checkpoint.md` names what is running and what is next.
+3. `ledger.md` has the wave's outcomes with their evidence.
+4. Tree committed and **pushed** — GitHub is the state that survives process death.
+
+**Compact BEFORE a large fan-out, not after.** Synthesis is the expensive thinking; give it a
+fresh window rather than the dregs of one spent reading reports.
+
+**Do not compact agents.** Subagents are ephemeral by design. Keep each Job small enough to
+finish inside one context; if one is running long, tell it to **commit partial work and report**
+rather than continue. A Job that cannot fit in one context is a Job that was scoped too large,
+and splitting it is cheaper than rescuing it.
+
+### Wind down before the wall, not at it
+
+At roughly **4h15m** into the window: every agent commits partial work with
+`git commit -- <paths>`, the tree is verified, the checkpoint is refreshed, everything is
+pushed. Then stop dispatching.
+
+This is not caution for its own sake. Hitting the wall on 2026-08-21 killed two agents
+mid-work, one holding **1,548 uncommitted lines**, and the recovery cost more than the pause
+would have.
+
+### The one gap that needs a human
+
+Monitors and crons die if the Claude process itself exits. Everything is pushed continuously so
+no work is lost, but that single case needs one message from the author to resume. Say so
+plainly rather than implying the loop is unbreakable.
+
 ## Handed back to the author, never certified by an agent
 
 - **C7 taste defaults** — identifier speech, path depth, announcement wording, overhead budget.
