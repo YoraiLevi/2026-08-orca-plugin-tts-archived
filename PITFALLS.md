@@ -72,8 +72,13 @@ Killing it moved the same probe **33,823 ms → 17,825 ms** `[measured-here]` �
 Nothing was audible: `say -o <file>` never opens the device (P31 respected).
 **What to do instead:** before trusting ANY `os-synth` timing, check for leaks and check load:
 
-    ps -eo pid,etime,command | grep '[s]ay -o'
-    pkill -f 'say -o.*orca-tts'      # only when no suite is legitimately running
+    pgrep -x say                     # NOT `ps | grep 'say -o'` — see below
+    pkill -x say                     # only when no suite is legitimately running
+
+**`ps -eo command | grep '[s]ay -o'` counts ITSELF.** The shell wrapper that runs the grep has
+the pattern in its own command line, so the check reports one or more leaked processes on a
+machine with none, every time. It was written that way here and reported a phantom leak at a
+wind-down. `pgrep -x say` matches the executable name and cannot match the query.
 
 A suite killed mid-run leaks its children, and over an eight-hour session they accumulate. The
 number this produces is not a slow system, it is a **misdiagnosis engine**: it points at the one
