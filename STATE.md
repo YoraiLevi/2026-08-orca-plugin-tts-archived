@@ -1,6 +1,6 @@
 # STATE — orca-plugin-tts
 
-**Updated:** 2026-08-23 · **Phase:** Pocket TTS backend complete; awaiting the author's review · **Branch:** `main` ·
+**Updated:** 2026-08-23 (later) · **Phase:** Pocket TTS usable end to end; awaiting the author's ear · **Branch:** `main` ·
 **Repo:** https://github.com/YoraiLevi/orca-plugin-tts
 
 > **Amended 2026-08-21 — forced by the latency measurement pass** (`docs/.research/latency-measurements.md`).
@@ -13,7 +13,52 @@
 
 ## IN PROGRESS — one task, named, per R041
 
-**Nothing is in progress. The next move is the author's ear.**
+**`PV-review18` is running against the frozen `ba9a40f`. Everything else waits on the author's ear.**
+
+The step-by-step for that review is **`docs/REVIEW-SCRIPT.md`** — two commands, a named expected
+result at each step so a wrong one reads as a defect rather than as his problem, the four C7 taste
+questions in the shape the answers are needed, and the two policy calls left to him.
+
+**He already has the weights.** `node scripts/stage-pocket-model.mjs` symlinks
+`~/.buzz/models/pocket-tts` into the product cache and writes our marker there; no 173.8 MB
+download, and nothing is ever written into buzz's directory.
+
+### Round 17: 7 findings, 7 confirmed, all closed
+
+| | closed by | verified by |
+|---|---|---|
+| R17-01 the artifact could not load its engine | `226e39d` | `prepare-failed, 0 chunks` -> **24000 Hz, rms 0.0768** |
+| R17-02 the bundle guard proved a STRING | `ef837f0` | round 17's own mutant (name kept as a log string) now goes RED |
+| R17-03 a failed download deleted the LIVE runtime | `76de03f` | `liveExists false` -> `true` under `afterStage` injection |
+| R17-05 `safe-swap.ts` did not contain the swap | `76de03f` | re-inlining a rename turns the guard red **and nine behaviour tests with it** |
+| R17-06 the documented assembler had no caller | `ef837f0` | inverting the factory's preference is now observable |
+| R17-07 three answers to "is Pocket installed" | `ba9a40f` | buzz -> `incomplete` naming the marker; empty CONTROL stays `absent` |
+| — the setting that makes it usable | `d4f9ff0` | `probe:artifact` PASS: PRESENT 24 kHz `rung=preferred`, ABSENT names the substitution |
+
+**R17-01 is the one to learn from.** `#loadEngine` used `import(ENGINE_MODULE)` — a VARIABLE.
+esbuild cannot follow one, so it left a runtime import of `dist/plugin/engine.ts`, a file the
+artifact does not contain, while the engine sat inlined in the bundle reached by the LITERAL import
+three lines above. **One specifier defeated three instruments**: a substring guard saw the string,
+SC-14's graph walk followed the literal and walked past the broken door, and every provider test
+injects `loadEngine` so none took the path at all.
+
+### The gate discipline that now exists, and its residue
+
+`pnpm probe:artifact` drives the SHIPPED `dist/plugin/main.mjs`. Exit codes were checked by effect:
+
+  0 = model present and neural audio verified · **1 = a real defect (corrupt model -> 1, not 2)**
+  2 = genuinely no model, INCONCLUSIVE · 3 = dirty machine or missing bundle
+
+**The residue, stated rather than hidden:** CI runners never have a model, so CI always takes the
+exit-2 path and the conclusive arm runs only when a human with the weights runs it. Round 18 is
+testing whether an ABSENT-arm failure can also hide behind exit 2 — a hole I did not think to check.
+
+### The author-facing claim that was wrong, and is now closed
+
+I twice reported *"Arm B heard Pocket TTS"*. True — but only because `ui-probe` staged a manifest
+marker the author's own Voice Lab never staged. On his machine the Lab said the backend was not
+installed. The probe no longer treats `~/.buzz` as installed, so it can no longer tell him something
+his product will not.
 
 ### What closed this session, and how it was checked
 
