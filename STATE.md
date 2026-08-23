@@ -13,7 +13,31 @@
 
 ## IN PROGRESS — one task, named, per R041
 
-**`PV-review18` is running against the frozen `ba9a40f`. Everything else waits on the author's ear.**
+**`PV-review19` is running against the frozen `db11fea`. Everything else waits on the author's ear.**
+
+### Round 18: 5 findings, 5 confirmed, all closed at `db11fea`
+
+Round 18 reviewed round 17's *repair* and found five. Two were in the command the author had just
+been told to run.
+
+| | closed by | verified by |
+|---|---|---|
+| R18-01 the "effect" guard was a LOG SUBSTRING | `db11fea` | round 18's own stub mutant: **BUILD_EXIT 0 -> 1** |
+| R18-02 exit 2 skipped the ABSENT arm; CI maps 2 to green | `db11fea` | an unnamed substitution is now exit 1, not 2 |
+| R18-03 the P31 leak check was WRITE-ONLY | `db11fea` | `--prove-p31`: 5 rows, RED on bare `say`, GREEN on `say -o` |
+| R18-04 `ready` came from `readdir` NAMES | `a937d11` | delete the symlink source: `ready` -> not ready |
+| R18-05 the R061 refusal was a string prefix | `a937d11` | non-existent dest via symlinked parent: **false -> true** |
+
+**The same guard has now been defeated twice.** `scripts/build.mjs` asserted a class NAME (R17-02),
+was repaired to assert a log SUBSTRING, and a stub with `id: 'pocket'` defeated that (R18-01). It now
+demands the bundled provider raise `PocketModelUnavailableError` naming the empty directory and
+enumerating `mimi_encoder.onnx`. Round 19's first job is to defeat it a third time.
+
+**P50 is the lesson that generalises** and it is about the coordinator, not the code: the R061
+refusal was written, tested, and hand-verified — I watched it refuse by name and watched its control
+return false — and round 18 walked past it, because I passed a destination that EXISTS and the
+product passes one that does NOT. Check the shape the product produces, not the shape that is easy
+to build.
 
 The step-by-step for that review is **`docs/REVIEW-SCRIPT.md`** — two commands, a named expected
 result at each step so a wrong one reads as a defect rather than as his problem, the four C7 taste
