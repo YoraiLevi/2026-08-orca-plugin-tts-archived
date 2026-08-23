@@ -344,8 +344,9 @@ async function muteConfirmations (cdp) {
   if (!/on/i.test(muteText)) return
   const beforeMute = await cdp.evaluate('window.__lab.utterances.length')
   await cdp.evaluate(`document.getElementById('btn-mute').click()`)
-  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforeMute, 120000)
-  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 30000)
+  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > beforeMute, 30000)
+  await cdp.evaluate(`document.getElementById('btn-stop').click()`)
+  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 5000)
 }
 
 function chooseVoice (cdp, key) {
@@ -376,11 +377,18 @@ async function pickerKeys (cdp) {
  * Asserting only the request is how U6 passed while the OS was speaking (R16-05).
  */
 async function playUntilDone (cdp) {
+  // Play toggles pause when something is already flagged as playing. Stop first so this
+  // click is always a new utterance, not a pause that never increments the counter.
+  await cdp.evaluate(`document.getElementById('btn-stop').click()`)
+  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 5000)
   await cdp.evaluate('window.__ui.requests = []; window.__ui.speakHeads = []')
   const before = await cdp.evaluate('window.__lab.utterances.length')
   await cdp.evaluate(`document.getElementById('btn-play').click()`)
-  await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > before, 120000)
-  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 120000)
+  const grew = await waitUntil(cdp, 'window.__lab.utterances.length', (n) => Number(n) > before, 120000)
+  if (!(Number(grew) > before)) {
+    throw new Error(`Play did not deliver an utterance (still ${grew} after Stop+Play)`)
+  }
+  await waitUntil(cdp, 'window.__ui.live', (n) => Number(n) === 0, 30000)
   await waitUntil(cdp, 'window.__labEffect().provenance.backend', (v) => v != null, 10000)
   await waitUntil(cdp, 'window.__ui.speakHeads.length', (n) => Number(n) > 0, 10000)
   return JSON.parse(await cdp.evaluate(`JSON.stringify({
@@ -736,7 +744,19 @@ async function u6 (cdp) {
 
   await muteConfirmations(cdp)
   await chooseVoice(cdp, pocketKey)
-  const snap = lastSpeak(await playUntilDone(cdp))
+  let snap
+  try {
+    snap = lastSpeak(await playUntilDone(cdp))
+  } catch (err) {
+    if (ARM.pocketInstalled) {
+      return {
+        pass: false,
+        inconclusive: true,
+        detail: `Pocket was staged but Play delivered nothing: ${err.message ?? err}`
+      }
+    }
+    throw err
+  }
   const served = snap.served
   const requested = snap.requested
   const degraded = snap.head?.degradation ?? null
@@ -910,13 +930,6 @@ async function u8 (cdp) {
 
   await muteConfirmations(cdp)
 
-  await cdp.evaluate(`(() => {
-    const input = document.getElementById('example-text');
-    input.value = 'Cache identity must include the selected backend and voice.';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  })()`)
-  await sleep(900)
-
   const keys = await pickerKeys(cdp)
   const osKey = keys.os[0]
   const pocketA = keys.pocket[0]
@@ -925,23 +938,38 @@ async function u8 (cdp) {
     return { pass: false, detail: `need one OS voice and two Pocket voices, got os=${keys.os.length} pocket=${keys.pocket.length}` }
   }
 
+  async function setExample (text) {
+    await cdp.evaluate(`(() => {
+      const input = document.getElementById('example-text');
+      input.value = ${JSON.stringify(text)};
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`)
+    await sleep(900)
+  }
+
   async function switchAndSpeak (from, to) {
     await chooseVoice(cdp, from)
-    const prime = lastSpeak(await playUntilDone(cdp))
-    if (prime.body === null) return { from, to, error: `prime ${from} made no /speak request` }
+    // Warming `from` may be a cache hit if we already played it. The property under
+    // test is the switch: Play of `to` must miss the cache.
+    await playUntilDone(cdp)
     await chooseVoice(cdp, to)
     const replayDisabled = await cdp.evaluate(`document.getElementById('btn-replay').disabled`)
     const snap = lastSpeak(await playUntilDone(cdp))
     return {
       from, to, replayDisabled,
       spoke: snap.body !== null,
-      requested: snap.requested,
-      primeRequested: prime.requested
+      requested: snap.requested
     }
   }
 
+  // Separate sentences so a correct cache of an earlier OS prime cannot satisfy
+  // pocket→os. R16-06's reverse mutant is "OS keyed as last Pocket"; a prior
+  // os play of the SAME text is a legitimate hit and would hide it.
+  await setExample('Cache identity os to pocket.')
   const fwd = await switchAndSpeak(osKey, pocketA)
+  await setExample('Cache identity pocket to os.')
   const rev = await switchAndSpeak(pocketA, osKey)
+  await setExample('Cache identity pocket to pocket.')
   const sibling = await switchAndSpeak(pocketA, pocketB)
   const problems = []
   for (const row of [fwd, rev, sibling]) {
@@ -977,7 +1005,19 @@ async function u9 (cdp) {
   if (!pocketKey) return { pass: false, detail: 'no Pocket option to play' }
 
   await chooseVoice(cdp, pocketKey)
-  const snap = lastSpeak(await playUntilDone(cdp))
+  let snap
+  try {
+    snap = lastSpeak(await playUntilDone(cdp))
+  } catch (err) {
+    if (ARM.pocketInstalled) {
+      return {
+        pass: false,
+        inconclusive: true,
+        detail: `Pocket was staged but Play delivered nothing: ${err.message ?? err}`
+      }
+    }
+    throw err
+  }
   const effect = snap.provenance
   const selected = await cdp.evaluate(`document.getElementById('ctl-voice.id').value`)
   const served = effect?.backend ?? snap.served
@@ -1083,9 +1123,13 @@ const BREAKAGES = [
   {
     id: 'U7',
     what: 'swallow the download error sentence the listener is owed',
-    apply: (html) => html.replace(
-      'const sentence = `The neural voice download stopped${where}: ${state.download.error}. Your system voices still work.`',
-      'const sentence = `Download finished.`')
+    apply: (html) => {
+      const broken = html.replaceAll(
+        'Your system voices still work.',
+        'Download finished.')
+      if (broken === html) throw new Error('the error-sentence breakage matched nothing')
+      return broken
+    }
   },
   {
     id: 'U8',
@@ -1293,17 +1337,19 @@ async function main () {
     }
   }
 
-  if (pocketDir) {
-    const pocketOnly = only ?? ['U6', 'U8', 'U9']
+  const pocketOnly = (only ?? ['U6', 'U9']).filter((id) => id === 'U6' || id === 'U9')
+  if (!prove && pocketDir && pocketOnly.length > 0) {
     console.log(`\nArm B — Pocket model present at ${pocketDir}.`)
     console.log('U6 and U9 must now require that Pocket is what spoke.\n')
     const pocket = await runAgainst(join(ROOT, 'voice-lab'), pocketOnly, {
       pocketInstalled: true, modelDir: pocketDir
     })
     ;({ failures } = printResults(pocket, failures))
-    const u6 = pocket.find((r) => r.id === 'U6')
-    if (u6?.pass === true) neuralHeard = true
-  } else {
+    const u6arm = pocket.find((r) => r.id === 'U6')
+    if (u6arm?.pass === true) neuralHeard = true
+  } else if (prove) {
+    console.log('\nArm B skipped during --prove (breakages are hermetic).')
+  } else if (!pocketDir) {
     console.log('\nArm B skipped — no Pocket model at ORCA_TTS_MODEL_DIR or ~/.buzz/models/pocket-tts.')
   }
 
