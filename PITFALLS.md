@@ -6,6 +6,45 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P50 — I verified the guard against the case I could build, not the case the product passes
+**Symptom:** a refusal guard (R061: never write into `~/.buzz`, another application's cache) was
+written, tested, *and independently re-verified by hand* — I ran it, watched it refuse by name,
+watched its control return false, and reported it working. Two hours later round 18 walked straight
+past it.
+**Cause:** the guard resolved the real path only when the directory **already existed**:
+
+```ts
+const realTarget = existsSync(dir) ? realpathSync(dir) : target   // <- the hole
+```
+
+My verification passed a destination that exists, because that is the easy thing to construct.
+**A staging command passes a destination that does NOT exist yet** — that is the whole point of a
+staging command. With a parent symlinked into `~/.buzz`, the non-existent dest resolved to its own
+literal string, matched no prefix, was declared safe, and the write would have created it inside
+buzz's directory. Measured, against the real cache:
+
+```
+existing dest via symlinked parent        true    <- the case I tested
+NON-EXISTENT dest via symlinked parent    FALSE   <- the case the product passes
+```
+
+Its sibling, found in the same round: `modelStatus` decided `ready` from `readdir` **names**. A
+symlink whose target was deleted still has a name, so a staged cache reported ready while not one
+byte was reachable.
+**What to do instead:** two rules, and the second is the one that was missing.
+- **A name is not a file; a path is not a location.** Ask the filesystem the question the caller is
+  actually asking. `existsSync` follows symlinks — use it when you mean "can this be read". For
+  "where would this write land", resolve the nearest EXISTING ancestor and re-attach the rest;
+  never fall back to the literal string, because unresolvable is not evidence of safe.
+- **Verify against the input the PRODUCT passes, not the input that is easy to build.** Before
+  writing the probe, ask: *what does the real caller hand this function?* If your fixture and the
+  production call site differ in any property the function branches on — exists vs not, absolute vs
+  relative, empty vs missing — you have tested a neighbour of the defect. Naming the production
+  call site in the test's own words is cheap and it is what would have caught this.
+
+Seventeen costumes in, the lesson has moved: it is no longer "check it" — that was done — it is
+*check the same shape the product produces*.
+
 ## P49 — Every test reached the code by a path the product does not take, so the shipped artifact had none of it
 **Symptom:** `PocketSynthProvider` had 975 passing tests, a working Voice Lab, an adversarial
 review round of its own, and **zero occurrences in `dist/plugin/main.mjs`** — the file ORCA loads.
