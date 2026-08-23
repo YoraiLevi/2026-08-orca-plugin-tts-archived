@@ -11,7 +11,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import {
   mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync,
-  symlinkSync, rmSync,
+  symlinkSync, rmSync, truncateSync,
   readFileSync as read,
 } from 'node:fs'
 import { rm, lstat } from 'node:fs/promises'
@@ -31,6 +31,30 @@ import {
   POCKET_VOICES, POCKET_DEFAULT_VOICE, parseVoiceKey, formatVoiceKey, resolveVoiceForBackend,
   OS_BACKEND, POCKET_BACKEND, VOICES_REVISION, voiceUrl,
 } from './voices.js'
+
+
+/**
+ * Build a cache whose files are the SIZE THE MANIFEST PINS, sparsely.
+ *
+ * R19-03 made `modelStatus` consult `MODEL_ARTIFACTS[].bytes`, because a one-byte
+ * `mimi_encoder.onnx` against a 39,768,446-byte pin used to report `ready` — a truncated download
+ * announcing a working neural voice. That is the right product behaviour and it makes a one-byte
+ * fixture an INVALID cache, which it always was; the old fixtures were describing a cache that
+ * could not exist. `truncate` extends the file without writing the bytes, so a valid 165 MB
+ * fixture costs no disk and no time, and the filler stays at the front for content assertions.
+ */
+function seedRequired(dir: string, filler = 'x', skip: readonly string[] = []): void {
+  const pinned = new Map<string, number>(
+    [...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS].map((a) => [a.file, a.bytes] as const),
+  )
+  for (const f of requiredFiles()) {
+    if (skip.includes(f)) continue
+    const path = join(dir, f)
+    writeFileSync(path, filler)
+    const want = pinned.get(f)
+    if (want !== undefined && want > filler.length) truncateSync(path, want)
+  }
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const MODELS_HREF = pathToFileURL(join(HERE, 'models.ts')).href
@@ -104,7 +128,7 @@ describe('modelStatus', () => {
     // `.orca-tts-model-manifest`. Collapsing that to kind=absent made the Lab say
     // "download 173.8 MB" for a directory one marker away from ready.
     const dir = scratch()
-    for (const f of requiredFiles()) if (f !== MANIFEST_FILE) writeFileSync(join(dir, f), 'x')
+    seedRequired(dir, 'x', [MANIFEST_FILE])
     const s = await modelStatus(dir)
     expect(s.kind, 'a one-file-short cache must not read as the same kind as an empty directory').toBe('incomplete')
     if (s.kind === 'incomplete') {
@@ -125,7 +149,7 @@ describe('modelStatus', () => {
 
   it('reports a version mismatch as stale, with both versions', async () => {
     const dir = scratch()
-    for (const f of requiredFiles()) writeFileSync(join(dir, f), 'x')
+    seedRequired(dir)
     writeFileSync(join(dir, MANIFEST_FILE), '0\n')
     const s = await modelStatus(dir)
     expect(s.kind).toBe('stale')
@@ -134,7 +158,7 @@ describe('modelStatus', () => {
 
   it('reports ready only when everything is there and current', async () => {
     const dir = scratch()
-    for (const f of requiredFiles()) writeFileSync(join(dir, f), 'x')
+    seedRequired(dir)
     writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
     expect((await modelStatus(dir)).kind).toBe('ready')
   })
@@ -191,14 +215,15 @@ describe('downloadModel refuses bad bytes and never damages a working cache', ()
     // already had. Staging plus an atomic swap is what makes that true; this is the check.
     const dir = scratch()
     mkdirSync(dir, { recursive: true })
-    for (const f of requiredFiles()) writeFileSync(join(dir, f), 'previous')
+    seedRequired(dir, 'previous')
     writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
     expect((await modelStatus(dir)).kind).toBe('ready')
 
     await expect(downloadModel({ dir, fetchImpl: fakeFetch({ fail: 'mimi_encoder.onnx' }) })).rejects.toThrow()
 
     expect((await modelStatus(dir)).kind).toBe('ready')
-    expect(read(join(dir, 'bundle.json'), 'utf8')).toBe('previous')
+    expect(read(join(dir, 'bundle.json'), 'utf8').startsWith('previous'),
+  'the previous model must still be the one on disk').toBe(true)
   })
 
   it('leaves no staging directory behind after a failure', async () => {
@@ -299,12 +324,12 @@ function tinyFetch(opts: { failLicence?: boolean } = {}): typeof fetch {
 /** Seed a directory with a recognisable, complete, current model. */
 function seedReady(dir: string): void {
   mkdirSync(dir, { recursive: true })
-  for (const f of requiredFiles()) writeFileSync(join(dir, f), 'PREVIOUS')
+  seedRequired(dir, 'PREVIOUS')
   writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
 }
 
 const stillPrevious = (dir: string): boolean =>
-  existsSync(join(dir, 'bundle.json')) && read(join(dir, 'bundle.json'), 'utf8') === 'PREVIOUS'
+  existsSync(join(dir, 'bundle.json')) && read(join(dir, 'bundle.json'), 'utf8').startsWith('PREVIOUS')
 
 describe('R14-06 — the swap is reversible at every step', () => {
   it('reaches the success tail at all, which nothing did before', async () => {
@@ -464,10 +489,9 @@ describe('R17-07 — incomplete is not absent; ~/.buzz is not writable', () => {
   it('stages a weights-complete source into a dest we own, as symlinks plus OUR marker', async () => {
     const source = scratch()
     const dest = scratch()
-    for (const f of requiredFiles()) {
-      if (f === MANIFEST_FILE) continue
-      writeFileSync(join(source, f), `payload-${f}`)
-    }
+    // Weights-complete means the PINNED LENGTHS are there (R19-03), not just the names — this
+    // source stands in for the author's real buzz cache, which is genuinely complete.
+    seedRequired(source, 'payload', [MANIFEST_FILE])
     writeFileSync(join(source, BUZZ_MANIFEST_FILE), 'buzz')
     expect((await modelStatus(source)).kind).toBe('incomplete')
 
@@ -503,7 +527,7 @@ describe('R17-07 — incomplete is not absent; ~/.buzz is not writable', () => {
 
   it('modelStatusDetail names the marker for the one-file-short case', async () => {
     const dir = scratch()
-    for (const f of requiredFiles()) if (f !== MANIFEST_FILE) writeFileSync(join(dir, f), 'x')
+    seedRequired(dir, 'x', [MANIFEST_FILE])
     const s = await modelStatus(dir)
     expect(modelStatusDetail(s)).toContain(MANIFEST_FILE)
     expect(modelStatusDetail(s)).toMatch(/every required file except/i)
@@ -580,7 +604,7 @@ describe('R14-02 — a reference clip is an artifact, not an assumption', () => 
 
   it('treats a version-1 cache as stale rather than adopting it', async () => {
     const dir = scratch()
-    for (const f of requiredFiles()) writeFileSync(join(dir, f), 'x')
+    seedRequired(dir)
     writeFileSync(join(dir, MANIFEST_FILE), '1\n')
     const s = await modelStatus(dir)
     expect(s.kind).toBe('stale')
@@ -826,7 +850,7 @@ describe('R18-04 ready means the bytes are reachable, not that the name is prese
   it('a staged cache whose source has been deleted is NOT ready', async () => {
     const source = scratch()
     const dest = scratch()
-    for (const f of requiredFiles()) writeFileSync(join(source, f), 'x')
+    seedRequired(source)
     for (const f of requiredFiles()) symlinkSync(join(source, f), join(dest, f))
     writeFileSync(join(dest, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
 
@@ -856,5 +880,65 @@ describe('R18-05 the foreign-cache refusal locates the write, not the string', (
     expect(isForeignModelCache(join(outside, 'ours'), home),
       'CONTROL: an ordinary destination must NOT be refused, or the guard is just "always true"')
       .toBe(false)
+  })
+})
+
+/**
+ * R19-02 / R19-03 — round 19 on the R18-04/05 repair I made an hour earlier.
+ *
+ * Same lesson a third time (P50): I fixed the case I could think of, and the filesystem knows
+ * more cases than I do.
+ *
+ * R19-02: `realWriteLocation` resolves symlinks but compares the result as a STRING. On this APFS
+ * volume `~/.buzz` and `~/.BUZZ` are **inode 9541114** — the same directory — and the string
+ * comparison says they are different. `stageModelFrom(source, home/.BUZZ/staged)` reported
+ * `foreign: false`, threw nothing, and wrote 22 files into buzz's directory. My R18-05 test covered
+ * the symlink parent, which is the case I had just been shown, and not the case-fold.
+ *
+ * The fix stops asking what the path SPELLS and asks the filesystem what it IS: same device plus
+ * same inode is the same directory, whatever it is spelled like, through however many links.
+ *
+ * R19-03: `ready` meant every required NAME resolved to something that exists. It never looked at
+ * the size. `MODEL_ARTIFACTS` pins `mimi_encoder.onnx` at 39,768,446 bytes; a ONE-BYTE file of the
+ * same name reported `ready`. Truncated and zero-length caches — a download killed midway, a disk
+ * that filled — announce a working neural voice and then cannot speak.
+ */
+describe('R19-02 the foreign-cache refusal asks the filesystem, not the spelling', () => {
+  it('a case-variant spelling of the same directory is the same directory', () => {
+    const home = scratch()
+    mkdirSync(join(home, '.buzz', 'models'), { recursive: true })
+    // Only meaningful where the volume is case-insensitive; where it is not, these really are
+    // two different directories and `false` is the correct answer. Ask, do not assume.
+    const insensitive = existsSync(join(home, '.BUZZ'))
+    expect(isForeignModelCache(join(home, '.buzz', 'models', 'x'), home),
+      'CONTROL: the canonical spelling must be caught, or nothing here means anything').toBe(true)
+    expect(isForeignModelCache(join(home, '.BUZZ', 'models', 'r19-must-not-exist'), home),
+      'same inode, different spelling').toBe(insensitive)
+    expect(isForeignModelCache(join(scratch(), 'ours'), home),
+      'CONTROL: an unrelated directory must NOT be refused').toBe(false)
+  })
+})
+
+describe('R19-03 ready means the bytes are there, not that the name is', () => {
+  it('a truncated required file is not ready, and says which', async () => {
+    const dir = scratch()
+    // Deliberately ONE BYTE each — this is the invalid cache, not a shortcut for a valid one.
+    for (const f of requiredFiles()) writeFileSync(join(dir, f), 'x')
+    writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+    const status = await modelStatus(dir)
+    expect(status.kind, 'a one-byte mimi_encoder.onnx against a 39,768,446-byte pin').not.toBe('ready')
+    expect(modelStatusDetail(status)).toMatch(/mimi_encoder\.onnx/)
+  })
+
+  it('CONTROL: correctly-sized files still reach ready, so this is not "never ready"', async () => {
+    const dir = scratch()
+    const sized = new Map(MODEL_ARTIFACTS.map((a) => [a.file, a.bytes]))
+    for (const v of VOICE_ARTIFACTS) sized.set(v.file, v.bytes)
+    for (const f of requiredFiles()) {
+      const n = sized.get(f)
+      writeFileSync(join(dir, f), n === undefined ? 'x' : Buffer.alloc(n))
+    }
+    writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+    expect((await modelStatus(dir)).kind).toBe('ready')
   })
 })

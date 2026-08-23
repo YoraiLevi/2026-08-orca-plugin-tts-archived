@@ -23,7 +23,7 @@
 
 import { createHash } from 'node:crypto'
 import { readFile, writeFile, readdir, mkdir, rm, symlink } from 'node:fs/promises'
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 // `.ts`, not `.js`, and the extension is load-bearing rather than a style choice. The Voice Lab
@@ -156,6 +156,11 @@ export const VOICE_ARTIFACTS: readonly ModelArtifact[] = POCKET_VOICES.map((v) =
 /** What the reference clips weigh — 8.5 MB, small beside the weights but not nothing. */
 export const VOICES_TOTAL_BYTES = VOICE_ARTIFACTS.reduce((n, a) => n + a.bytes, 0)
 
+/** Every artifact whose exact length the manifest pins, so `ready` can mean "the bytes are here". */
+const PINNED_BYTES: ReadonlyMap<string, number> = new Map(
+  [...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS].map((a) => [a.file, a.bytes] as const),
+)
+
 /**
  * What a complete install weighs, which is what a person must be told before it is spent.
  *
@@ -231,8 +236,21 @@ export async function modelStatus(dir = modelDir()): Promise<ModelStatus> {
   // `stage-pocket-model` symlinks buzz's weights and buzz may clean its cache afterwards.
   // `existsSync` FOLLOWS the link, so it answers the question the caller is really asking:
   // can this file be read? A dangling link is missing, and says so by name.
+  // R19-03: `ready` used to mean every required NAME resolved to something that exists. It never
+  // looked at the size, so a ONE-BYTE `mimi_encoder.onnx` — against a 39,768,446-byte pin — was
+  // `ready`. A download killed midway or a disk that filled would announce a working neural voice
+  // and then fail to speak. The manifest already knows how big each artifact is; consult it.
+  // (The sha256 is verified at DOWNLOAD time; hashing 165 MB on every status call would make this
+  // predicate too slow to be the one everything asks, and length already catches truncation.)
   const names = new Set(await readdir(dir))
-  const missing = required.filter((f) => !names.has(f) || !existsSync(join(dir, f)))
+  const missing = required.filter((f) => {
+    if (!names.has(f)) return true
+    const path = join(dir, f)
+    if (!existsSync(path)) return true          // R18-04: a dangling symlink still has a name
+    const want = PINNED_BYTES.get(f)
+    if (want === undefined) return false        // licences and the marker carry no pinned length
+    try { return statSync(path).size !== want } catch { return true }
+  })
   const present = required.length - missing.length
   if (missing.length > 0) {
     if (present === 0) return { kind: 'absent', dir, missing }
@@ -288,21 +306,51 @@ function realWriteLocation(p: string): string {
   }
 }
 
+/**
+ * Is `candidate` the same directory as `root`, or inside it — as the FILESYSTEM sees it?
+ *
+ * R19-02: the previous version resolved symlinks and then compared STRINGS. On an APFS volume
+ * `~/.buzz` and `~/.BUZZ` are the same directory — inode 9541114 — and a string comparison says
+ * they are not. `stageModelFrom` into `~/.BUZZ/staged` reported `foreign: false`, threw nothing,
+ * and wrote 22 files into buzz's directory.
+ *
+ * Device plus inode is what "the same directory" MEANS. It is immune to case folding, to symlinks,
+ * to `..`, to hardlinked directories, and to every other spelling the filesystem treats as one
+ * place — including the ones nobody has thought of yet, which is the point, because the last two
+ * repairs each fixed the spelling I had just been shown.
+ */
+function isInsideByIdentity(candidate: string, root: string): boolean {
+  let rootStat
+  try { rootStat = statSync(root) } catch { return false }
+  let cursor = resolvePath(candidate)
+  for (;;) {
+    try {
+      const here = statSync(cursor)
+      if (here.dev === rootStat.dev && here.ino === rootStat.ino) return true
+    } catch {
+      // Does not exist yet — a staging destination usually does not. Keep walking up: the
+      // question is where the write LANDS, and that is decided by the nearest real ancestor.
+    }
+    const parent = dirname(cursor)
+    if (parent === cursor) return false
+    cursor = parent
+  }
+}
+
 export function isForeignModelCache(dir: string, home = homedir()): boolean {
   const buzzRoot = resolvePath(join(home, '.buzz'))
   const under = (candidate: string, root: string): boolean =>
     candidate === root || candidate.startsWith(root + sep)
 
-  // The literal path, for the ordinary case and for when nothing resolves.
+  // Spelling first: cheap, and the only thing available when nothing on the path exists.
   if (under(resolvePath(dir), buzzRoot)) return true
-
-  // Where the write would land. Checked whether or not `dir` exists yet — that was the hole.
   try {
     const realBuzz = existsSync(buzzRoot) ? realpathSync(buzzRoot) : buzzRoot
     if (under(realWriteLocation(dir), realBuzz)) return true
-  } catch {
-    // An unresolvable path is not evidence of safety; the literal check above already ran.
-  }
+  } catch { /* unresolvable is not evidence of safety; the checks either side still run */ }
+
+  // Then identity, which is what actually decides where the bytes go.
+  if (isInsideByIdentity(dir, buzzRoot)) return true
 
   // Last resort: it is buzz's if it carries buzz's own marker, wherever it lives.
   if (existsSync(join(dir, BUZZ_MANIFEST_FILE))) return true

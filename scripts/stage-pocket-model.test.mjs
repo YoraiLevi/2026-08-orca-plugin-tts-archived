@@ -6,11 +6,11 @@
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, writeFile, rm, readFile, lstat } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, readFile, lstat, truncate } from 'node:fs/promises'
 import { existsSync, readdirSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = join(ROOT, 'scripts/stage-pocket-model.mjs')
@@ -33,8 +33,22 @@ const REQUIRED = [
   'LICENSE', 'MODEL_LICENSE.txt',
 ]
 
+/**
+ * R19-03: "weights-complete" now means the PINNED LENGTHS are present, not just the names — a
+ * one-byte `mimi_encoder.onnx` against a 39,768,446-byte pin used to report `ready`. This fixture
+ * stands in for the author's real buzz cache, which is genuinely complete, so it must be too.
+ * `truncate` extends without writing, so a valid 165 MB source costs no disk and no time.
+ */
 async function weightsComplete (dir) {
-  for (const f of REQUIRED) await writeFile(join(dir, f), `payload-${f}`)
+  const { MODEL_ARTIFACTS, VOICE_ARTIFACTS } = await import(
+    pathToFileURL(join(ROOT, 'packages/providers/src/pocket-synth/models.ts')).href)
+  const pinned = new Map([...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS].map((a) => [a.file, a.bytes]))
+  for (const f of REQUIRED) {
+    const path = join(dir, f)
+    await writeFile(path, `payload-${f}`)
+    const want = pinned.get(f)
+    if (want !== undefined && want > `payload-${f}`.length) await truncate(path, want)
+  }
   await writeFile(join(dir, '.buzz-model-manifest'), 'buzz')
 }
 

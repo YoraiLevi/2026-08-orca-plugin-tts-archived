@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, readFile, rm, truncate } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -1089,10 +1089,22 @@ const POCKET_DOWNLOAD_FILES = [
   'eve.wav'
 ]
 
+/**
+ * R19-03: `ready` now requires the PINNED LENGTH of every artifact, because a one-byte
+ * `mimi_encoder.onnx` against a 39,768,446-byte pin used to report ready — a truncated download
+ * announcing a working neural voice. A fixture that claims to be ready must therefore be a cache
+ * that could actually exist. `truncate` extends without writing, so 165 MB costs nothing.
+ */
 async function readyModelFixture (dir) {
   await mkdir(dir, { recursive: true })
+  const { MODEL_ARTIFACTS, VOICE_ARTIFACTS } = await import(
+    pathToFileURL(join(REPO_ROOT, 'packages/providers/src/pocket-synth/models.ts')).href)
+  const pinned = new Map([...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS].map((a) => [a.file, a.bytes]))
   for (const file of [...POCKET_DOWNLOAD_FILES, 'LICENSE', 'MODEL_LICENSE.txt']) {
-    await writeFile(join(dir, file), 'fixture')
+    const path = join(dir, file)
+    await writeFile(path, 'fixture')
+    const want = pinned.get(file)
+    if (want !== undefined && want > 'fixture'.length) await truncate(path, want)
   }
   await writeFile(join(dir, '.orca-tts-model-manifest'), '2\n')
 }
