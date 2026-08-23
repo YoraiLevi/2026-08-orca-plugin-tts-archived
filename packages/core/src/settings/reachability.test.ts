@@ -91,10 +91,14 @@ describe('T124 (b) — schema ids and the real option surfaces name the same pro
 
   it('only the three option-surface owners carry a wire into a typed options object', () => {
     const optionTypes = new Set(Object.values(OPTIONS_TYPE))
+    // Named exceptions: a synthesize-owned field that selects the provider rather than a
+    // generate() option. Restated here (P36) so adding another one is a visible decision.
+    const NON_OPTION_WIRES_ON_OPTION_OWNERS = new Set(['synthesize.engine'])
     for (const f of Object.values(SETTINGS_SCHEMA)) {
       if (f.wire === null) continue
       const type = f.wire.split('.')[0]!
       if (!optionTypes.has(type)) {
+        if (NON_OPTION_WIRES_ON_OPTION_OWNERS.has(f.id)) continue
         // e.g. announce.reportChannel -> SettingsReport.channel. Legal, but it must not be counted
         // as an options-surface wire, and its owner must not be one of the three.
         expect(WIRED_OWNERS as readonly string[]).not.toContain(f.owner)
@@ -273,15 +277,16 @@ describe('T124 (d) — the gap report', () => {
     // one fewer row. These numbers must be edited by hand when the schema legitimately changes,
     // and that edit is the point: it makes a change to the listener's control surface a decision
     // visible in the diff.
-    expect(r.total, 'shipping fields at schemaVersion 2').toBe(47)
+    expect(r.total, 'shipping fields at schemaVersion 2').toBe(48)
     // +1 wired, -1 designed-not-wired since J26 closed SC-8: `normalize.expandUnits` used to be
     // rendered-but-unconsumed, governed in fact by `normalize.expandIntegers`. It now owns a wire.
-    expect(r.wired, 'fields some consumer reads today').toBe(11)
+    // +1 shipping and +1 wired for `synthesize.engine` (ProviderRegistry.resolve, not an options surface).
+    expect(r.wired, 'fields some consumer reads today').toBe(12)
     expect(r.optionSurfaceWired, '011 section 3.2: 6 normalize + 2 chunk + 2 synthesize').toBe(10)
     expect(r.designedNotWired, 'rendered and recorded; nothing consumes them yet').toBe(36)
     expect(r.excluded, 'named exclusions: chunk.countUnits, synthesize.signal').toBe(2)
     expect(r.future, 'ids reserved at since:3 by 011 section 4.2a').toBe(11)
-    expect(r.provisional, 'defaults nobody has settled by ear').toBe(45)
+    expect(r.provisional, 'defaults nobody has settled by ear').toBe(46)
 
     const text = formatGapReport(r)
     expect(text).toContain('of which options .... 10')
@@ -306,9 +311,10 @@ describe('T124 (d) — the gap report', () => {
     ])
   })
 
-  it('the eleventh wired field is the settings report itself, and it is not an options surface', () => {
+  it('the two extra wired fields are consumers that are not option surfaces', () => {
     const extra = Object.values(SETTINGS_SCHEMA).filter((f) => isWired(f) && !isOptionWired(f))
-    expect(extra.map((f) => f.id)).toEqual(['announce.reportChannel'])
-    expect(extra[0]!.wire).toBe('SettingsReport.channel')
+    expect(extra.map((f) => f.id).toSorted()).toEqual(['announce.reportChannel', 'synthesize.engine'])
+    expect(SETTINGS_SCHEMA['announce.reportChannel']!.wire).toBe('SettingsReport.channel')
+    expect(SETTINGS_SCHEMA['synthesize.engine']!.wire).toBe('ProviderRegistry.resolve')
   })
 })

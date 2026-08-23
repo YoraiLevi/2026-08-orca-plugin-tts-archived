@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SCHEMA_VERSION, SETTINGS_SCHEMA, OWNERS, RESERVED_KEY_PREFIX, MIRROR_ENVELOPE_KEYS,
-  fieldsByOwner, isFuture, schemaDefaults, type Owner
+  fieldsByOwner, isFuture, schemaDefaults, requestedEngineId, type Owner
 } from './schema.ts'
 
 const ALL = Object.values(SETTINGS_SCHEMA)
@@ -127,7 +127,7 @@ describe('the field inventory, by owner', () => {
   const EXPECTED: Record<Owner, { shipping: number; reserved: number }> = {
     normalize: { shipping: 23, reserved: 0 },
     chunk: { shipping: 2, reserved: 0 },
-    synthesize: { shipping: 6, reserved: 0 },
+    synthesize: { shipping: 7, reserved: 0 },
     queue: { shipping: 3, reserved: 1 },
     announce: { shipping: 9, reserved: 0 },
     session: { shipping: 1, reserved: 4 },
@@ -144,9 +144,9 @@ describe('the field inventory, by owner', () => {
     })
   }
 
-  it('47 fields ship at schemaVersion 2 and 11 more are reserved at 3', () => {
+  it('48 fields ship at schemaVersion 2 and 11 more are reserved at 3', () => {
     expect(SCHEMA_VERSION).toBe(2)
-    expect(SHIPPING.length).toBe(47)
+    expect(SHIPPING.length).toBe(48)
     expect(ALL.length - SHIPPING.length).toBe(11)
   })
 
@@ -202,5 +202,39 @@ describe('defaults come from the schema and nowhere else (T122)', () => {
     const a = schemaDefaults() as Record<string, unknown>
     ;(a['normalize.codeBlockDetail'] as unknown[]).push('language')
     expect(schemaDefaults()['normalize.codeBlockDetail']).toEqual([])
+  })
+
+  it('synthesize.engine defaults to auto and names the three legal values', () => {
+    const f = SETTINGS_SCHEMA['synthesize.engine']!
+    expect(f.kind).toBe('enum')
+    expect(f.values).toEqual(['auto', 'os', 'pocket'])
+    expect(f.default).toBe('auto')
+    expect(f.wire).toBe('ProviderRegistry.resolve')
+    expect(schemaDefaults()['synthesize.engine']).toBe('auto')
+  })
+})
+
+describe('requestedEngineId maps the setting onto registry.resolve()', () => {
+  it('auto asks for Pocket when it is registered, so the model dir is consulted', () => {
+    expect(requestedEngineId('auto', true)).toBe('pocket')
+  })
+
+  it('auto leaves the request unset when Pocket is not even registered — the OS floor, unnamed', () => {
+    expect(requestedEngineId('auto', false)).toBeUndefined()
+  })
+
+  it('os always names the system voice', () => {
+    expect(requestedEngineId('os', true)).toBe('os-synth')
+    expect(requestedEngineId('os', false)).toBe('os-synth')
+  })
+
+  it('pocket always names Pocket, even when it is not registered — the substitution must be loud', () => {
+    expect(requestedEngineId('pocket', true)).toBe('pocket')
+    expect(requestedEngineId('pocket', false)).toBe('pocket')
+  })
+
+  it('CONTROL: an unknown value is treated as auto, never as a silent OS pin', () => {
+    expect(requestedEngineId('piper', true), 'a stale id must still consult Pocket').toBe('pocket')
+    expect(requestedEngineId(undefined, false)).toBeUndefined()
   })
 })

@@ -484,7 +484,8 @@ describe('006 sites 45/46 — total engine failure reports a named cause', () =>
       log: () => {}
     }
     activate(orca, {
-      provider: new BrokenProvider(), sink: new FakeSink(), projectsDir: '/nonexistent', controlDir: false
+      provider: new BrokenProvider(), sink: new FakeSink(), projectsDir: '/nonexistent',
+      controlDir: false, pocket: false
     })
     await settle(10)
     const engineReport = notifications.find((n) => n.includes('no speech engine'))
@@ -532,7 +533,9 @@ describe('006 section 19 rank 1 — the listener can ask whether the voice actua
       log: () => {}
     }
     const commands = new Map<string, (args?: unknown) => unknown>()
-    activate(orca, { provider, sink: new FakeSink(), projectsDir: '/nonexistent', controlDir: false })
+    activate(orca, {
+      provider, sink: new FakeSink(), projectsDir: '/nonexistent', controlDir: false, pocket: false
+    })
     await settle(10)
     await commands.get('read-aloud.self-test')?.()
     await settle(20)
@@ -856,25 +859,92 @@ describe('R16-10 the plugin registers the neural backend beside the OS floor', (
   })
 
   /**
-   * R17-06: both backends prepare, so resolve() stops at preferred. Inverting
-   * `createProviderRegistry` (Pocket preferred, OS beside) makes this log
-   * `engine ready (Pocket TTS, rung=preferred)` and this row goes red. The
-   * R16-10 injection tests cannot see that — they force OS down, so whichever
-   * is preferred, Pocket is consulted either way.
+   * Default `synthesize.engine` is `auto`: Pocket if it can prepare, else the OS floor.
+   * Both backends here prepare, so auto must select Pocket on the production resolve path
+   * — the thing `probe:artifact`'s PRESENT arm watches. If this logs System voice at
+   * preferred, `registry.resolve()` was called with no id again.
    */
-  it('R17-06: OS is preferred; Pocket is beside it, not in front', async () => {
+  it('auto selects Pocket when it can prepare, so the model dir is consulted', async () => {
     const os = usable('os-synth', 'System voice')
     const pocket = usable('pocket', 'Pocket TTS')
     const logs: string[] = []
     bootWith(pocket, { provider: os, logs })
     await until(
       () => logs.some((l) => l.includes('engine ready (') || l.includes('no speech engine is available')),
-      'engine ready on the preferred floor'
+      'engine ready on the auto-selected neural backend'
     )
     expect(logs.join('\n'),
-      'preferred engine was not the OS floor — createProviderRegistry preference was inverted or unused')
-      .toMatch(/engine ready \(System voice, rung=preferred\)/)
-    expect(os.prepared, 'OS floor never prepared').toBeGreaterThan(0)
-    expect(pocket.prepared, 'default resolve must not prepare Pocket when OS works').toBe(0)
+      'auto did not select Pocket — registry.resolve() was called without the engine setting')
+      .toMatch(/engine ready \(Pocket TTS, rung=preferred\)/)
+    expect(pocket.prepared, 'auto never asked Pocket to prepare').toBeGreaterThan(0)
+  })
+
+  it('auto NAMEs the substitution when Pocket cannot prepare — the ABSENT arm', async () => {
+    const os = usable('os-synth', 'System voice')
+    const pocket = fakePocket()
+    const logs: string[] = []
+    bootWith(pocket, { provider: os, logs })
+    await until(
+      () => logs.some((l) => l.includes('engine ready (') || l.includes('no speech engine is available')),
+      'engine ready on the OS floor after Pocket failed'
+    )
+    expect(logs.join('\n'),
+      'auto fell back to the OS floor without naming the substitution')
+      .toMatch(/was unavailable/)
+    expect(logs.join('\n')).toMatch(/using System voice/)
+    expect(os.prepared, 'OS floor never prepared after Pocket failed').toBeGreaterThan(0)
+  })
+
+  it('engine os keeps the system voice even when Pocket can prepare', async () => {
+    const os = usable('os-synth', 'System voice')
+    const pocket = usable('pocket', 'Pocket TTS')
+    const osGenerated: string[] = []
+    const pocketGenerated: string[] = []
+    os.generate = async function * (text: string): AsyncIterable<AudioChunk> {
+      osGenerated.push(text)
+      yield { data: new Uint8Array([1, 2, 3, 4]), format: 'wav', sampleRate: 22050, channels: 1 }
+    }
+    pocket.generate = async function * (text: string): AsyncIterable<AudioChunk> {
+      pocketGenerated.push(text)
+      yield { data: new Uint8Array([1, 2, 3, 4]), format: 'wav', sampleRate: 24000, channels: 1 }
+    }
+    const logs: string[] = []
+    const commands = new Map<string, (args?: unknown) => unknown>()
+    const root = await mkdtemp(join(tmpdir(), 'orca-tts-engine-os-'))
+    const settingsDir = join(root, 'settings')
+    await mkdir(settingsDir)
+    await writeFile(join(settingsDir, 'settings.jsonc'), JSON.stringify({
+      kind: 'orca-tts-settings',
+      schemaVersion: 2,
+      revision: 1,
+      settings: { 'synthesize.engine': 'os' }
+    }))
+    const orca: OrcaApi = {
+      commands: { register: (id, fn) => { commands.set(id, fn) } },
+      events: { on: () => { /* ignored */ } },
+      host: {
+        call: async (action) => (action === 'storage.get' ? { value: undefined } : {})
+      },
+      log: (m: string) => { logs.push(m) }
+    }
+    activate(orca, {
+      provider: os, pocket, sink: new FakeSink(),
+      projectsDir: join(root, 'projects'), settingsDir, controlDir: false
+    })
+    await until(
+      () => logs.some((l) => l.startsWith('read-aloud: settings loaded from ')),
+      'settings file with engine=os to be adopted'
+    )
+    await until(
+      () => logs.some((l) => l.includes('engine ready (') || l.includes('no speech engine is available')),
+      'engine ready'
+    )
+    const selfTest = commands.get('read-aloud.self-test')
+    expect(selfTest, 'self-test was never registered').toBeTypeOf('function')
+    await selfTest!()
+    await until(() => osGenerated.length + pocketGenerated.length > 0, 'self-test to synthesize')
+    expect(osGenerated.length, 'engine=os still synthesized with Pocket')
+      .toBeGreaterThan(0)
+    expect(pocketGenerated, 'engine=os handed the utterance to Pocket').toEqual([])
   })
 })

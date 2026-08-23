@@ -13,10 +13,10 @@
  * 2. **Taste is marked, never hidden** (`provisional`, PITFALLS **P23**). When the listener settles
  *    a value by ear in Voice Lab, the change must be a one-line data edit here — not a code change,
  *    not a test rewrite.
- * 3. **`wire: null` means DESIGNED, NOT WIRED** (PITFALLS **P26**). Nine of these 47 fields reach a
- *    typed options object today. The other 38 record their value and must be able to SAY that
- *    nothing consumes it yet. Modelling that once, here, is what stops the lab and the plugin from
- *    disagreeing about which is which.
+ * 3. **`wire: null` means DESIGNED, NOT WIRED** (PITFALLS **P26**). A field that a consumer reads
+ *    today has a `wire`. The rest record their value and must be able to SAY that nothing consumes
+ *    them yet. Modelling that once, here, is what stops the lab and the plugin from disagreeing
+ *    about which is which.
  *
  * DEPENDENCY-FREE, like the normalizer beside it: this module imports nothing but its own sibling
  * types, so it runs identically in a plugin worker, a browser page, a local server and a test.
@@ -128,7 +128,7 @@ export const SETTINGS_POLL_MS = 2_000
 const d = (x: FieldDescriptor<unknown>): FieldDescriptor => x
 
 /**
- * The schema. 47 fields at `SCHEMA_VERSION = 2`, plus 11 reserved at `since: 3` (011 section 4.2a).
+ * The schema. 48 fields at `SCHEMA_VERSION = 2`, plus 11 reserved at `since: 3` (011 section 4.2a).
  *
  * Grouped by OWNER, in owner order, because ownership is the structure. The starter-file generator
  * emits banner comments in this order, which is where the grouping becomes visible to a human.
@@ -345,11 +345,24 @@ export const SETTINGS_SCHEMA: Readonly<Record<string, FieldDescriptor>> = {
   }),
 
   // ─────────────────────────────────────────────────────────────────────────────────────────
-  // synthesize — SynthesizeOptions. 6 fields, 2 wired. `signal` is runtime, not settable.
+  // synthesize — 7 fields, 3 wired. Two of those land on SynthesizeOptions (voice, rate);
+  // `synthesize.engine` selects WHICH provider `registry.resolve()` tries first, so its wire
+  // is `ProviderRegistry.resolve`, not a generate() option. `signal` is runtime, not settable.
   // Read ONCE PER UTTERANCE, never per chunk (011 section 2.3): a voice change between chunk
-  // three and chunk four is a sentence that changes speaker mid-word.
+  // three and chunk four is a sentence that changes speaker mid-word. Same cadence for engine:
+  // swapping the backend mid-utterance is the same failure wearing a different costume.
   // ─────────────────────────────────────────────────────────────────────────────────────────
 
+  'synthesize.engine': d({
+    id: 'synthesize.engine', owner: 'synthesize', panel: 'E',
+    label: 'Which engine',
+    help: 'Auto uses Pocket TTS when the neural model is installed, otherwise the system voice. OS always uses the system voice. Pocket asks for the neural voice and names the substitution out loud when it cannot.',
+    kind: 'enum', values: ['auto', 'os', 'pocket'], default: 'auto',
+    provisional: true, effect: 'utterance', enginePersonal: false,
+    // Not SynthesizeOptions: this value chooses the provider, it is not handed to generate().
+    // P28's voiceIndex stays an index into the SELECTED backend's list; do not qualify it.
+    wire: 'ProviderRegistry.resolve', since: 2
+  }),
   'synthesize.voiceIndex': d({
     id: 'synthesize.voiceIndex', owner: 'synthesize', panel: 'E',
     label: 'Which voice',
@@ -672,7 +685,7 @@ export function isFuture(f: FieldDescriptor): boolean {
   return f.since > SCHEMA_VERSION
 }
 
-/** The value reaches SOME consumer today. Ten fields. */
+/** The value reaches SOME consumer today. Twelve fields. */
 export function isWired(f: FieldDescriptor): boolean {
   return f.wire !== null && !isFuture(f)
 }
@@ -709,8 +722,8 @@ export interface GapReport {
   readonly wired: number
   /**
    * The subset whose wire names one of the three typed options surfaces. 011 section 3.2 counts
-   * THIS one and calls it 9; `wired` is 10 because `announce.reportChannel` reaches
-   * `SettingsReport.channel`, which is a consumer but not an options surface.
+   * THIS one and calls it 9; `wired` is 12 because `announce.reportChannel` reaches
+   * `SettingsReport.channel` and `synthesize.engine` reaches `ProviderRegistry.resolve`.
    */
   readonly optionSurfaceWired: number
   /** `wire === null` and shipping. The lab renders these; nothing consumes them. */
@@ -783,7 +796,9 @@ export function wireProperty(f: FieldDescriptor): string | null {
 function project(s: Settings, owner: Owner): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const f of Object.values(SETTINGS_SCHEMA)) {
-    if (f.owner !== owner || !isWired(f)) continue
+    // Option-surface wires only. `synthesize.engine` is wired to the registry, not to
+    // SynthesizeOptions, and must not appear as a generate() property.
+    if (f.owner !== owner || !isOptionWired(f)) continue
     const prop = wireProperty(f)
     if (prop === null) continue
     const v = s[f.id]
@@ -823,4 +838,30 @@ export function toSynthesizeOptions(
     else delete out['voice']
   }
   return out as SynthesizeOptions
+}
+
+/** Legal values of `synthesize.engine`. The setting is the listener's; these ids are ours. */
+export const SYNTHESIZE_ENGINE_VALUES = ['auto', 'os', 'pocket'] as const
+export type SynthesizeEngine = (typeof SYNTHESIZE_ENGINE_VALUES)[number]
+
+/**
+ * Which id `ProviderRegistry.resolve()` should try first, given the listener's engine setting.
+ *
+ *   auto   — Pocket when it is registered, so the model dir is actually consulted; otherwise
+ *            the OS floor (no substitution to name: Pocket was never a candidate).
+ *   os     — always the system voice
+ *   pocket — Pocket, and the registry names the substitution out loud when it cannot
+ *            (principle VIII / R015: a listener who asked for the neural voice and got the
+ *            system one must be told, in the registry's own words).
+ *
+ * `voiceIndex` is deliberately not consulted here. P28 chose a per-backend index; qualifying
+ * it would reopen that decision.
+ */
+export function requestedEngineId(
+  engine: unknown,
+  pocketRegistered: boolean
+): string | undefined {
+  if (engine === 'os') return 'os-synth'
+  if (engine === 'pocket') return 'pocket'
+  return pocketRegistered ? 'pocket' : undefined
 }

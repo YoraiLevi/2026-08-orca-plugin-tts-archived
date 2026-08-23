@@ -10,7 +10,7 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { OsSynthProvider, createProviderRegistry } from '@orca-tts/providers'
-import type { PlaybackSink, TtsProvider } from '@orca-tts/core'
+import { requestedEngineId, type PlaybackSink, type TtsProvider } from '@orca-tts/core'
 import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi } from './adapter/index.ts'
 import { readClipboard, ClipboardUnavailableError } from './clipboard.ts'
 import { SpeechService } from './speech-service.ts'
@@ -216,10 +216,21 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     os: options.provider ?? new OsSynthProvider({ notify: (m) => { announce(m) } }),
     ...(options.pocket === undefined ? {} : { pocket: options.pocket })
   })
+  const pocketRegistered = registry.get('pocket') !== undefined
+  const resolveFor = (engine: unknown) =>
+    registry.resolve(requestedEngineId(engine, pocketRegistered))
+  let lastNamedReason: string | undefined
+  const nameSubstitution = (reason: string | undefined): void => {
+    if (reason === undefined || reason === lastNamedReason) return
+    lastNamedReason = reason
+    announce(reason)
+  }
 
   // Resolve the engine in the background: activate() must return promptly so command registration
-  // is never delayed behind a process spawn.
-  void registry.resolve().then((resolved) => {
+  // is never delayed behind a process spawn. `synthesize.engine` is read from the live snapshot
+  // (schema defaults until the inbox lands) and handed to `registry.resolve(id)` so auto actually
+  // consults the model dir instead of stopping at the OS floor (the probe:artifact defect).
+  void resolveFor(settings.snapshot.values['synthesize.engine']).then((resolved) => {
     if (resolved === null) {
       // `lastFailureDetail` is the named form (006 sites 45/46): "nothing was registered" is a bug
       // in our own wiring, "unknown id" is a stale settings file, and "prepare failed" is a fact
@@ -249,6 +260,14 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       // session; the listener's file can change at any point inside it.
       settings: () => settings.snapshot,
       resolveVoice: (i) => settings.voiceName(i),
+      // Engine is a synthesize setting: read once per utterance from the snapshot, pass the
+      // mapped id to registry.resolve(). Pocket failing names the substitution out loud.
+      selectEngine: async (engine) => {
+        const next = await resolveFor(engine)
+        if (next === null) return null
+        nameSubstitution(next.status.reason)
+        return next.provider
+      },
       ...(dashboard === null ? {} : { onStatus: (status: ReturnType<SpeechService['status']>) => {
         dashboard.updateSpeech(status)
       } }),
@@ -289,7 +308,7 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
       deferredDropped = 0
     }
     // R015: degrade loudly. Never let a worse engine pass unmentioned.
-    if (resolved.status.reason !== undefined) announce(resolved.status.reason)
+    nameSubstitution(resolved.status.reason)
   }).catch((err: unknown) => {
     engineError = String(err)
     dashboard?.updateEngine({ state: 'failed', name: 'unavailable', rung: null, reason: engineError })

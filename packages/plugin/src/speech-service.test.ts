@@ -187,6 +187,50 @@ describe('voice, rate and chunking are reachable from the caller', () => {
     }
   })
 
+  it('the provider selectEngine returns is who generate() is called on', async () => {
+    const constructed = new RecordingProvider()
+    constructed.id = 'constructed'
+    const selected = new RecordingProvider()
+    selected.id = 'selected'
+    const s = new SpeechService({
+      provider: constructed, sink: new FakeSink(),
+      settings: () => ({ revision: 1, values: { 'synthesize.engine': 'os' } }),
+      selectEngine: async () => selected
+    })
+    s.speak('Hello there.')
+    await settle()
+    expect(selected.synthesized.length, 'selectEngine returned a provider that never generated')
+      .toBeGreaterThan(0)
+    expect(constructed.synthesized, 'the constructor provider still generated after a swap')
+      .toEqual([])
+  })
+
+  it('selectEngine is handed synthesize.engine once per utterance, not per chunk', async () => {
+    const provider = new RecordingProvider()
+    const seen: unknown[] = []
+    const s = new SpeechService({
+      provider, sink: new FakeSink(), maxUnits: 12,
+      settings: () => ({ revision: 1, values: { 'synthesize.engine': 'pocket' } }),
+      selectEngine: async (engine) => { seen.push(engine); return provider }
+    })
+    s.speak('One sentence here. Another sentence here. A third sentence here.')
+    await settle()
+    expect(provider.options.length, 'the utterance did not chunk, so once-per-utterance is untested')
+      .toBeGreaterThan(1)
+    expect(seen, 'engine was re-read per chunk, or never read').toEqual(['pocket'])
+  })
+
+  it('CONTROL: without selectEngine the constructor provider is who generates', async () => {
+    const provider = new RecordingProvider()
+    const s = new SpeechService({
+      provider, sink: new FakeSink(),
+      settings: () => ({ revision: 1, values: { 'synthesize.engine': 'pocket' } })
+    })
+    s.speak('Hello there.')
+    await settle()
+    expect(provider.synthesized.length).toBeGreaterThan(0)
+  })
+
   it('forwards isolateFirstSentence, which no caller could reach (H20)', async () => {
     const isolated = new RecordingProvider()
     const grouped = new RecordingProvider()

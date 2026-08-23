@@ -84,13 +84,16 @@ await build({
  *              mutant produces only `os-synth:` and goes red. Isolated empty model
  *              dir (R061): we are proving consultation, not a successful neural
  *              render, so CI without weights still has a check that can fail.
- *   prefer   — production wiring, empty model. Demand `engine ready` names the OS
- *              floor at rung=preferred. Inverting the factory makes Pocket preferred;
- *              with no weights that is a FALLBACK to OS, and this arm goes red.
+ *   prefer   — production wiring, empty model. Default `synthesize.engine` is
+ *              `auto`, which asks Pocket first. With no weights that MUST land
+ *              on the OS floor at rung=fallback AND name the substitution.
+ *              Calling `resolve()` with no id again makes OS preferred and
+ *              silent — this arm goes red. Factory preference (R17-06) is
+ *              asserted in `createProviderRegistry` tests; this arm is the
+ *              production-path ABSENT half of `probe:artifact`.
  *
- * The parent `pnpm probe:artifact` verdict (PRESENT must speak at 24 kHz) is a
- * different question — "does production SELECT Pocket when weights exist" — and
- * would stay GREEN under inverted preference. That is why it is not this gate.
+ * The parent `pnpm probe:artifact` verdict (PRESENT must speak at 24 kHz) is the
+ * other half — "does production SELECT Pocket when weights exist".
  */
 const bundle = await readFile(`${OUT}/main.mjs`, 'utf8')
 await assertShippedProvidersByEffect()
@@ -219,12 +222,16 @@ async function assertShippedProvidersByEffect () {
         `(empty model, no force-os-down): ${prefer.error}`
       )
     }
-    if (prefer.displayName !== 'System voice' || prefer.rung !== 'preferred') {
+    const named = typeof prefer.substitution === 'string'
+      && /was unavailable/.test(prefer.substitution)
+      && /using /.test(prefer.substitution)
+    if (prefer.displayName !== 'System voice' || prefer.rung !== 'fallback' || !named) {
       throw new Error(
-        `${OUT}/main.mjs inverted (or lost) OS preference. Want engine ready ` +
-        `displayName="System voice" rung=preferred; got displayName=${
-          JSON.stringify(prefer.displayName)} rung=${JSON.stringify(prefer.rung)} ` +
-        `engineReady=${JSON.stringify(prefer.engineReady)}. See R17-06.`
+        `${OUT}/main.mjs production auto did not fall back loudly when Pocket had no model. ` +
+        `Want System voice at rung=fallback with "was unavailable" + "using" named; got ` +
+        `displayName=${JSON.stringify(prefer.displayName)} rung=${JSON.stringify(prefer.rung)} ` +
+        `substitution=${JSON.stringify(prefer.substitution)} ` +
+        `engineReady=${JSON.stringify(prefer.engineReady)}.`
       )
     }
   } finally {

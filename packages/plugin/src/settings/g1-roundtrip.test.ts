@@ -274,7 +274,12 @@ async function boot(opts: HarnessOptions = {}): Promise<Harness> {
     },
     log: (m) => { logs.push(m) }
   }
-  activate(orca, { provider, sink: new FakeSink(), projectsDir, settingsDir, announceDelayMs: 5 })
+  activate(orca, {
+    provider, sink: new FakeSink(), projectsDir, settingsDir, announceDelayMs: 5,
+    // Same as main.test.ts: the default constructs a real PocketSynthProvider against the
+    // author's model cache (R061). G1 asserts spoken TEXT, not which engine produced it.
+    pocket: false
+  })
   // The load is asynchronous by design (activate() must return promptly, or command registration
   // waits behind a filesystem read). Wait for its EFFECT — the line the loader emits when it has
   // adopted a snapshot — not for a duration.

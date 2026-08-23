@@ -2034,221 +2034,6 @@ function createProviderRegistry(options = {}) {
   return registry;
 }
 
-// packages/plugin/src/adapter/index.ts
-function makeHost(orca, hooks = {}) {
-  let registered = 0;
-  let logFailures = 0;
-  const log = (m) => {
-    try {
-      orca.log(m);
-    } catch {
-      logFailures++;
-    }
-  };
-  return {
-    log,
-    logFailures: () => logFailures,
-    registeredCommands: () => registered,
-    notify(title, body, opts = {}) {
-      const safeTitle = title.trim() !== "" ? title : (body ?? "").trim() !== "" ? body : "Read aloud";
-      const params = { title: safeTitle.slice(0, 120) };
-      if (body !== void 0) params["body"] = body.slice(0, 1e3);
-      const message = body ?? title;
-      const undelivered = (why) => {
-        log(`notification not delivered (${why}): ${message}`);
-        if (opts.alreadySpoken !== true) hooks.onUndelivered?.(message);
-      };
-      void Promise.resolve(orca.host.call("notifications.show", params)).then((r) => {
-        if (r?.delivered === false) undelivered("reported undelivered");
-      }).catch((err) => {
-        undelivered(String(err));
-      });
-    },
-    async storageGet(key) {
-      try {
-        const r = await orca.host.call("storage.get", { key });
-        return r?.value;
-      } catch (err) {
-        hooks.onStorageFailure?.({ op: "get", key, reason: String(err) });
-        return void 0;
-      }
-    },
-    async storageSet(key, value) {
-      try {
-        await orca.host.call("storage.set", { key, value });
-      } catch (err) {
-        hooks.onStorageFailure?.({ op: "set", key, reason: String(err) });
-      }
-    },
-    async settingsGet() {
-      try {
-        const r = await orca.host.call("settings.get");
-        if (r === null || typeof r !== "object") return null;
-        const env = r;
-        const inner = env["settings"] ?? env["value"];
-        const out = inner !== void 0 && inner !== null && typeof inner === "object" ? inner : env;
-        return out;
-      } catch (err) {
-        hooks.onSettingsFailure?.({ op: "get", reason: String(err) });
-        return null;
-      }
-    },
-    /** Returns whether the write was OBSERVED to land, not whether the call returned. */
-    async settingsSet(values) {
-      try {
-        for (const [key, value] of Object.entries(values)) {
-          const r = await orca.host.call("settings.set", { key, value });
-          const ok = r?.ok;
-          if (ok === false) {
-            const why = r.error;
-            hooks.onSettingsFailure?.({ op: "set", reason: `${key}: ${String(why ?? "refused")}` });
-            return false;
-          }
-        }
-      } catch (err) {
-        hooks.onSettingsFailure?.({ op: "set", reason: String(err) });
-        return false;
-      }
-      try {
-        const back = await orca.host.call("settings.get");
-        const env = back ?? {};
-        const inner = env["settings"] ?? env["value"];
-        const rec = inner !== void 0 && inner !== null && typeof inner === "object" ? inner : env;
-        const key = "__revision";
-        if (rec[key] !== values[key]) {
-          hooks.onSettingsFailure?.({
-            op: "verify",
-            reason: `wrote ${key}=${String(values[key])} and read back ${String(rec[key])} \u2014 the mirror did not take the write`
-          });
-          return false;
-        }
-      } catch (err) {
-        hooks.onSettingsFailure?.({ op: "verify", reason: String(err) });
-        return false;
-      }
-      return true;
-    },
-    onEvent(name, handler) {
-      try {
-        orca.events.on(name, handler);
-      } catch (err) {
-        log(`could not subscribe to ${name}: ${String(err)}`);
-        hooks.onUndelivered?.(`Huddle could not subscribe to ${name}, so agent replies will not be spoken.`);
-      }
-    },
-    registerCommand(id, handler) {
-      try {
-        orca.commands.register(id, async () => {
-          try {
-            await handler();
-            return { ok: true };
-          } catch (err) {
-            log(`command ${id} failed: ${String(err)}`);
-            hooks.onCommandFailed?.(id, String(err));
-            return { ok: false, error: String(err) };
-          }
-        });
-        registered++;
-      } catch (err) {
-        log(`could not register command ${id}: ${String(err)}`);
-      }
-    }
-  };
-}
-function asAgentStatus(payload) {
-  if (typeof payload !== "object" || payload === null) return null;
-  const p = payload;
-  if (typeof p["paneKey"] !== "string" || typeof p["state"] !== "string") return null;
-  const out = {
-    worktreeId: typeof p["worktreeId"] === "string" ? p["worktreeId"] : null,
-    paneKey: p["paneKey"],
-    state: p["state"],
-    receivedAt: typeof p["receivedAt"] === "number" ? p["receivedAt"] : 0
-  };
-  return typeof p["sessionId"] === "string" ? { ...out, sessionId: p["sessionId"] } : out;
-}
-function worktreePathFrom(worktreeId) {
-  if (worktreeId === null) return null;
-  const sep = worktreeId.indexOf("::");
-  const path = sep === -1 ? worktreeId : worktreeId.slice(sep + 2);
-  return path.length > 0 ? path : null;
-}
-
-// packages/plugin/src/clipboard.ts
-import { spawn as spawn2 } from "node:child_process";
-var ClipboardUnavailableError = class extends Error {
-  /** Per-helper reason, in ladder order. */
-  reasons;
-  constructor(platform, tried, reasons = []) {
-    super(reasons.length > 0 ? `Could not read the clipboard on ${platform}. ${reasons.join("; ")}.` : `Could not read the clipboard on ${platform}. Tried: ${tried.join(", ")}`);
-    this.name = "ClipboardUnavailableError";
-    this.reasons = reasons;
-  }
-};
-var CANDIDATES = {
-  darwin: [{ cmd: "pbpaste", args: [] }],
-  win32: [{ cmd: "powershell", args: ["-NoProfile", "-NonInteractive", "-STA", "-Command", "Get-Clipboard -Raw"] }],
-  linux: [
-    { cmd: "wl-paste", args: ["--no-newline"] },
-    { cmd: "xclip", args: ["-selection", "clipboard", "-o"] },
-    { cmd: "xsel", args: ["--clipboard", "--output"] }
-  ]
-};
-function capture(cmd, args, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let child;
-    try {
-      child = spawn2(cmd, [...args], { stdio: ["ignore", "pipe", "ignore"] });
-    } catch {
-      reject(new Error(`${cmd} could not be started`));
-      return;
-    }
-    let out = "";
-    const timer = setTimeout(() => {
-      if (child.exitCode === null) child.kill("SIGKILL");
-      reject(new Error(`${cmd} timed out after ${timeoutMs} ms`));
-    }, timeoutMs);
-    const settle = (fn) => {
-      clearTimeout(timer);
-      fn();
-    };
-    child.stdout?.on("data", (d2) => {
-      out += d2.toString("utf8");
-    });
-    child.on("error", (err) => settle(() => reject(new Error(
-      err.code === "ENOENT" ? `${cmd} is not installed` : `${cmd} could not be started`
-    ))));
-    child.on("close", (code) => settle(() => code === 0 ? resolve(out) : reject(new Error(`${cmd} exited with code ${String(code)}`))));
-  });
-}
-function capText(raw, maxChars) {
-  if (raw.length <= maxChars) return { text: raw, truncated: false };
-  return { text: raw.slice(0, maxChars), truncated: true };
-}
-var DEFAULT_MAX_CHARS = 2e4;
-var DEFAULT_CLIPBOARD_TIMEOUT_MS = 2e4;
-async function readClipboard(opts = {}) {
-  const platform = opts.platform ?? process.platform;
-  const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS;
-  const candidates = opts.helpers ?? CANDIDATES[platform] ?? [];
-  const tried = [];
-  const reasons = [];
-  for (const c of candidates) {
-    tried.push(c.cmd);
-    try {
-      return capText(await capture(c.cmd, c.args, timeoutMs), maxChars);
-    } catch (err) {
-      reasons.push(err instanceof Error ? err.message : String(err));
-      continue;
-    }
-  }
-  if (candidates.length === 0) {
-    reasons.push(`no clipboard helper is known for ${platform}`);
-  }
-  throw new ClipboardUnavailableError(platform, tried, reasons);
-}
-
 // packages/core/src/normalizer/index.ts
 var EXTENSION_WORDS = {
   ts: "typescript",
@@ -3675,10 +3460,30 @@ var SETTINGS_SCHEMA = {
     since: 2
   }),
   // ─────────────────────────────────────────────────────────────────────────────────────────
-  // synthesize — SynthesizeOptions. 6 fields, 2 wired. `signal` is runtime, not settable.
+  // synthesize — 7 fields, 3 wired. Two of those land on SynthesizeOptions (voice, rate);
+  // `synthesize.engine` selects WHICH provider `registry.resolve()` tries first, so its wire
+  // is `ProviderRegistry.resolve`, not a generate() option. `signal` is runtime, not settable.
   // Read ONCE PER UTTERANCE, never per chunk (011 section 2.3): a voice change between chunk
-  // three and chunk four is a sentence that changes speaker mid-word.
+  // three and chunk four is a sentence that changes speaker mid-word. Same cadence for engine:
+  // swapping the backend mid-utterance is the same failure wearing a different costume.
   // ─────────────────────────────────────────────────────────────────────────────────────────
+  "synthesize.engine": d({
+    id: "synthesize.engine",
+    owner: "synthesize",
+    panel: "E",
+    label: "Which engine",
+    help: "Auto uses Pocket TTS when the neural model is installed, otherwise the system voice. OS always uses the system voice. Pocket asks for the neural voice and names the substitution out loud when it cannot.",
+    kind: "enum",
+    values: ["auto", "os", "pocket"],
+    default: "auto",
+    provisional: true,
+    effect: "utterance",
+    enginePersonal: false,
+    // Not SynthesizeOptions: this value chooses the provider, it is not handed to generate().
+    // P28's voiceIndex stays an index into the SELECTED backend's list; do not qualify it.
+    wire: "ProviderRegistry.resolve",
+    since: 2
+  }),
   "synthesize.voiceIndex": d({
     id: "synthesize.voiceIndex",
     owner: "synthesize",
@@ -4222,6 +4027,14 @@ function isFuture(f) {
 function isWired(f) {
   return f.wire !== null && !isFuture(f);
 }
+var OPTION_SURFACE_TYPES = [
+  "NormalizeOptions",
+  "ChunkerOptions",
+  "SynthesizeOptions"
+];
+function isOptionWired(f) {
+  return isWired(f) && OPTION_SURFACE_TYPES.includes(f.wire.split(".")[0]);
+}
 function schemaDefaults() {
   const out = {};
   for (const f of Object.values(SETTINGS_SCHEMA)) {
@@ -4236,7 +4049,7 @@ function wireProperty(f) {
 function project(s, owner) {
   const out = {};
   for (const f of Object.values(SETTINGS_SCHEMA)) {
-    if (f.owner !== owner || !isWired(f)) continue;
+    if (f.owner !== owner || !isOptionWired(f)) continue;
     const prop = wireProperty(f);
     if (prop === null) continue;
     const v = s[f.id];
@@ -4260,6 +4073,11 @@ function toSynthesizeOptions(s, resolveVoice) {
     else delete out["voice"];
   }
   return out;
+}
+function requestedEngineId(engine, pocketRegistered) {
+  if (engine === "os") return "os-synth";
+  if (engine === "pocket") return "pocket";
+  return pocketRegistered ? "pocket" : void 0;
 }
 
 // packages/core/src/settings/jsonc.ts
@@ -4597,6 +4415,221 @@ function settingsReportSentence(r) {
   return parts.join(" ");
 }
 
+// packages/plugin/src/adapter/index.ts
+function makeHost(orca, hooks = {}) {
+  let registered = 0;
+  let logFailures = 0;
+  const log = (m) => {
+    try {
+      orca.log(m);
+    } catch {
+      logFailures++;
+    }
+  };
+  return {
+    log,
+    logFailures: () => logFailures,
+    registeredCommands: () => registered,
+    notify(title, body, opts = {}) {
+      const safeTitle = title.trim() !== "" ? title : (body ?? "").trim() !== "" ? body : "Read aloud";
+      const params = { title: safeTitle.slice(0, 120) };
+      if (body !== void 0) params["body"] = body.slice(0, 1e3);
+      const message = body ?? title;
+      const undelivered = (why) => {
+        log(`notification not delivered (${why}): ${message}`);
+        if (opts.alreadySpoken !== true) hooks.onUndelivered?.(message);
+      };
+      void Promise.resolve(orca.host.call("notifications.show", params)).then((r) => {
+        if (r?.delivered === false) undelivered("reported undelivered");
+      }).catch((err) => {
+        undelivered(String(err));
+      });
+    },
+    async storageGet(key) {
+      try {
+        const r = await orca.host.call("storage.get", { key });
+        return r?.value;
+      } catch (err) {
+        hooks.onStorageFailure?.({ op: "get", key, reason: String(err) });
+        return void 0;
+      }
+    },
+    async storageSet(key, value) {
+      try {
+        await orca.host.call("storage.set", { key, value });
+      } catch (err) {
+        hooks.onStorageFailure?.({ op: "set", key, reason: String(err) });
+      }
+    },
+    async settingsGet() {
+      try {
+        const r = await orca.host.call("settings.get");
+        if (r === null || typeof r !== "object") return null;
+        const env = r;
+        const inner = env["settings"] ?? env["value"];
+        const out = inner !== void 0 && inner !== null && typeof inner === "object" ? inner : env;
+        return out;
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: "get", reason: String(err) });
+        return null;
+      }
+    },
+    /** Returns whether the write was OBSERVED to land, not whether the call returned. */
+    async settingsSet(values) {
+      try {
+        for (const [key, value] of Object.entries(values)) {
+          const r = await orca.host.call("settings.set", { key, value });
+          const ok = r?.ok;
+          if (ok === false) {
+            const why = r.error;
+            hooks.onSettingsFailure?.({ op: "set", reason: `${key}: ${String(why ?? "refused")}` });
+            return false;
+          }
+        }
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: "set", reason: String(err) });
+        return false;
+      }
+      try {
+        const back = await orca.host.call("settings.get");
+        const env = back ?? {};
+        const inner = env["settings"] ?? env["value"];
+        const rec = inner !== void 0 && inner !== null && typeof inner === "object" ? inner : env;
+        const key = "__revision";
+        if (rec[key] !== values[key]) {
+          hooks.onSettingsFailure?.({
+            op: "verify",
+            reason: `wrote ${key}=${String(values[key])} and read back ${String(rec[key])} \u2014 the mirror did not take the write`
+          });
+          return false;
+        }
+      } catch (err) {
+        hooks.onSettingsFailure?.({ op: "verify", reason: String(err) });
+        return false;
+      }
+      return true;
+    },
+    onEvent(name, handler) {
+      try {
+        orca.events.on(name, handler);
+      } catch (err) {
+        log(`could not subscribe to ${name}: ${String(err)}`);
+        hooks.onUndelivered?.(`Huddle could not subscribe to ${name}, so agent replies will not be spoken.`);
+      }
+    },
+    registerCommand(id, handler) {
+      try {
+        orca.commands.register(id, async () => {
+          try {
+            await handler();
+            return { ok: true };
+          } catch (err) {
+            log(`command ${id} failed: ${String(err)}`);
+            hooks.onCommandFailed?.(id, String(err));
+            return { ok: false, error: String(err) };
+          }
+        });
+        registered++;
+      } catch (err) {
+        log(`could not register command ${id}: ${String(err)}`);
+      }
+    }
+  };
+}
+function asAgentStatus(payload) {
+  if (typeof payload !== "object" || payload === null) return null;
+  const p = payload;
+  if (typeof p["paneKey"] !== "string" || typeof p["state"] !== "string") return null;
+  const out = {
+    worktreeId: typeof p["worktreeId"] === "string" ? p["worktreeId"] : null,
+    paneKey: p["paneKey"],
+    state: p["state"],
+    receivedAt: typeof p["receivedAt"] === "number" ? p["receivedAt"] : 0
+  };
+  return typeof p["sessionId"] === "string" ? { ...out, sessionId: p["sessionId"] } : out;
+}
+function worktreePathFrom(worktreeId) {
+  if (worktreeId === null) return null;
+  const sep = worktreeId.indexOf("::");
+  const path = sep === -1 ? worktreeId : worktreeId.slice(sep + 2);
+  return path.length > 0 ? path : null;
+}
+
+// packages/plugin/src/clipboard.ts
+import { spawn as spawn2 } from "node:child_process";
+var ClipboardUnavailableError = class extends Error {
+  /** Per-helper reason, in ladder order. */
+  reasons;
+  constructor(platform, tried, reasons = []) {
+    super(reasons.length > 0 ? `Could not read the clipboard on ${platform}. ${reasons.join("; ")}.` : `Could not read the clipboard on ${platform}. Tried: ${tried.join(", ")}`);
+    this.name = "ClipboardUnavailableError";
+    this.reasons = reasons;
+  }
+};
+var CANDIDATES = {
+  darwin: [{ cmd: "pbpaste", args: [] }],
+  win32: [{ cmd: "powershell", args: ["-NoProfile", "-NonInteractive", "-STA", "-Command", "Get-Clipboard -Raw"] }],
+  linux: [
+    { cmd: "wl-paste", args: ["--no-newline"] },
+    { cmd: "xclip", args: ["-selection", "clipboard", "-o"] },
+    { cmd: "xsel", args: ["--clipboard", "--output"] }
+  ]
+};
+function capture(cmd, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn2(cmd, [...args], { stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      reject(new Error(`${cmd} could not be started`));
+      return;
+    }
+    let out = "";
+    const timer = setTimeout(() => {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      reject(new Error(`${cmd} timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
+    const settle = (fn) => {
+      clearTimeout(timer);
+      fn();
+    };
+    child.stdout?.on("data", (d2) => {
+      out += d2.toString("utf8");
+    });
+    child.on("error", (err) => settle(() => reject(new Error(
+      err.code === "ENOENT" ? `${cmd} is not installed` : `${cmd} could not be started`
+    ))));
+    child.on("close", (code) => settle(() => code === 0 ? resolve(out) : reject(new Error(`${cmd} exited with code ${String(code)}`))));
+  });
+}
+function capText(raw, maxChars) {
+  if (raw.length <= maxChars) return { text: raw, truncated: false };
+  return { text: raw.slice(0, maxChars), truncated: true };
+}
+var DEFAULT_MAX_CHARS = 2e4;
+var DEFAULT_CLIPBOARD_TIMEOUT_MS = 2e4;
+async function readClipboard(opts = {}) {
+  const platform = opts.platform ?? process.platform;
+  const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS;
+  const candidates = opts.helpers ?? CANDIDATES[platform] ?? [];
+  const tried = [];
+  const reasons = [];
+  for (const c of candidates) {
+    tried.push(c.cmd);
+    try {
+      return capText(await capture(c.cmd, c.args, timeoutMs), maxChars);
+    } catch (err) {
+      reasons.push(err instanceof Error ? err.message : String(err));
+      continue;
+    }
+  }
+  if (candidates.length === 0) {
+    reasons.push(`no clipboard helper is known for ${platform}`);
+  }
+  throw new ClipboardUnavailableError(platform, tried, reasons);
+}
+
 // packages/plugin/src/speech-service.ts
 var DEFAULT_MAX_QUEUED = 20;
 var DEFAULT_ANNOUNCE_DELAY_MS = 500;
@@ -4615,6 +4648,7 @@ var LOSS_SENTENCE = {
 };
 var SpeechService = class {
   #deps;
+  #provider;
   #playback;
   #pending = [];
   #draining = false;
@@ -4630,9 +4664,10 @@ var SpeechService = class {
   #reattributed = /* @__PURE__ */ new Set();
   constructor(deps) {
     this.#deps = deps;
+    this.#provider = deps.provider;
     this.#playback = new PlaybackQueue({
       sink: deps.sink,
-      cancelSynthesis: () => deps.provider.cancel()
+      cancelSynthesis: () => this.#provider.cancel()
     });
   }
   get isSpeaking() {
@@ -4704,10 +4739,11 @@ var SpeechService = class {
     let error = null;
     try {
       const snapshot = this.#deps.settings?.();
+      await this.#applyEngine(snapshot);
       const spokenText = normalize(phrase, this.#normalizeOptions(snapshot));
       const chunker = new Chunker(this.#chunkerOptions(snapshot));
       for (const chunk of [...chunker.addText(spokenText), ...chunker.finish()]) {
-        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions(snapshot))) {
+        for await (const audio of this.#provider.generate(chunk.text, this.#synthesizeOptions(snapshot))) {
           chunks++;
           bytes += audio.data.length;
           await this.#deps.sink.enqueue(audio);
@@ -4944,6 +4980,7 @@ var SpeechService = class {
     const chunker = new Chunker(this.#chunkerOptions(snapshot));
     const chunks = [...chunker.addText(spoken), ...chunker.finish()];
     if (chunks.some((c) => c.boundary === "scalar")) this.#noteLoss("cut-mid-word");
+    await this.#applyEngine(snapshot);
     const generation = this.#playback.begin();
     const startedAtEpochMs = Date.now();
     this.#current = {
@@ -4971,7 +5008,7 @@ var SpeechService = class {
       if (this.#skip) return "skipped";
       if (generation !== this.#playback.generation) return "superseded";
       try {
-        for await (const audio of this.#deps.provider.generate(chunk.text, synthOpts)) {
+        for await (const audio of this.#provider.generate(chunk.text, synthOpts)) {
           if (!this.#playback.push(generation, audio)) return "superseded";
         }
       } catch (err) {
@@ -4980,6 +5017,20 @@ var SpeechService = class {
       }
     }
     return "spoken";
+  }
+  /**
+   * Apply `synthesize.engine` once per utterance. The registry does the ladder walk;
+   * we only read the setting and hand the id across.
+   */
+  async #applyEngine(snapshot) {
+    if (this.#deps.selectEngine === void 0) return;
+    const engine = snapshot?.values["synthesize.engine"] ?? "auto";
+    try {
+      const selected = await this.#deps.selectEngine(engine);
+      if (selected !== null) this.#provider = selected;
+    } catch (err) {
+      this.#deps.log?.(`engine selection failed: ${String(err)}`);
+    }
   }
   /** Status reporting is supplementary; a dashboard failure must never stop speech. */
   #emitStatus() {
@@ -6305,7 +6356,15 @@ function activate(orca, options = {}) {
     } }),
     ...options.pocket === void 0 ? {} : { pocket: options.pocket }
   });
-  void registry.resolve().then((resolved) => {
+  const pocketRegistered = registry.get("pocket") !== void 0;
+  const resolveFor = (engine) => registry.resolve(requestedEngineId(engine, pocketRegistered));
+  let lastNamedReason;
+  const nameSubstitution = (reason) => {
+    if (reason === void 0 || reason === lastNamedReason) return;
+    lastNamedReason = reason;
+    announce(reason);
+  };
+  void resolveFor(settings.snapshot.values["synthesize.engine"]).then((resolved) => {
     if (resolved === null) {
       const detail = registry.lastFailureDetail;
       const why = detail === null ? registry.lastFailure ?? "no speech engine is available on this system" : `no speech engine is available on this system (${detail.kind}) \u2014 ${detail.reason}`;
@@ -6324,6 +6383,14 @@ function activate(orca, options = {}) {
       // session; the listener's file can change at any point inside it.
       settings: () => settings.snapshot,
       resolveVoice: (i) => settings.voiceName(i),
+      // Engine is a synthesize setting: read once per utterance from the snapshot, pass the
+      // mapped id to registry.resolve(). Pocket failing names the substitution out loud.
+      selectEngine: async (engine) => {
+        const next = await resolveFor(engine);
+        if (next === null) return null;
+        nameSubstitution(next.status.reason);
+        return next.provider;
+      },
       ...dashboard === null ? {} : { onStatus: (status) => {
         dashboard.updateSpeech(status);
       } },
@@ -6361,7 +6428,7 @@ function activate(orca, options = {}) {
       );
       deferredDropped = 0;
     }
-    if (resolved.status.reason !== void 0) announce(resolved.status.reason);
+    nameSubstitution(resolved.status.reason);
   }).catch((err) => {
     engineError = String(err);
     dashboard?.updateEngine({ state: "failed", name: "unavailable", rung: null, reason: engineError });

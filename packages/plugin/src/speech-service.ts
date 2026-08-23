@@ -134,6 +134,16 @@ export interface SpeechServiceDeps {
    */
   readonly settings?: () => SettingsSnapshot
   /**
+   * Pick the engine for THIS utterance from `synthesize.engine`. Return the provider to use,
+   * or `null` to keep the current one.
+   *
+   * 011 section 2.3: synthesize settings are read once per utterance, never per chunk. The
+   * engine is the same cadence — swapping the backend between chunk three and chunk four is
+   * a sentence that changes speaker mid-word. The caller maps `auto`/`os`/`pocket` onto
+   * `registry.resolve(id)` and names the substitution when Pocket was asked and could not.
+   */
+  readonly selectEngine?: (engine: unknown) => Promise<TtsProvider | null>
+  /**
    * The host's runtime voice list, index to name. `synthesize.voiceIndex` persists an INDEX
    * because voice NAMES have zero overlap across the three platforms (P28), and resolving one
    * needs a list only the host has. With no resolver, or an index the list does not reach, the
@@ -232,6 +242,7 @@ interface ObservableSink { readonly bytesPlayed?: number }
 
 export class SpeechService {
   readonly #deps: SpeechServiceDeps
+  #provider: TtsProvider
   readonly #playback: PlaybackQueue
   #pending: PendingUtterance[] = []
   #draining = false
@@ -248,9 +259,10 @@ export class SpeechService {
 
   constructor(deps: SpeechServiceDeps) {
     this.#deps = deps
+    this.#provider = deps.provider
     this.#playback = new PlaybackQueue({
       sink: deps.sink,
-      cancelSynthesis: () => deps.provider.cancel()
+      cancelSynthesis: () => this.#provider.cancel()
     })
   }
 
@@ -330,10 +342,11 @@ export class SpeechService {
     let error: string | null = null
     try {
       const snapshot = this.#deps.settings?.()
+      await this.#applyEngine(snapshot)
       const spokenText = normalize(phrase, this.#normalizeOptions(snapshot))
       const chunker = new Chunker(this.#chunkerOptions(snapshot))
       for (const chunk of [...chunker.addText(spokenText), ...chunker.finish()]) {
-        for await (const audio of this.#deps.provider.generate(chunk.text, this.#synthesizeOptions(snapshot))) {
+        for await (const audio of this.#provider.generate(chunk.text, this.#synthesizeOptions(snapshot))) {
           chunks++
           bytes += audio.data.length
           await this.#deps.sink.enqueue(audio)
@@ -603,7 +616,8 @@ export class SpeechService {
     // 011 section 2.3, the one required source change the settings design forces: this used to be
     // called INSIDE the per-chunk loop. With a live snapshot behind it, a voice change would land
     // between chunk three and chunk four of one utterance — a sentence that changes speaker
-    // mid-word. Read once, into a local, at the top.
+    // mid-word. Read once, into a local, at the top. Engine is the same cadence.
+    await this.#applyEngine(snapshot)
     const generation = this.#playback.begin()
     const startedAtEpochMs = Date.now()
     this.#current = {
@@ -631,7 +645,7 @@ export class SpeechService {
       if (this.#skip) return 'skipped'
       if (generation !== this.#playback.generation) return 'superseded'
       try {
-        for await (const audio of this.#deps.provider.generate(chunk.text, synthOpts)) {
+        for await (const audio of this.#provider.generate(chunk.text, synthOpts)) {
           if (!this.#playback.push(generation, audio)) return 'superseded'
         }
       } catch (err) {
@@ -643,6 +657,21 @@ export class SpeechService {
       }
     }
     return 'spoken'
+  }
+
+  /**
+   * Apply `synthesize.engine` once per utterance. The registry does the ladder walk;
+   * we only read the setting and hand the id across.
+   */
+  async #applyEngine(snapshot?: SettingsSnapshot): Promise<void> {
+    if (this.#deps.selectEngine === undefined) return
+    const engine = snapshot?.values['synthesize.engine'] ?? 'auto'
+    try {
+      const selected = await this.#deps.selectEngine(engine)
+      if (selected !== null) this.#provider = selected
+    } catch (err) {
+      this.#deps.log?.(`engine selection failed: ${String(err)}`)
+    }
   }
 
   /** Status reporting is supplementary; a dashboard failure must never stop speech. */

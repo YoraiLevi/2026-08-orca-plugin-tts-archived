@@ -334,16 +334,7 @@ describe('SC-18 — every gate the repo defines is executed by something', () =>
     'control': 'the foreground terminal dashboard; G2 exercises its renderer and socket in `test`',
     'bench:latency': 'opens the audio device on `--audible` and is a measurement, not an assertion (P31)',
     'bench:lab-gate': 'drives a real browser; measured deliberately rather than gated',
-    'probe:numbers': 'run by the CI leg directly rather than through the script name',
-    // Deliberately NOT in CI yet, and this reason is the finding rather than an excuse.
-    // `probe:artifact` drives the SHIPPED dist/plugin/main.mjs and demands 24 kHz neural audio on
-    // the production path. Its GENERATION half passes since R17-01 -- the bundled provider really
-    // does synthesize. Its SELECTION half fails, because ORCA has no setting that can request a
-    // backend: `registry.resolve()` is called with no id and `synthesize.voiceIndex` is an INDEX
-    // into the host's own voice list (P28) that does not generalise across engines. Adding that
-    // setting is a product decision and it is the author's. Wire this in the moment it lands; if
-    // this exemption is still here after that, it is hiding red.
-    'probe:artifact': 'drives the shipped bundle; its selection half is blocked on the engine-choice setting (R17-01, D005) and the author\'s decision'
+    'probe:numbers': 'run by the CI leg directly rather than through the script name'
   }
 
   it('CONTROL: the CI file really does name the gates it runs', () => {

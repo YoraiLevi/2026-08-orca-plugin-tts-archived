@@ -272,9 +272,9 @@ const LAB_ONLY_IDS = ['lab.sessionLabelHashChars'] as const
 /**
  * Ids the SCHEMA carries that the lab has no control for, so the lab's serializer cannot write
  * them and they must come back as schema defaults. Also J11's arithmetic: 46 lab rows − 1 lab-only
- * + 2 schema-only = 47 shipping fields.
+ * + 3 schema-only = 48 shipping fields.
  */
-const SCHEMA_ONLY_IDS = ['announce.reportChannel', 'apply.toQueued'] as const
+const SCHEMA_ONLY_IDS = ['synthesize.engine', 'announce.reportChannel', 'apply.toQueued'] as const
 
 // ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -512,7 +512,7 @@ describe('C4 — the lab/schema disagreement is named, not absorbed', () => {
     for (const id of LAB_ONLY_IDS) expect(SETTINGS_SCHEMA[id]).toBeUndefined()
   })
 
-  it('the two schema-only ids have no lab control and fall back to their schema defaults', () => {
+  it('the schema-only ids have no lab control and fall back to their schema defaults', () => {
     const labIds = new Set(CONTROLS.map((c) => c.settingsId))
     for (const id of SCHEMA_ONLY_IDS) {
       expect(labIds.has(id), `${id} now HAS a lab control — the asymmetry moved`).toBe(false)
@@ -526,13 +526,13 @@ describe('C4 — the lab/schema disagreement is named, not absorbed', () => {
     for (const id of SCHEMA_ONLY_IDS) expect(r.settings[id]).toEqual(defaults[id])
   })
 
-  it('the inventories differ by exactly the three ids named above and no others', () => {
+  it('the inventories differ by exactly the named lab-only and schema-only ids and no others', () => {
     // J11's arithmetic, restated by hand rather than imported (P36/P33): 46 lab rows − 1 lab-only
-    // + 2 schema-only = 47 shipping schema fields. A new control on either side lands here.
+    // + 3 schema-only = 48 shipping schema fields. A new control on either side lands here.
     const labIds = CONTROLS.map((c) => c.settingsId)
     const schemaIds = Object.values(SETTINGS_SCHEMA).filter((f) => !isFuture(f)).map((f) => f.id)
     expect(labIds).toHaveLength(46)
-    expect(schemaIds).toHaveLength(47)
+    expect(schemaIds).toHaveLength(48)
     expect(labIds.filter((i) => !schemaIds.includes(i))).toEqual([...LAB_ONLY_IDS])
     expect(schemaIds.filter((i) => !labIds.includes(i))).toEqual([...SCHEMA_ONLY_IDS])
   })

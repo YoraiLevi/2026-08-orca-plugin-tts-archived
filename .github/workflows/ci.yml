@@ -39,6 +39,25 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+      # Effect gate for neural selection (P49 / R16-10). Presence of PocketSynthProvider in
+      # the bundle is not enough: this loads dist/plugin/main.mjs the way ORCA does and
+      # demands PRESENT = 24000 Hz with signal, ABSENT names the substitution.
+      # Hosted runners have no Pocket model — the probe exits 2 (INCONCLUSIVE), which is
+      # not a pass and not a fail. Treat 2 as skip; any other non-zero is red. `set +e`
+      # around the call is load-bearing: GitHub runs bash as `-eo pipefail`, so an
+      # INCONCLUSIVE 2 would abort the step before we compared it (same trap as the
+      # million-ceiling probe's expected-code wrapper below).
+      - name: Artifact e2e — production path must speak with Pocket when the model is there
+        shell: bash
+        run: |
+          set +e
+          pnpm probe:artifact
+          got=$?
+          set -e
+          if [ "$got" -eq 0 ]; then echo "artifact e2e: PASS"; exit 0; fi
+          if [ "$got" -eq 2 ]; then echo "artifact e2e: INCONCLUSIVE (no Pocket model on this runner)"; exit 0; fi
+          echo "artifact e2e: FAIL (exit $got)"; exit "$got"
+
       # PITFALLS P0: a claim about the plugin API is only as good as its `file:line`. Round-3 review
       # found ~30 citations that had gone stale by 15-150 lines while the code moved underneath them,
       # which is P0's failure mode with a friendly face -- the reader cannot tell a stale pointer
