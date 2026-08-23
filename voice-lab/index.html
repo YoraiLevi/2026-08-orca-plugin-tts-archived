@@ -1195,6 +1195,7 @@ const state = {
   voices: [],
   platform: null,
   provider: null,
+  modelKind: null,
   voiceListHash: null,
   lastProvenance: null,
   provenanceFor: new Map(),
@@ -1481,6 +1482,7 @@ async function loadVoices () {
   }))
   state.platform = response.json.platform ?? null
   state.provider = response.json.provider ?? null
+  state.modelKind = typeof response.json.model?.kind === 'string' ? response.json.model.kind : null
   state.voiceListHash = state.voices.length
     ? 'fnv:' + hash(state.voices.map((voice) => voice.key).join('\n'))
     : null
@@ -1925,8 +1927,13 @@ function formatBytes (bytes) {
 }
 
 function pocketNeedsDownload () {
-  return state.voices.some((voice) => voice.backend === 'pocket' && !voice.available &&
-    /model|download|missing file|stale/i.test(voice.reason ?? ''))
+  // R17-07: only a genuinely absent cache is a 173.8 MB download. Incomplete (weights
+  // present, marker missing) must not offer that button — the status sentence names the
+  // missing file instead.
+  if (state.modelKind === 'incomplete' || state.modelKind === 'stale' || state.modelKind === 'ready') {
+    return false
+  }
+  return state.voices.some((voice) => voice.backend === 'pocket' && !voice.available)
 }
 
 function voiceOptionText (voice) {
@@ -1935,6 +1942,7 @@ function voiceOptionText (voice) {
   if (pocketNeedsDownload()) {
     return `${base} — download needed (${formatBytes(state.download.totalBytes)})`
   }
+  if (voice.reason) return `${base} — ${voice.reason}`
   return `${base} — unavailable`
 }
 

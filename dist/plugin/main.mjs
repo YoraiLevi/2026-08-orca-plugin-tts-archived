@@ -319,10 +319,10 @@ var init_safe_swap = __esm({
 
 // packages/providers/src/pocket-synth/models.ts
 import { createHash } from "node:crypto";
-import { readFile as readFile3, writeFile as writeFile2, readdir as readdir2 } from "node:fs/promises";
-import { existsSync as existsSync2 } from "node:fs";
+import { readFile as readFile3, writeFile as writeFile2, readdir as readdir2, mkdir as mkdir2, rm as rm3, symlink } from "node:fs/promises";
+import { existsSync as existsSync2, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join as join3 } from "node:path";
+import { join as join3, resolve as resolvePath, sep } from "node:path";
 function modelDir(env = process.env) {
   const override = env.ORCA_TTS_MODEL_DIR;
   if (override !== void 0 && override !== "") return override;
@@ -345,12 +345,38 @@ function requiredFiles() {
     MANIFEST_FILE
   ];
 }
+function incompleteDetail(missing, present, required) {
+  if (missing.length === 1 && missing[0] === MANIFEST_FILE) {
+    return `this directory has every required file except ${MANIFEST_FILE}`;
+  }
+  return `this directory has ${present} of ${required} required files; missing ${missing.join(", ")}`;
+}
+function modelStatusDetail(status) {
+  if (status.kind === "ready") return `Pocket TTS is ready in ${status.dir}`;
+  if (status.kind === "absent") {
+    return `Pocket TTS is not installed in ${status.dir}`;
+  }
+  if (status.kind === "incomplete") return `${status.detail} (${status.dir})`;
+  return `Pocket TTS model is stale in ${status.dir}; found manifest ${status.found}, expected ${status.want}`;
+}
 async function modelStatus(dir = modelDir()) {
   await recoverLiveFromBackup(dir);
-  if (!existsSync2(dir)) return { kind: "absent", dir, missing: requiredFiles() };
-  const present = new Set(await readdir2(dir));
-  const missing = requiredFiles().filter((f) => !present.has(f));
-  if (missing.length > 0) return { kind: "absent", dir, missing };
+  const required = requiredFiles();
+  if (!existsSync2(dir)) return { kind: "absent", dir, missing: required };
+  const names = new Set(await readdir2(dir));
+  const missing = required.filter((f) => !names.has(f));
+  const present = required.length - missing.length;
+  if (missing.length > 0) {
+    if (present === 0) return { kind: "absent", dir, missing };
+    return {
+      kind: "incomplete",
+      dir,
+      missing,
+      present,
+      required: required.length,
+      detail: incompleteDetail(missing, present, required.length)
+    };
+  }
   const found = (await readFile3(join3(dir, MANIFEST_FILE), "utf8")).trim();
   const want = String(MANIFEST_VERSION);
   if (found !== want) return { kind: "stale", dir, found, want };
@@ -1663,7 +1689,7 @@ var PocketOrtUnavailableError = class extends Error {
 var PocketModelUnavailableError = class extends Error {
   status;
   constructor(status) {
-    const detail = status.kind === "absent" ? `missing ${status.missing.join(", ")}` : `model manifest is stale (found ${status.found}, need ${status.want})`;
+    const detail = status.kind === "absent" ? `missing ${status.missing.join(", ")}` : modelStatusDetail(status);
     super(`Pocket TTS model is not ready in ${status.dir}: ${detail}`);
     this.name = "PocketModelUnavailableError";
     this.status = status;
@@ -4550,8 +4576,8 @@ function asAgentStatus(payload) {
 }
 function worktreePathFrom(worktreeId) {
   if (worktreeId === null) return null;
-  const sep = worktreeId.indexOf("::");
-  const path = sep === -1 ? worktreeId : worktreeId.slice(sep + 2);
+  const sep2 = worktreeId.indexOf("::");
+  const path = sep2 === -1 ? worktreeId : worktreeId.slice(sep2 + 2);
   return path.length > 0 ? path : null;
 }
 
@@ -5044,7 +5070,7 @@ var SpeechService = class {
 
 // packages/plugin/src/sinks/subprocess-sink.ts
 import { spawn as spawn3 } from "node:child_process";
-import { mkdtemp as mkdtemp2, writeFile as writeFile4, rm as rm3 } from "node:fs/promises";
+import { mkdtemp as mkdtemp2, writeFile as writeFile4, rm as rm4 } from "node:fs/promises";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join7 } from "node:path";
 var PLAYERS = {
@@ -5129,7 +5155,7 @@ var SubprocessSink = class {
       this.#log(`read-aloud: ${failure.reason}`);
       this.#onFailure(failure);
     } finally {
-      await rm3(dir, { recursive: true, force: true }).catch(() => void 0);
+      await rm4(dir, { recursive: true, force: true }).catch(() => void 0);
     }
   }
   async stop() {
@@ -6071,7 +6097,7 @@ function relativeAge(writtenAt, now) {
 
 // packages/plugin/src/control/dashboard.ts
 import { createConnection, createServer } from "node:net";
-import { mkdir as mkdir2, readFile as readFile8, rename as rename2, writeFile as writeFile5 } from "node:fs/promises";
+import { mkdir as mkdir3, readFile as readFile8, rename as rename2, writeFile as writeFile5 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { join as join10 } from "node:path";
 var DASHBOARD_FILE = "dashboard.json";
@@ -6138,7 +6164,7 @@ var DashboardRuntime = class {
     return this.#path;
   }
   async start() {
-    await mkdir2(this.#dir, { recursive: true, mode: 448 });
+    await mkdir3(this.#dir, { recursive: true, mode: 448 });
     await new Promise((resolve, reject) => {
       const server = createServer((socket) => {
         this.#accept(socket);

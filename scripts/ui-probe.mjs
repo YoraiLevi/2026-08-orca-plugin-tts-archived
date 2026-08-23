@@ -31,10 +31,11 @@
  * failed is not a check.
  *
  * TWO ARMS. The default is a hermetic empty model directory, so U7's download button exists and
- * U9 can see the OS fallback. If a Pocket install is on disk (`ORCA_TTS_MODEL_DIR` or
- * `~/.buzz/models/pocket-tts`), a second arm re-runs U6/U8/U9 against it and REQUIRES Pocket to
- * be what spoke. A probe that cannot say "I could not tell" reports acceptable under conditions
- * it never tested — that is R16-05.
+ * U9 can see the OS fallback. If `modelStatus(modelDir())` is `ready` — the SAME predicate the
+ * Lab and the plugin use — a second arm re-runs U6/U8/U9 against it and REQUIRES Pocket to be
+ * what spoke. The probe does not look in `~/.buzz` and does not stage a marker in a temp dir
+ * and then describe that as the product (R17-07). A probe that cannot say "I could not tell"
+ * reports acceptable under conditions it never tested — that is R16-05.
  *
  * SILENT — P31, the author is at this machine. Chrome runs headless with `--mute-audio` and
  * `--disable-audio-output`, and the injected probe additionally pins a zero gain node between
@@ -47,11 +48,11 @@
  */
 
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, writeFile, rm, mkdir, readdir, symlink } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, rm, mkdir, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -1257,34 +1258,15 @@ function parseOnly () {
 }
 
 /**
- * A Pocket install we can actually play. Prefer an explicit ORCA_TTS_MODEL_DIR when it looks
- * populated; otherwise the buzz cache the brief names. Missing files → no second arm.
+ * THE predicate. Same function the Lab and the plugin call. `modelDir()` already honours
+ * `ORCA_TTS_MODEL_DIR`. Looking in `~/.buzz` was a third opinion (R17-07) and is gone.
  */
-function findPocketDir () {
-  const candidates = [
-    process.env.ORCA_TTS_MODEL_DIR,
-    join(homedir(), '.buzz', 'models', 'pocket-tts')
-  ].filter((d) => typeof d === 'string' && d.length > 0)
-  for (const dir of candidates) {
-    if (existsSync(join(dir, 'tokenizer.model')) && existsSync(join(dir, 'eve.wav'))) return dir
-  }
-  return null
-}
-
-/**
- * The Voice Lab's modelStatus requires `.orca-tts-model-manifest` with version 2. The buzz
- * cache the brief names has the weights and the twelve clips, but buzz's own marker
- * (`.buzz-model-manifest`). Writing into the author's cache is forbidden. Stage a temp
- * directory of symlinks plus the one file the lab checks, so Arm B actually sees Pocket ready.
- */
-async function stagePocketDir (source) {
-  const dir = await mkdtemp(join(tmpdir(), 'ui-probe-pocket-model-'))
-  for (const name of await readdir(source)) {
-    if (name === '.orca-tts-model-manifest') continue
-    await symlink(join(source, name), join(dir, name))
-  }
-  await writeFile(join(dir, '.orca-tts-model-manifest'), '2\n')
-  return dir
+async function productModelStatus () {
+  const { modelStatus, modelDir, modelStatusDetail } = await import(
+    pathToFileURL(join(ROOT, 'packages/providers/src/pocket-synth/models.ts')).href
+  )
+  const status = await modelStatus(modelDir())
+  return { status, detail: modelStatusDetail(status) }
 }
 
 function printResults (results, failures) {
@@ -1307,9 +1289,8 @@ async function main () {
   let hermeticInconclusive = 0
 
   const emptyDir = await mkdtemp(join(tmpdir(), 'ui-probe-empty-model-'))
-  const pocketSource = findPocketDir()
-  const stagedPocket = pocketSource ? await stagePocketDir(pocketSource) : null
-  const pocketDir = stagedPocket
+  const product = await productModelStatus()
+  const pocketDir = product.status.kind === 'ready' ? product.status.dir : null
 
   console.log('Voice Lab UI probe — headless, muted, 127.0.0.1 only.')
   console.log('Arm A — hermetic empty model (Pocket ABSENT by construction).\n')
@@ -1339,7 +1320,7 @@ async function main () {
 
   const pocketOnly = (only ?? ['U6', 'U9']).filter((id) => id === 'U6' || id === 'U9')
   if (!prove && pocketDir && pocketOnly.length > 0) {
-    console.log(`\nArm B — Pocket model present at ${pocketDir}.`)
+    console.log(`\nArm B — product cache ready at ${pocketDir} (modelStatus.kind=ready).`)
     console.log('U6 and U9 must now require that Pocket is what spoke.\n')
     const pocket = await runAgainst(join(ROOT, 'voice-lab'), pocketOnly, {
       pocketInstalled: true, modelDir: pocketDir
@@ -1350,11 +1331,11 @@ async function main () {
   } else if (prove) {
     console.log('\nArm B skipped during --prove (breakages are hermetic).')
   } else if (!pocketDir) {
-    console.log('\nArm B skipped — no Pocket model at ORCA_TTS_MODEL_DIR or ~/.buzz/models/pocket-tts.')
+    console.log(`\nArm B skipped — product cache is ${product.status.kind}: ${product.detail}`)
+    console.log('         Reuse an existing download with: node scripts/stage-pocket-model.mjs')
   }
 
   await removeWhenReleased(emptyDir)
-  if (stagedPocket) await removeWhenReleased(stagedPocket)
 
   if (failures > 0) {
     console.log(`\n${failures} check(s) did not.`)

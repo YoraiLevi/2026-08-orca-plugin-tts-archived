@@ -22,10 +22,10 @@
  */
 
 import { createHash } from 'node:crypto'
-import { readFile, writeFile, readdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { readFile, writeFile, readdir, mkdir, rm, symlink } from 'node:fs/promises'
+import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve as resolvePath, sep } from 'node:path'
 // `.ts`, not `.js`, and the extension is load-bearing rather than a style choice. The Voice Lab
 // imports this module under PLAIN NODE, whose resolver does not rewrite `.js` to `.ts` — vitest
 // does, which is exactly how a suite goes green over a tree that cannot boot (P37, SC-14). The
@@ -81,6 +81,8 @@ export const MODEL_ARTIFACTS: readonly ModelArtifact[] = [
 export const MODEL_TOTAL_BYTES = MODEL_ARTIFACTS.reduce((n, a) => n + a.bytes, 0)
 
 export const MANIFEST_FILE = '.orca-tts-model-manifest'
+/** Buzz's own marker. Presence means this directory belongs to another application (R061). */
+export const BUZZ_MANIFEST_FILE = '.buzz-model-manifest'
 export const LICENSE_FILE = 'MODEL_LICENSE.txt'
 /**
  * The unmodified upstream CC-BY-4.0 text. Distinct from `LICENSE_FILE`, which is our local
@@ -116,6 +118,10 @@ distribution. Provided AS IS, without warranty of any kind.
 /**
  * The cache directory. `ORCA_TTS_MODEL_DIR` overrides it, which is what tests and the Voice Lab
  * use so that no test can ever write into the author's real model cache.
+ *
+ * This is the ONE lookup path (R17-07). It does not fall back to `~/.buzz`. To reuse weights
+ * that already live there, run `node scripts/stage-pocket-model.mjs` — that command reads buzz
+ * and writes OUR marker into a directory we own.
  */
 export function modelDir(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.ORCA_TTS_MODEL_DIR
@@ -172,11 +178,45 @@ export function requiredFiles(): string[] {
 export type ModelStatus =
   | { readonly kind: 'ready', readonly dir: string }
   | { readonly kind: 'absent', readonly dir: string, readonly missing: readonly string[] }
+  | {
+      readonly kind: 'incomplete'
+      readonly dir: string
+      readonly missing: readonly string[]
+      readonly present: number
+      readonly required: number
+      readonly detail: string
+    }
   | { readonly kind: 'stale', readonly dir: string, readonly found: string, readonly want: string }
+
+function incompleteDetail(missing: readonly string[], present: number, required: number): string {
+  if (missing.length === 1 && missing[0] === MANIFEST_FILE) {
+    return `this directory has every required file except ${MANIFEST_FILE}`
+  }
+  return `this directory has ${present} of ${required} required files; missing ${missing.join(', ')}`
+}
+
+/**
+ * The sentence a person can act on. R17-07: `kind` alone is not that sentence — `absent` used
+ * to cover both "nothing is here" and "everything is here except our marker".
+ */
+export function modelStatusDetail(status: ModelStatus): string {
+  if (status.kind === 'ready') return `Pocket TTS is ready in ${status.dir}`
+  if (status.kind === 'absent') {
+    return `Pocket TTS is not installed in ${status.dir}`
+  }
+  if (status.kind === 'incomplete') return `${status.detail} (${status.dir})`
+  return `Pocket TTS model is stale in ${status.dir}; found manifest ${status.found}, expected ${status.want}`
+}
 
 /**
  * Is the cache usable? Reports WHICH files are missing rather than a bare boolean, because
  * "the model is not ready" is not an actionable sentence and "mimi_encoder.onnx is missing" is.
+ *
+ * R17-07: a directory that exists and holds some of the required files is `incomplete`, not
+ * `absent`. `absent` is reserved for "nothing is here" (the directory does not exist, or none
+ * of the required files are in it). The author's `~/.buzz/models/pocket-tts` is the motivating
+ * case: every payload file present, only `.orca-tts-model-manifest` missing — that is one
+ * marker away from ready, and calling it `absent` made the Lab offer a 173.8 MB download.
  *
  * R15-02: a crash between `rename(live, backup)` and `rename(staging, live)` leaves the known-good
  * copy under a sibling name. Recover that before answering, otherwise `ready` is a property of
@@ -184,14 +224,118 @@ export type ModelStatus =
  */
 export async function modelStatus(dir = modelDir()): Promise<ModelStatus> {
   await recoverLiveFromBackup(dir)
-  if (!existsSync(dir)) return { kind: 'absent', dir, missing: requiredFiles() }
-  const present = new Set(await readdir(dir))
-  const missing = requiredFiles().filter((f) => !present.has(f))
-  if (missing.length > 0) return { kind: 'absent', dir, missing }
+  const required = requiredFiles()
+  if (!existsSync(dir)) return { kind: 'absent', dir, missing: required }
+  const names = new Set(await readdir(dir))
+  const missing = required.filter((f) => !names.has(f))
+  const present = required.length - missing.length
+  if (missing.length > 0) {
+    if (present === 0) return { kind: 'absent', dir, missing }
+    return {
+      kind: 'incomplete',
+      dir,
+      missing,
+      present,
+      required: required.length,
+      detail: incompleteDetail(missing, present, required.length),
+    }
+  }
   const found = (await readFile(join(dir, MANIFEST_FILE), 'utf8')).trim()
   const want = String(MANIFEST_VERSION)
   if (found !== want) return { kind: 'stale', dir, found, want }
   return { kind: 'ready', dir }
+}
+
+/**
+ * True when `dir` is another application's cache. We may READ it (the stage command does);
+ * we must never WRITE it (R061, PV-NFR-004). Two independent signals, either is enough:
+ * the path is under `~/.buzz`, or the directory already holds `.buzz-model-manifest`.
+ */
+export function isForeignModelCache(dir: string): boolean {
+  const target = resolvePath(dir)
+  const buzzRoot = resolvePath(join(homedir(), '.buzz'))
+  if (target === buzzRoot || target.startsWith(buzzRoot + sep)) return true
+  try {
+    if (existsSync(buzzRoot)) {
+      const realBuzz = realpathSync(buzzRoot)
+      const realTarget = existsSync(dir) ? realpathSync(dir) : target
+      if (realTarget === realBuzz || realTarget.startsWith(realBuzz + sep)) return true
+    }
+  } catch {
+    // realpath of a dangling path is not evidence either way; the prefix check already ran.
+  }
+  if (existsSync(join(dir, BUZZ_MANIFEST_FILE))) return true
+  return false
+}
+
+export class ForeignModelCacheError extends Error {
+  readonly dir: string
+
+  constructor(dir: string) {
+    super(
+      `refusing to write into ${dir} — that directory belongs to another application (buzz). ` +
+      'Stage a copy into a directory we own: node scripts/stage-pocket-model.mjs',
+    )
+    this.name = 'ForeignModelCacheError'
+    this.dir = dir
+  }
+}
+
+export function assertModelDirWritable(dir: string): void {
+  if (isForeignModelCache(dir)) throw new ForeignModelCacheError(dir)
+}
+
+/**
+ * Copy a Pocket TTS cache we do not own (typically `~/.buzz/models/pocket-tts`) into a
+ * directory we do, as symlinks plus OUR marker. Never writes into `source`. Never writes
+ * into a foreign dest.
+ *
+ * This is the author's reuse path: he already has the weights; he should not re-download
+ * 173.8 MB. The product still does not look in `~/.buzz` on its own (R17-07 option A).
+ */
+export async function stageModelFrom(
+  source: string,
+  dest: string,
+): Promise<{ readonly source: string, readonly dest: string, readonly files: number }> {
+  assertModelDirWritable(dest)
+  if (!existsSync(source)) {
+    throw new Error(`no Pocket TTS files at ${source}`)
+  }
+  const sourceStatus = await modelStatus(source)
+  const payloadMissing = sourceStatus.kind === 'ready' || sourceStatus.kind === 'stale'
+    ? []
+    : sourceStatus.missing.filter((f) => f !== MANIFEST_FILE)
+  if (sourceStatus.kind === 'absent') {
+    throw new Error(`nothing to stage from ${source}: Pocket TTS is not installed there`)
+  }
+  if (payloadMissing.length > 0) {
+    throw new Error(`cannot stage from ${source}: still missing ${payloadMissing.join(', ')}`)
+  }
+
+  const srcResolved = resolvePath(source)
+  const destResolved = resolvePath(dest)
+  await mkdir(destResolved, { recursive: true })
+
+  const names = await readdir(source)
+  let linked = 0
+  for (const name of names) {
+    if (name === MANIFEST_FILE || name === BUZZ_MANIFEST_FILE) continue
+    const from = join(srcResolved, name)
+    const to = join(destResolved, name)
+    if (from === to) continue
+    if (existsSync(to)) await rm(to)
+    await symlink(from, to)
+    linked++
+  }
+  await writeFile(join(destResolved, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+
+  const after = await modelStatus(destResolved)
+  if (after.kind !== 'ready') {
+    throw new Error(
+      `staged ${destResolved} from ${srcResolved} but modelStatus is ${modelStatusDetail(after)}`,
+    )
+  }
+  return { source: srcResolved, dest: destResolved, files: linked }
 }
 
 /* --------------------------------------------------------------- crash-safe swap + single writer */
@@ -288,6 +432,8 @@ export interface DownloadOptions {
  */
 export async function downloadModel(options: DownloadOptions = {}): Promise<string> {
   const dir = options.dir ?? modelDir()
+  // R17-07 / R061: ORCA_TTS_MODEL_DIR is an opt-in path, not a licence to write into buzz.
+  assertModelDirWritable(dir)
   const doFetch = options.fetchImpl ?? fetch
   // Weights AND voices. Fetching one without the other produces a directory that reports ready
   // and cannot speak (R14-02).

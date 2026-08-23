@@ -351,7 +351,7 @@ async function main() {
   const prove = process.argv.includes('--prove')
   const voiceFile = arg('--voice', 'eve.wav')
 
-  const { modelDir: cacheDir, modelStatus, requiredFiles } =
+  const { modelDir: cacheDir, modelStatus, requiredFiles, modelStatusDetail } =
     await import(pathToFileURL(join(ROOT, 'packages/providers/src/pocket-synth/models.ts')).href)
   const modelDir = process.env.POCKET_MODEL_DIR ?? process.env.ORCA_TTS_MODEL_DIR ?? cacheDir()
 
@@ -378,10 +378,7 @@ async function main() {
     console.log('          whatever is on disk; nothing here verified their provenance.\n')
   }
   if (status.kind !== 'ready') {
-    const detail = status.kind === 'absent'
-      ? `missing ${status.missing.slice(0, 3).join(', ')}${status.missing.length > 3 ? ` and ${status.missing.length - 3} more` : ''}`
-      : `on-disk manifest ${status.found}, want ${status.want}`
-    console.log(`[ INCONC ] the model is not ready: ${detail}`)
+    console.log(`[ INCONC ] the model is not ready: ${modelStatusDetail(status)}`)
     console.log('           This is not a PASS and not a FAIL. Fetch the model, then re-run.')
     process.exit(2)
   }

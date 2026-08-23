@@ -13,8 +13,8 @@ import {
   mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync,
   readFileSync as read,
 } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm, lstat } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -22,7 +22,8 @@ import {
   MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, MODEL_REVISION, MANIFEST_FILE, MANIFEST_VERSION,
   LICENSE_FILE, UPSTREAM_LICENSE, UPSTREAM_LICENSE_FILE, VOICE_ARTIFACTS, VOICES_TOTAL_BYTES,
   INSTALL_TOTAL_BYTES,
-  downloadModel, modelDir, modelStatus, requiredFiles, sha256, urlFor,
+  downloadModel, modelDir, modelStatus, modelStatusDetail, requiredFiles, sha256, urlFor,
+  stageModelFrom, isForeignModelCache, ForeignModelCacheError, BUZZ_MANIFEST_FILE,
   type ModelArtifact,
 } from './models.js'
 import {
@@ -97,14 +98,28 @@ describe('modelStatus', () => {
     if (s.kind === 'absent') expect(s.missing).toContain('mimi_encoder.onnx')
   })
 
-  it('reports a directory with every file but the manifest as ABSENT', async () => {
-    // This is precisely a download that died before its last write, and treating it as ready
-    // would load a half-written graph.
+  it('R17-07: a directory with every file but the marker is INCOMPLETE, not absent', async () => {
+    // The author's ~/.buzz/models/pocket-tts is this shape: every required payload file, no
+    // `.orca-tts-model-manifest`. Collapsing that to kind=absent made the Lab say
+    // "download 173.8 MB" for a directory one marker away from ready.
     const dir = scratch()
     for (const f of requiredFiles()) if (f !== MANIFEST_FILE) writeFileSync(join(dir, f), 'x')
     const s = await modelStatus(dir)
+    expect(s.kind, 'a one-file-short cache must not read as the same kind as an empty directory').toBe('incomplete')
+    if (s.kind === 'incomplete') {
+      expect(s.missing).toEqual([MANIFEST_FILE])
+      expect(s.detail).toMatch(/every required file except/i)
+      expect(s.detail).toContain(MANIFEST_FILE)
+      expect(s.present).toBe(requiredFiles().length - 1)
+      expect(s.required).toBe(requiredFiles().length)
+    }
+  })
+
+  it('R17-07 CONTROL: a genuinely empty directory is still absent', async () => {
+    const dir = scratch()
+    const s = await modelStatus(dir)
     expect(s.kind).toBe('absent')
-    if (s.kind === 'absent') expect(s.missing).toEqual([MANIFEST_FILE])
+    if (s.kind === 'absent') expect(s.missing).toEqual(requiredFiles())
   })
 
   it('reports a version mismatch as stale, with both versions', async () => {
@@ -408,6 +423,96 @@ describe('R14-06 — the swap is reversible at every step', () => {
 })
 
 
+/* --------------------------------------------- R17-07: one predicate, buzz is read-only */
+
+describe('R17-07 — incomplete is not absent; ~/.buzz is not writable', () => {
+  it('isForeignModelCache is true for ~/.buzz and for a dir holding buzz\'s marker', () => {
+    expect(isForeignModelCache(join(homedir(), '.buzz', 'models', 'pocket-tts'))).toBe(true)
+    expect(isForeignModelCache(join(homedir(), '.buzz'))).toBe(true)
+    const ours = scratch()
+    expect(isForeignModelCache(ours)).toBe(false)
+    writeFileSync(join(ours, BUZZ_MANIFEST_FILE), 'buzz')
+    expect(isForeignModelCache(ours)).toBe(true)
+  })
+
+  it('REFUSES to download into ~/.buzz, by name, before any file is created', async () => {
+    const dir = join(homedir(), '.buzz', `orca-tts-r17-07-must-not-exist-${Date.now()}`)
+    expect(existsSync(dir)).toBe(false)
+    let fetchCalled = false
+    const fetchImpl = (async () => {
+      fetchCalled = true
+      return new Response('nope')
+    }) as unknown as typeof fetch
+    await expect(downloadModel({ dir, artifacts: TINY, fetchImpl }))
+      .rejects.toBeInstanceOf(ForeignModelCacheError)
+    await expect(downloadModel({ dir, artifacts: TINY, fetchImpl }))
+      .rejects.toThrow(/refusing to write/)
+    expect(fetchCalled, 'must not fetch before the write refusal').toBe(false)
+    expect(existsSync(dir), 'must not create anything under ~/.buzz').toBe(false)
+  })
+
+  it('REFUSES to download into a directory that already holds .buzz-model-manifest', async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, BUZZ_MANIFEST_FILE), 'buzz')
+    const before = readdirSync(dir)
+    await expect(downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() }))
+      .rejects.toBeInstanceOf(ForeignModelCacheError)
+    expect(readdirSync(dir)).toEqual(before)
+  })
+
+  it('stages a weights-complete source into a dest we own, as symlinks plus OUR marker', async () => {
+    const source = scratch()
+    const dest = scratch()
+    for (const f of requiredFiles()) {
+      if (f === MANIFEST_FILE) continue
+      writeFileSync(join(source, f), `payload-${f}`)
+    }
+    writeFileSync(join(source, BUZZ_MANIFEST_FILE), 'buzz')
+    expect((await modelStatus(source)).kind).toBe('incomplete')
+
+    const result = await stageModelFrom(source, dest)
+    expect(result.dest).toBe(dest)
+    const s = await modelStatus(dest)
+    expect(s.kind).toBe('ready')
+    expect(existsSync(join(source, MANIFEST_FILE)), 'must not write the marker into the source').toBe(false)
+    const destMarker = (await lstat(join(dest, MANIFEST_FILE))).isSymbolicLink()
+    expect(destMarker, 'the marker is a real file we wrote, not a symlink into buzz').toBe(false)
+    expect((await lstat(join(dest, 'tokenizer.model'))).isSymbolicLink()).toBe(true)
+    expect((await lstat(join(dest, 'eve.wav'))).isSymbolicLink()).toBe(true)
+  })
+
+  it('REFUSES to stage INTO ~/.buzz', async () => {
+    const source = scratch()
+    for (const f of requiredFiles()) {
+      if (f === MANIFEST_FILE) continue
+      writeFileSync(join(source, f), 'x')
+    }
+    const dest = join(homedir(), '.buzz', `orca-tts-r17-07-must-not-exist-${Date.now()}`)
+    expect(existsSync(dest)).toBe(false)
+    await expect(stageModelFrom(source, dest)).rejects.toBeInstanceOf(ForeignModelCacheError)
+    expect(existsSync(dest), 'must not create anything under ~/.buzz').toBe(false)
+  })
+
+  it('CONTROL: an empty dest of a missing source stays empty and names the miss', async () => {
+    const dest = scratch()
+    await expect(stageModelFrom(join(dest, 'does-not-exist'), dest))
+      .rejects.toThrow(/no Pocket TTS files/)
+    expect(readdirSync(dest)).toEqual([])
+  })
+
+  it('modelStatusDetail names the marker for the one-file-short case', async () => {
+    const dir = scratch()
+    for (const f of requiredFiles()) if (f !== MANIFEST_FILE) writeFileSync(join(dir, f), 'x')
+    const s = await modelStatus(dir)
+    expect(modelStatusDetail(s)).toContain(MANIFEST_FILE)
+    expect(modelStatusDetail(s)).toMatch(/every required file except/i)
+    const empty = await modelStatus(scratch())
+    expect(empty.kind).toBe('absent')
+    expect(modelStatusDetail(empty)).toMatch(/not installed/i)
+  })
+})
+
+
 /* --------------------------------------------- R14-02: ready must mean the voices actually work */
 
 describe('R14-02 — a reference clip is an artifact, not an assumption', () => {
@@ -457,7 +562,7 @@ describe('R14-02 — a reference clip is an artifact, not an assumption', () => 
     expect(urlFor('bundle.json')).toContain(MODEL_REVISION)
   })
 
-  it('reports a weights-only directory as ABSENT and names a missing voice', async () => {
+  it('reports a weights-only directory as INCOMPLETE and names a missing voice', async () => {
     // This is exactly a version-1 cache: every model artifact present, no clips. It used to read
     // as ready and could not speak.
     const dir = scratch()
@@ -465,8 +570,11 @@ describe('R14-02 — a reference clip is an artifact, not an assumption', () => 
     writeFileSync(join(dir, LICENSE_FILE), 'x')
     writeFileSync(join(dir, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
     const s = await modelStatus(dir)
-    expect(s.kind).toBe('absent')
-    if (s.kind === 'absent') expect(s.missing).toContain('eve.wav')
+    expect(s.kind).toBe('incomplete')
+    if (s.kind === 'incomplete') {
+      expect(s.missing).toContain('eve.wav')
+      expect(s.detail).toMatch(/missing/i)
+    }
   })
 
   it('treats a version-1 cache as stale rather than adopting it', async () => {
@@ -529,8 +637,8 @@ describe('R15-09 / PV-075 — a cache with no upstream LICENSE is not ready', ()
 
     const s = await modelStatus(dir)
     expect(s.kind, 'modelStatus called an attribution-incomplete cache ready').not.toBe('ready')
-    expect(s.kind).toBe('absent')
-    if (s.kind === 'absent') expect(s.missing).toContain('LICENSE')
+    expect(s.kind).toBe('incomplete')
+    if (s.kind === 'incomplete') expect(s.missing).toContain('LICENSE')
   })
 })
 

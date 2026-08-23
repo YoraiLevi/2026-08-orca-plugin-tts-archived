@@ -162,6 +162,28 @@ describe('PV-022 capabilities and named availability causes', () => {
     await expect(ready.generate('hello', { voice: 'pocket:not-a-voice' })[Symbol.asyncIterator]().next())
       .rejects.toThrow(/pocket:not-a-voice/)
   })
+
+  it('R17-07: omitted dir uses ORCA_TTS_MODEL_DIR, the same env the Lab honours', async () => {
+    const prev = process.env.ORCA_TTS_MODEL_DIR
+    const dir = '/tmp/orca-tts-r17-07-plugin-env'
+    process.env.ORCA_TTS_MODEL_DIR = dir
+    const seen: string[] = []
+    try {
+      const p = new PocketSynthProvider({
+        loadOrt: async () => ({}),
+        loadEngine: async () => ({ PocketTts: { load: async () => new PocketEngineStub() } }),
+        modelStatus: async (d) => {
+          seen.push(d)
+          return { kind: 'absent', dir: d, missing: ['mimi_encoder.onnx'] }
+        },
+      })
+      await expect(p.prepare()).rejects.toBeInstanceOf(PocketModelUnavailableError)
+      expect(seen, 'the plugin did not honour ORCA_TTS_MODEL_DIR').toEqual([dir])
+    } finally {
+      if (prev === undefined) delete process.env.ORCA_TTS_MODEL_DIR
+      else process.env.ORCA_TTS_MODEL_DIR = prev
+    }
+  })
 })
 
 describe('PV-023 emits audio and never owns playback', () => {

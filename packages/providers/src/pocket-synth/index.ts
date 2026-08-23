@@ -9,6 +9,7 @@ import {
   INSTALL_TOTAL_BYTES,
   modelDir,
   modelStatus as readModelStatus,
+  modelStatusDetail,
   type ModelStatus,
 } from './models.ts'
 import {
@@ -108,7 +109,7 @@ export class PocketModelUnavailableError extends Error {
   constructor(status: Exclude<ModelStatus, { readonly kind: 'ready' }>) {
     const detail = status.kind === 'absent'
       ? `missing ${status.missing.join(', ')}`
-      : `model manifest is stale (found ${status.found}, need ${status.want})`
+      : modelStatusDetail(status)
     super(`Pocket TTS model is not ready in ${status.dir}: ${detail}`)
     this.name = 'PocketModelUnavailableError'
     this.status = status

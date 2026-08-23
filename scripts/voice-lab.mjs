@@ -56,7 +56,7 @@ const { OsSynthProvider, LINUX_WAV_BACKENDS, LINUX_INSTALL_HINT } =
   await import(pathToFileURL(PROVIDER_SRC).href)
 const pocketModels = await import(pathToFileURL(POCKET_MODELS_SRC).href)
 const {
-  modelStatus, modelDir: defaultModelDir, downloadModel,
+  modelStatus, modelDir: defaultModelDir, downloadModel, modelStatusDetail,
   MODEL_TOTAL_BYTES, MODEL_ARTIFACTS, MANIFEST_VERSION, MANIFEST_FILE, sha256
 } = pocketModels
 const { runtimeStatus, downloadRuntime } = await import(pathToFileURL(POCKET_RUNTIME_SRC).href)
@@ -809,10 +809,7 @@ async function speakStreaming (res, route, text, { allowElsewhere, signal }) {
 
 function pocketUnavailableReason (status) {
   if (status.kind === 'ready') return null
-  if (status.kind === 'absent') {
-    return `Pocket TTS model is not downloaded; missing files: ${status.missing.join(', ')}`
-  }
-  return `Pocket TTS model is stale; found manifest ${status.found}, expected ${status.want}`
+  return modelStatusDetail(status)
 }
 
 function voiceEntries (osVoices, pocketStatus) {
@@ -1128,11 +1125,11 @@ async function streamModelDownload (
     // actually ready, so an injected or future downloader cannot earn a false terminal success.
     const status = await modelStatusImpl(dir)
     if (status.kind !== 'ready') {
-      const file = status.kind === 'absent' ? (status.missing[0] ?? 'model') : 'model'
+      const file = (status.kind === 'absent' || status.kind === 'incomplete')
+        ? (status.missing[0] ?? 'model')
+        : 'model'
       throw Object.assign(new Error(
-        status.kind === 'absent'
-          ? `download returned but ${file} is still missing`
-          : `download returned but manifest ${status.found} is stale; expected ${status.want}`
+        `download returned but ${modelStatusDetail(status)}`
       ), { file })
     }
 
@@ -1237,7 +1234,15 @@ export function createLabServer ({
         return json(res, 200, {
           voices: voiceEntries(voiceCache, pocketStatus),
           platform: process.platform,
-          provider: prov.id ?? 'os-synth'
+          provider: prov.id ?? 'os-synth',
+          model: {
+            kind: pocketStatus.kind,
+            dir: pocketStatus.dir,
+            detail: modelStatusDetail(pocketStatus),
+            ...(pocketStatus.kind === 'absent' || pocketStatus.kind === 'incomplete'
+              ? { missing: pocketStatus.missing }
+              : {})
+          }
         })
       }
 

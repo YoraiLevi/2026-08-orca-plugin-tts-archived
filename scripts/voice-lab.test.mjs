@@ -1125,7 +1125,8 @@ describe('PV-030 — /voices names both backends and their availability', () => 
       expect(eve).toMatchObject({
         key: 'pocket:eve', displayName: 'Eve', backend: 'pocket', available: false
       })
-      expect(eve.reason).toMatch(/mimi_encoder\.onnx/)
+      expect(eve.reason).toMatch(/not installed/)
+      expect(first.model.kind).toBe('absent')
       expect(first.voices.filter((voice) => voice.backend === 'pocket')).toHaveLength(12)
 
       // This is the exact mapper in the existing page's start(). If the compatibility field is
@@ -1170,6 +1171,48 @@ describe('PV-031 — /model/status names what is missing', () => {
       })
     } finally {
       await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('R17-07: a one-file-short cache is incomplete and names the marker', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-incomplete-'))
+    await readyModelFixture(dir)
+    await rm(join(dir, '.orca-tts-model-manifest'))
+    const { base, close } = await listen(createLabServer({ modelDirectory: dir }))
+    try {
+      const status = await (await fetch(`${base}/model/status`)).json()
+      expect(status.kind, 'Lab collapsed a one-file-short cache to absent').toBe('incomplete')
+      expect(status.missing).toEqual(['.orca-tts-model-manifest'])
+      expect(status.detail).toMatch(/every required file except/i)
+      const voices = await (await fetch(`${base}/voices`)).json()
+      expect(voices.model.kind).toBe('incomplete')
+      const eve = voices.voices.find((voice) => voice.key === 'pocket:eve')
+      expect(eve.available).toBe(false)
+      expect(eve.reason).toContain('.orca-tts-model-manifest')
+      expect(eve.reason, 'must not tell the listener to re-download 173.8 MB').not.toMatch(/173\.8/)
+    } finally {
+      await close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('R17-07: createLabServer without modelDirectory honours ORCA_TTS_MODEL_DIR', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vl-pocket-env-'))
+    const prev = process.env.ORCA_TTS_MODEL_DIR
+    process.env.ORCA_TTS_MODEL_DIR = dir
+    try {
+      const { base, close } = await listen(createLabServer({}))
+      try {
+        const body = await (await fetch(`${base}/model/status`)).json()
+        expect(body.dir).toBe(dir)
+        expect(body.kind).toBe('absent')
+      } finally {
+        await close()
+      }
+    } finally {
+      if (prev === undefined) delete process.env.ORCA_TTS_MODEL_DIR
+      else process.env.ORCA_TTS_MODEL_DIR = prev
       await rm(dir, { recursive: true, force: true })
     }
   })

@@ -11,9 +11,11 @@
  *
  * THE ASSERTION IS AN EFFECT, NOT A PRESENCE.
  *
- *   PRESENT arm — staged Pocket model (symlinks + `.orca-tts-model-manifest` = 2, never writing
- *                 the author's cache). The chunk's sampleRate must be 24000 (Pocket), not 22050
- *                 (macOS `say`), and the PCM must be signal, not silence.
+ *   PRESENT arm — `modelStatus(modelDir())` is `ready` (the same predicate the plugin uses).
+ *                 The chunk's sampleRate must be 24000 (Pocket), not 22050 (macOS `say`),
+ *                 and the PCM must be signal, not silence. This script does not look in
+ *                 `~/.buzz` and does not stage a marker, then describe that as the product
+ *                 (R17-07). Reuse weights with `node scripts/stage-pocket-model.mjs`.
  *   ABSENT arm  — the SAME artifact, model dir empty. Must fall back to the OS floor AND NAME
  *                 the substitution. If both arms produce the same answer, this probe measured
  *                 nothing about Pocket (R16-05's costume).
@@ -26,7 +28,7 @@
  *
  * SILENT — P31. The author is at this machine. A capturing sink records buffers; nothing is
  * handed to a player. macOS `say` is invoked with `-o <file>` (never the device). The author's
- * `~/.buzz/models/pocket-tts` is READ-ONLY (R061): we stage symlinks.
+ * `~/.buzz/models/pocket-tts` is READ-ONLY (R061) and is not a lookup path.
  *
  * Usage:
  *   pnpm probe:artifact                 # both arms against dist/plugin/main.mjs
@@ -36,9 +38,9 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import {
-  mkdtemp, mkdir, readdir, symlink, writeFile, rm, readFile,
+  mkdtemp, mkdir, rm, readFile, writeFile,
 } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -59,32 +61,14 @@ const arg = (name, fallback = null) => {
 const flag = (name) => process.argv.includes(name)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-/* ------------------------------------------------------------------------- model staging (R061) */
+/* ------------------------------------------------------------------------- the one predicate (R17-07) */
 
-function findPocketDir () {
-  const candidates = [
-    process.env.ORCA_TTS_MODEL_DIR,
-    join(homedir(), '.buzz', 'models', 'pocket-tts'),
-  ].filter((d) => typeof d === 'string' && d.length > 0)
-  for (const dir of candidates) {
-    if (existsSync(join(dir, 'tokenizer.model')) && existsSync(join(dir, 'eve.wav'))) return dir
-  }
-  return null
-}
-
-/**
- * Identical contract to `scripts/ui-probe.mjs` `stagePocketDir()`: symlink every file from the
- * source cache into a temp dir, then write `.orca-tts-model-manifest` containing `2`. Never write
- * into the author's cache. Skip an existing manifest in the source so we do not symlink-and-clobber.
- */
-async function stagePocketDir (source) {
-  const dir = await mkdtemp(join(tmpdir(), 'artifact-e2e-pocket-model-'))
-  for (const name of await readdir(source)) {
-    if (name === '.orca-tts-model-manifest') continue
-    await symlink(join(source, name), join(dir, name))
-  }
-  await writeFile(join(dir, '.orca-tts-model-manifest'), '2\n')
-  return dir
+async function productModelStatus () {
+  const { modelStatus, modelDir, modelStatusDetail } = await import(
+    pathToFileURL(join(ROOT, 'packages/providers/src/pocket-synth/models.ts')).href
+  )
+  const status = await modelStatus(modelDir())
+  return { status, detail: modelStatusDetail(status) }
 }
 
 /* ------------------------------------------------------------------------- WAV → RMS / peak */
@@ -546,14 +530,14 @@ async function main () {
     const emptyDir = await mkdtemp(join(tmpdir(), 'artifact-e2e-empty-'))
     staged.push(emptyDir)
 
-    const pocketSource = findPocketDir()
+    const product = await productModelStatus()
     let presentDir = null
-    if (pocketSource === null) {
-      console.log('Pocket model not found (ORCA_TTS_MODEL_DIR / ~/.buzz/models/pocket-tts). PRESENT arm INCONCLUSIVE.')
+    if (product.status.kind !== 'ready') {
+      console.log(`Pocket product cache is ${product.status.kind}: ${product.detail}`)
+      console.log('PRESENT arm INCONCLUSIVE. Reuse an existing download with: node scripts/stage-pocket-model.mjs')
     } else {
-      presentDir = await stagePocketDir(pocketSource)
-      staged.push(presentDir)
-      console.log(`staged Pocket model from ${pocketSource} -> ${presentDir}`)
+      presentDir = product.status.dir
+      console.log(`product cache ready at ${presentDir} (modelStatus.kind=ready)`)
     }
 
     const absentOut = join(runDir, 'absent.json')
