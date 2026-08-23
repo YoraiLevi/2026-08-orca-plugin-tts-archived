@@ -15,6 +15,7 @@ import {
   POCKET_BACKEND,
   POCKET_DEFAULT_VOICE,
   POCKET_VOICES,
+  formatVoiceKey,
   parseVoiceKey,
   type PocketVoice,
 } from './voices.ts'
@@ -409,10 +410,27 @@ export class PocketSynthProvider implements TtsProvider {
     return outcome.samples
   }
 
+  /**
+   * R16-08: accept BOTH spellings, because the seam produces both and neither half was wrong.
+   *
+   * `listVoices()` advertises qualified keys (`pocket:anna`) so the picker cannot confuse a Pocket
+   * voice with an OS one. But `scripts/voice-lab.mjs` strips the qualifier before dispatch, on
+   * purpose -- "a qualified key is never handed to either provider" -- so what actually arrives
+   * here is the bare `anna`. This used to run it through `parseVoiceKey`, whose documented rule is
+   * that an unqualified name means `os:`, and throw. Every advertised voice 503'd.
+   *
+   * A bare name is therefore provider-local and means THIS backend. A qualified one must name this
+   * backend or be refused. What is never allowed is falling back to a default: a listener who
+   * asked for Anna and silently got Mary has been lied to about who is speaking (principle VIII),
+   * so an unknown name is still an error in both spellings.
+   */
   #resolveVoice(key: string): PocketVoice {
-    const parsed = parseVoiceKey(key)
-    if (parsed.backend !== POCKET_BACKEND) throw new PocketVoiceUnavailableError(key)
-    const voice = POCKET_VOICES.find((candidate) => candidate.key === key)
+    const qualified = key.includes(':')
+    if (qualified && parseVoiceKey(key).backend !== POCKET_BACKEND) {
+      throw new PocketVoiceUnavailableError(key)
+    }
+    const wanted = qualified ? key : formatVoiceKey(POCKET_BACKEND, key)
+    const voice = POCKET_VOICES.find((candidate) => candidate.key === wanted)
     if (voice === undefined) throw new PocketVoiceUnavailableError(key)
     return voice
   }

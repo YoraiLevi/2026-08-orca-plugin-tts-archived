@@ -3,6 +3,7 @@ import type { AudioChunk, ProviderCapabilities, TtsProvider } from '@orca-tts/co
 import { CANCEL_BUDGET_MS } from '../contract.ts'
 import { ProviderRegistry } from '../registry.ts'
 import { createProviderRegistry } from '../index.ts'
+import { parseVoiceKey } from './voices.ts'
 import {
   INSTALL_TOTAL_BYTES, MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, VOICE_ARTIFACTS,
   type ModelStatus,
@@ -314,5 +315,74 @@ describe('PV-025 Pocket is registered beside the OS provider without changing th
     expect((await registry.resolve())?.provider).toBe(os)
     expect(os.prepare).toHaveBeenCalledTimes(1)
     expect(pocket.isWarm, 'default resolution must not even prepare Pocket').toBe(false)
+  })
+})
+
+/**
+ * R16-08 — the picker offers twelve voices and every one of them 503s.
+ *
+ * Measured against the author's real model, staged read-only:
+ *
+ *   GET  /voices              -> {"key":"pocket:anna","available":true,"reason":null}  (x12)
+ *   POST /speak pocket:anna   -> 503 PocketVoiceUnavailableError: no voice named "anna"
+ *
+ * The seam disagrees with itself. `scripts/voice-lab.mjs` strips the qualifier ON PURPOSE --
+ * "a qualified key is never handed to either provider", so that an OS voice can never be reached
+ * by a Pocket key -- and hands the provider the bare `anna`. `#resolveVoice` then ran
+ * `parseVoiceKey('anna')`, which by its own documented rule reads an unqualified name as
+ * `os:anna`, and threw. Both halves are individually defensible; nothing compared them.
+ *
+ * This is the defect PV-074's worker named in its report and no one actioned: "a peer still needs
+ * PocketSynthProvider.#resolveVoice to accept that bare name or a ready model will throw." It sat
+ * in the mailbox while `pnpm test` stayed green, because every provider test passed the qualified
+ * key that the product never sends.
+ */
+describe('R16-08 the provider accepts the bare voice name the Lab actually sends', () => {
+  it('CONTROL: the qualified key every existing test uses still works', async () => {
+    const p = providerWith(new PocketEngineStub())
+    const chunks = []
+    for await (const c of p.generate('Anna speaks.', { voice: 'pocket:anna' })) chunks.push(c)
+    expect(chunks.length).toBeGreaterThan(0)
+  })
+
+  it('the BARE name the Lab sends is accepted, and reaches the same voice', async () => {
+    const engine = new PocketEngineStub()
+    const p = providerWith(engine)
+    const chunks = []
+    for await (const c of p.generate('Anna speaks.', { voice: 'anna' })) chunks.push(c)
+    expect(chunks.length, 'a ready model threw on the only spelling the product sends')
+      .toBeGreaterThan(0)
+    expect(engine.voiceState.mock.calls.map((c) => c[0]),
+      'the bare name must resolve to the SAME voice as the qualified key, not to a default')
+      .toContain('pocket:anna')
+  })
+
+  it('every key GET /voices advertises can actually be spoken', async () => {
+    // The exact list the picker is built from, in both spellings the seam produces.
+    const p = providerWith(new PocketEngineStub())
+    const advertised = await p.listVoices()
+    expect(advertised.length).toBe(12)
+    for (const key of advertised) {
+      for (const spelling of [key, parseVoiceKey(key).voice]) {
+        const chunks = []
+        for await (const c of p.generate('x', { voice: spelling })) chunks.push(c)
+        expect(chunks.length, `advertised ${key} but ${JSON.stringify(spelling)} produced nothing`)
+          .toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('a name that belongs to another backend is still refused, by name', async () => {
+    const p = providerWith(new PocketEngineStub())
+    await expect(async () => {
+      for await (const _ of p.generate('x', { voice: 'os:Albert' })) { /* drain */ }
+    }).rejects.toBeInstanceOf(PocketVoiceUnavailableError)
+  })
+
+  it('an unknown bare name is refused rather than silently defaulted', async () => {
+    const p = providerWith(new PocketEngineStub())
+    await expect(async () => {
+      for await (const _ of p.generate('x', { voice: 'nobody' })) { /* drain */ }
+    }).rejects.toBeInstanceOf(PocketVoiceUnavailableError)
   })
 })
