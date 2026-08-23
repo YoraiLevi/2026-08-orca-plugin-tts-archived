@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto'
 import { readFile, writeFile, readdir, mkdir, rm, symlink } from 'node:fs/promises'
 import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path'
 // `.ts`, not `.js`, and the extension is load-bearing rather than a style choice. The Voice Lab
 // imports this module under PLAIN NODE, whose resolver does not rewrite `.js` to `.ts` — vitest
 // does, which is exactly how a suite goes green over a tree that cannot boot (P37, SC-14). The
@@ -226,8 +226,13 @@ export async function modelStatus(dir = modelDir()): Promise<ModelStatus> {
   await recoverLiveFromBackup(dir)
   const required = requiredFiles()
   if (!existsSync(dir)) return { kind: 'absent', dir, missing: required }
+  // R18-04: `readdir` returns NAMES. A symlink whose target was deleted still has a name, so a
+  // staged cache reported `ready` while not one byte was reachable — the author's exact path, since
+  // `stage-pocket-model` symlinks buzz's weights and buzz may clean its cache afterwards.
+  // `existsSync` FOLLOWS the link, so it answers the question the caller is really asking:
+  // can this file be read? A dangling link is missing, and says so by name.
   const names = new Set(await readdir(dir))
-  const missing = required.filter((f) => !names.has(f))
+  const missing = required.filter((f) => !names.has(f) || !existsSync(join(dir, f)))
   const present = required.length - missing.length
   if (missing.length > 0) {
     if (present === 0) return { kind: 'absent', dir, missing }
@@ -251,19 +256,55 @@ export async function modelStatus(dir = modelDir()): Promise<ModelStatus> {
  * we must never WRITE it (R061, PV-NFR-004). Two independent signals, either is enough:
  * the path is under `~/.buzz`, or the directory already holds `.buzz-model-manifest`.
  */
-export function isForeignModelCache(dir: string): boolean {
-  const target = resolvePath(dir)
-  const buzzRoot = resolvePath(join(homedir(), '.buzz'))
-  if (target === buzzRoot || target.startsWith(buzzRoot + sep)) return true
-  try {
-    if (existsSync(buzzRoot)) {
-      const realBuzz = realpathSync(buzzRoot)
-      const realTarget = existsSync(dir) ? realpathSync(dir) : target
-      if (realTarget === realBuzz || realTarget.startsWith(realBuzz + sep)) return true
+/**
+ * Where a write to `p` would ACTUALLY land, following symlinks as far as the filesystem can.
+ *
+ * R18-05: the old code only called `realpathSync` when the directory already existed. A directory
+ * that does NOT exist yet is exactly what a staging command passes, so a dest whose PARENT was a
+ * symlink into `~/.buzz` resolved to its own literal string, matched no prefix, and was declared
+ * safe — after which the write created it inside another application's directory. R061 was being
+ * enforced against a string rather than against the place the bytes would go.
+ *
+ * So walk up to the nearest ancestor that DOES exist, resolve that, and re-attach the rest.
+ */
+function realWriteLocation(p: string): string {
+  const absolute = resolvePath(p)
+  const trailing: string[] = []
+  let cursor = absolute
+  for (;;) {
+    if (existsSync(cursor)) {
+      try {
+        return trailing.length === 0
+          ? realpathSync(cursor)
+          : join(realpathSync(cursor), ...trailing.reverse())
+      } catch {
+        return absolute
+      }
     }
-  } catch {
-    // realpath of a dangling path is not evidence either way; the prefix check already ran.
+    const parent = dirname(cursor)
+    if (parent === cursor) return absolute
+    trailing.push(basename(cursor))
+    cursor = parent
   }
+}
+
+export function isForeignModelCache(dir: string, home = homedir()): boolean {
+  const buzzRoot = resolvePath(join(home, '.buzz'))
+  const under = (candidate: string, root: string): boolean =>
+    candidate === root || candidate.startsWith(root + sep)
+
+  // The literal path, for the ordinary case and for when nothing resolves.
+  if (under(resolvePath(dir), buzzRoot)) return true
+
+  // Where the write would land. Checked whether or not `dir` exists yet — that was the hole.
+  try {
+    const realBuzz = existsSync(buzzRoot) ? realpathSync(buzzRoot) : buzzRoot
+    if (under(realWriteLocation(dir), realBuzz)) return true
+  } catch {
+    // An unresolvable path is not evidence of safety; the literal check above already ran.
+  }
+
+  // Last resort: it is buzz's if it carries buzz's own marker, wherever it lives.
   if (existsSync(join(dir, BUZZ_MANIFEST_FILE))) return true
   return false
 }

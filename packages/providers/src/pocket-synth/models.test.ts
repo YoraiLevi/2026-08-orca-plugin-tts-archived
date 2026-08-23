@@ -11,6 +11,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import {
   mkdtempSync, writeFileSync, mkdirSync, readdirSync, existsSync, renameSync,
+  symlinkSync, rmSync,
   readFileSync as read,
 } from 'node:fs'
 import { rm, lstat } from 'node:fs/promises'
@@ -801,5 +802,59 @@ try {
     release()
     await first
     expect(read(join(dir, 'bundle.json'), 'utf8')).toBe('{"bundle_name":"tiny"}')
+  })
+})
+
+/**
+ * R18-04 / R18-05 — round 18 on the R17-07 repair.
+ *
+ * Both are one mistake in two places: **a NAME is not a FILE, and a PATH is not a LOCATION.**
+ *
+ * R18-04: `modelStatus` built its answer from `readdir` NAMES. A symlink whose target has been
+ * deleted still has a name, so a staged cache whose source went away reported `ready` while
+ * `existsSync` on that same file — which follows the link — was false. That is the author's path
+ * exactly: `stage-pocket-model` symlinks buzz's weights, buzz later cleans its cache, and the
+ * product announces the neural voice as ready and then cannot speak.
+ *
+ * R18-05: `isForeignModelCache` resolved the real path only when the directory ALREADY EXISTED
+ * (`existsSync(dir) ? realpathSync(dir) : target`). A destination that does not exist yet is
+ * precisely what a staging command passes, so a dest whose PARENT is a symlink into `~/.buzz`
+ * walked past the guard — and the write then created it inside another application's directory.
+ * R061 was enforced as a string prefix rather than as the location actually written to.
+ */
+describe('R18-04 ready means the bytes are reachable, not that the name is present', () => {
+  it('a staged cache whose source has been deleted is NOT ready', async () => {
+    const source = scratch()
+    const dest = scratch()
+    for (const f of requiredFiles()) writeFileSync(join(source, f), 'x')
+    for (const f of requiredFiles()) symlinkSync(join(source, f), join(dest, f))
+    writeFileSync(join(dest, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+
+    expect((await modelStatus(dest)).kind,
+      'CONTROL: a live staged cache must be ready, or this test proves nothing').toBe('ready')
+
+    rmSync(source, { recursive: true, force: true })
+    expect((await modelStatus(dest)).kind,
+      'every name is still present and not one byte is reachable').not.toBe('ready')
+  })
+})
+
+describe('R18-05 the foreign-cache refusal locates the write, not the string', () => {
+  it('a dest that does not exist yet, under a parent symlinked into .buzz, is foreign', () => {
+    const home = scratch()
+    const buzzModels = join(home, '.buzz', 'models')
+    mkdirSync(buzzModels, { recursive: true })
+    const outside = scratch()
+    const link = join(outside, 'parentlink')
+    symlinkSync(buzzModels, link)
+    mkdirSync(join(link, 'already-there'), { recursive: true })
+
+    expect(isForeignModelCache(join(link, 'already-there'), home),
+      'CONTROL: an EXISTING dest through the link was already caught before this fix').toBe(true)
+    expect(isForeignModelCache(join(link, 'not-yet-created'), home),
+      'a dest that does not exist yet is exactly what a staging command passes').toBe(true)
+    expect(isForeignModelCache(join(outside, 'ours'), home),
+      'CONTROL: an ordinary destination must NOT be refused, or the guard is just "always true"')
+      .toBe(false)
   })
 })
