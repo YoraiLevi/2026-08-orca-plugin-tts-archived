@@ -17,6 +17,7 @@ import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { consultProvesRealPocket } from './artifact-score.mjs'
 
 const OUT = 'dist/plugin'
 
@@ -67,23 +68,28 @@ await build({
 })
 
 /**
- * R16-10 / R17-02 — assert what SURVIVED by EFFECT, not by substring.
+ * R16-10 / R17-02 / R18-01 — assert what SURVIVED by EFFECT, not by substring.
  *
  * Round 16's guard was `bundle.includes('PocketSynthProvider')`. Round 17 deleted the
  * production constructor, kept the name as `host.log('PocketSynthProvider')`, and
- * watched tests 2/2 plus `pnpm build` stay green while the class was gone. Presence
- * of a string is not construction; construction is not prepare; prepare is the effect.
+ * watched tests 2/2 plus `pnpm build` stay green while the class was gone. Round 17's
+ * repair grepped `/pocket:/` out of a log. Round 18 handed `activate()` a stub with
+ * `id: 'pocket'` whose `prepare()` throws `'pocket: mutant stub'`, stopped the factory
+ * default-constructing the real class, and got: `pnpm build` EXIT 0, class gone,
+ * `PocketTts` gone. A log substring is not an effect. A stub can fake one.
  *
  * Reuse `scripts/artifact-e2e.mjs` rather than a third instrument. Its `--child`
  * path already imports `dist/plugin/main.mjs`, constructs the production providers,
  * and drives `prepare()`. We interpret the JSON; we do not duplicate the driver.
  *
  * Two arms, because one mutant each:
- *   consult  — OS floor forced down. Demand the failure names `pocket:` — the
- *              production constructor ran and `prepare()` was invoked. The log-string
- *              mutant produces only `os-synth:` and goes red. Isolated empty model
- *              dir (R061): we are proving consultation, not a successful neural
- *              render, so CI without weights still has a check that can fail.
+ *   consult  — OS floor forced down, isolated empty model dir (R061). Demand the
+ *              real `PocketModelUnavailableError`: it names THIS empty directory
+ *              and enumerates `mimi_encoder.onnx`. Round 18's stub cannot produce
+ *              either — it never called `modelStatus()`. 24 kHz is the stronger
+ *              discriminator but needs weights CI does not have; against an empty
+ *              dir it would mean the provider ignored `ORCA_TTS_MODEL_DIR`. The
+ *              PRESENT arm of `probe:artifact` is the 24 kHz gate.
  *   prefer   — production wiring, empty model. Default `synthesize.engine` is
  *              `auto`, which asks Pocket first. With no weights that MUST land
  *              on the OS floor at rung=fallback AND name the substitution.
@@ -91,9 +97,6 @@ await build({
  *              silent — this arm goes red. Factory preference (R17-06) is
  *              asserted in `createProviderRegistry` tests; this arm is the
  *              production-path ABSENT half of `probe:artifact`.
- *
- * The parent `pnpm probe:artifact` verdict (PRESENT must speak at 24 kHz) is the
- * other half — "does production SELECT Pocket when weights exist".
  */
 const bundle = await readFile(`${OUT}/main.mjs`, 'utf8')
 await assertShippedProvidersByEffect()
@@ -193,17 +196,16 @@ async function assertShippedProvidersByEffect () {
       '--force-os-down'
     ])
     const consult = await readChildResult(consultProbe, consultOut, 'consult')
-    const consultHay = [consult.error, consult.engineReady, ...(consult.logs ?? [])]
-      .filter((x) => typeof x === 'string' && x.length > 0)
-      .join('\n')
-    // `pocket:` is the registry id in `prepare-failed` (`id: reason`). The R17-02
-    // mutant's `host.log('PocketSynthProvider')` has no colon and must not satisfy this.
-    const consulted = /pocket:/.test(consultHay) || /engine ready \(Pocket TTS/.test(consultHay)
-    if (!consulted) {
+    // R18-01: `/pocket:/` in a log is the R17-02 log-string with a colon. A stub
+    // with `id: 'pocket'` whose `prepare()` throws `'pocket: mutant stub'` satisfies
+    // it. Demand the real class's `PocketModelUnavailableError` instead — it names
+    // THIS empty directory and enumerates a Pocket-only weight a stub never lists.
+    if (!consultProvesRealPocket(consult, emptyModel)) {
       throw new Error(
-        `${OUT}/main.mjs was imported but Pocket was never constructed/prepared. ` +
-        `Round 17 deleted the constructor, kept the name as a log string, and a ` +
-        `substring search stayed green. This check does not. ` +
+        `${OUT}/main.mjs consult arm did not run the bundled PocketSynthProvider.prepare(). ` +
+        `A stub with id:'pocket' whose throw contains "pocket:" is not the real class (R18-01). ` +
+        `Want PocketModelUnavailableError naming this empty dir (${emptyModel}) and ` +
+        `enumerating mimi_encoder.onnx. ` +
         `error=${JSON.stringify(consult.error)} logs=${JSON.stringify(consult.logs)}`
       )
     }

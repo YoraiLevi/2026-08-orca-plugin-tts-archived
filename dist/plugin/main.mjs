@@ -322,7 +322,7 @@ import { createHash } from "node:crypto";
 import { readFile as readFile3, writeFile as writeFile2, readdir as readdir2, mkdir as mkdir2, rm as rm3, symlink } from "node:fs/promises";
 import { existsSync as existsSync2, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join as join3, resolve as resolvePath, sep } from "node:path";
+import { basename as basename2, dirname as dirname2, join as join3, resolve as resolvePath, sep } from "node:path";
 function modelDir(env = process.env) {
   const override = env.ORCA_TTS_MODEL_DIR;
   if (override !== void 0 && override !== "") return override;
@@ -364,7 +364,7 @@ async function modelStatus(dir = modelDir()) {
   const required = requiredFiles();
   if (!existsSync2(dir)) return { kind: "absent", dir, missing: required };
   const names = new Set(await readdir2(dir));
-  const missing = required.filter((f) => !names.has(f));
+  const missing = required.filter((f) => !names.has(f) || !existsSync2(join3(dir, f)));
   const present = required.length - missing.length;
   if (missing.length > 0) {
     if (present === 0) return { kind: "absent", dir, missing };
@@ -700,14 +700,14 @@ import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync3 } from "node:fs";
 import { readFile as readFile4, writeFile as writeFile3, readdir as readdir3, chmod } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
-import { join as join4, dirname as dirname2 } from "node:path";
+import { join as join4, dirname as dirname3 } from "node:path";
 function platformKey(platform = process.platform, arch = process.arch) {
   return `${platform}-${arch}`;
 }
 function runtimeDir(env = process.env) {
   const override = env.ORCA_TTS_RUNTIME_DIR;
   if (override !== void 0 && override !== "") return override;
-  return join4(dirname2(modelDir(env)), "onnxruntime", RUNTIME_VERSION);
+  return join4(dirname3(modelDir(env)), "onnxruntime", RUNTIME_VERSION);
 }
 async function runtimeStatus(dir = runtimeDir(), key = platformKey()) {
   const wanted = RUNTIME_FILES[key];

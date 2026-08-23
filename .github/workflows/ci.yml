@@ -39,23 +39,37 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-      # Effect gate for neural selection (P49 / R16-10). Presence of PocketSynthProvider in
-      # the bundle is not enough: this loads dist/plugin/main.mjs the way ORCA does and
-      # demands PRESENT = 24000 Hz with signal, ABSENT names the substitution.
-      # Hosted runners have no Pocket model — the probe exits 2 (INCONCLUSIVE), which is
-      # not a pass and not a fail. Treat 2 as skip; any other non-zero is red. `set +e`
-      # around the call is load-bearing: GitHub runs bash as `-eo pipefail`, so an
-      # INCONCLUSIVE 2 would abort the step before we compared it (same trap as the
-      # million-ceiling probe's expected-code wrapper below).
-      - name: Artifact e2e — production path must speak with Pocket when the model is there
+      # Artifact e2e — what a runner with no Pocket model covers, and what it does not.
+      #
+      # COVERED on every runner (no weights needed):
+      #   ABSENT arm — OS floor at 22050 Hz AND a named substitution
+      #   ("was unavailable" + "using"). A failure is exit 1, a real defect.
+      #   Swallowing nameSubstitution is red here, including on hosted runners (R18-02).
+      #
+      # NOT COVERED on a hosted runner (no Pocket weights ever):
+      #   PRESENT arm — 24000 Hz neural audio with signal. Exit 2 means ONLY
+      #   "PRESENT could not run"; ABSENT already passed. Mapped to skip below.
+      #   A tree-shaken PocketSynthProvider replaced by a stub that still logs
+      #   "pocket:" is R18-01; `pnpm build`'s consult arm is what catches that
+      #   without weights. This step does not prove neural audio in CI.
+      #
+      # Incomplete/stale product cache is exit 1, not 2: a broken cache is a defect.
+      # `set +e` around the call is load-bearing: GitHub runs bash as `-eo pipefail`,
+      # so an INCONCLUSIVE 2 would abort the step before we compared it (same trap
+      # as the million-ceiling probe's expected-code wrapper below).
+      - name: Artifact e2e — ABSENT is conclusive without a model; PRESENT is 24 kHz when one exists
         shell: bash
         run: |
           set +e
           pnpm probe:artifact
           got=$?
           set -e
-          if [ "$got" -eq 0 ]; then echo "artifact e2e: PASS"; exit 0; fi
-          if [ "$got" -eq 2 ]; then echo "artifact e2e: INCONCLUSIVE (no Pocket model on this runner)"; exit 0; fi
+          if [ "$got" -eq 0 ]; then echo "artifact e2e: PASS (PRESENT 24 kHz + ABSENT named substitution)"; exit 0; fi
+          if [ "$got" -eq 2 ]; then
+            echo "artifact e2e: INCONCLUSIVE — PRESENT (24 kHz neural) could not run; no Pocket model on this runner."
+            echo "ABSENT (OS floor + named substitution) already passed. This is not a neural-audio pass."
+            exit 0
+          fi
           echo "artifact e2e: FAIL (exit $got)"; exit "$got"
 
       # PITFALLS P0: a claim about the plugin API is only as good as its `file:line`. Round-3 review

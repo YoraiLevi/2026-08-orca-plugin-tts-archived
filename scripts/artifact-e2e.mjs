@@ -11,14 +11,24 @@
  *
  * THE ASSERTION IS AN EFFECT, NOT A PRESENCE.
  *
+ *   ABSENT arm  — the SAME artifact, model dir empty. Must fall back to the OS floor AND NAME
+ *                 the substitution. Needs no model. Failures are ALWAYS exit 1 (R18-02).
+ *                 If both arms produce the same answer, this probe measured nothing about
+ *                 Pocket (R16-05's costume).
  *   PRESENT arm — `modelStatus(modelDir())` is `ready` (the same predicate the plugin uses).
  *                 The chunk's sampleRate must be 24000 (Pocket), not 22050 (macOS `say`),
  *                 and the PCM must be signal, not silence. This script does not look in
  *                 `~/.buzz` and does not stage a marker, then describe that as the product
  *                 (R17-07). Reuse weights with `node scripts/stage-pocket-model.mjs`.
- *   ABSENT arm  — the SAME artifact, model dir empty. Must fall back to the OS floor AND NAME
- *                 the substitution. If both arms produce the same answer, this probe measured
- *                 nothing about Pocket (R16-05's costume).
+ *                 If the cache is not `ready`, PRESENT does not run. `absent` is exit 2
+ *                 (INCONCLUSIVE — only this arm). `incomplete` / `stale` is exit 1: a
+ *                 broken cache is a defect, not a skip.
+ *
+ * Exit codes:
+ *   0  PRESENT spoke at 24 kHz; ABSENT named the OS substitution
+ *   1  a real defect (ABSENT failed, cache broken, PRESENT failed)
+ *   2  ONLY "the PRESENT arm could not run" (no ready model). ABSENT already passed.
+ *   3  harness (missing bundle, dirty machine, child wrote no JSON)
  *
  * Production wiring is what is under test. No fake provider is injected on either required arm:
  * `activate(orca, { sink, settingsDir, ... })` with the bundle's own `OsSynthProvider` and
@@ -30,9 +40,17 @@
  * handed to a player. macOS `say` is invoked with `-o <file>` (never the device). The author's
  * `~/.buzz/models/pocket-tts` is READ-ONLY (R061) and is not a lookup path.
  *
+ * P31 is asserted, not hoped for (R18-03). `pgrep -x say` is P42 (an orphan still running);
+ * it cannot tell `say -o` from bare `say`, and a completed bare `say` is already gone. Each
+ * `--child` re-execs under `scripts/ci/no-audio-recorder.mjs`, which records argv at the
+ * spawn call, and `p31Rows` demands leftover count 0 AND no `say` without `-o`. `--prove-p31`
+ * shows that check going RED on a PATH-stubbed bare `say` (the real binary is never reached)
+ * and staying GREEN on `say -o`.
+ *
  * Usage:
  *   pnpm probe:artifact                 # both arms against dist/plugin/main.mjs
  *   node scripts/artifact-e2e.mjs --keep
+ *   node scripts/artifact-e2e.mjs --prove-p31
  */
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -41,15 +59,13 @@ import {
   mkdtemp, mkdir, rm, readFile, writeFile,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { judge, OS_RATE, POCKET_RATE } from './artifact-score.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUNDLE = join(ROOT, 'dist/plugin/main.mjs')
 const SELF = fileURLToPath(import.meta.url)
-
-const POCKET_RATE = 24_000
-const OS_RATE = 22_050
 /** Below this, the buffer is silence / a DC click, not speech. R16-08 measured Pocket rms 0.14. */
 const SIGNAL_RMS = 0.01
 const SIGNAL_PEAK = 0.05
@@ -240,11 +256,97 @@ function substitutionFrom (logs, notifications) {
   return announced ?? null
 }
 
-function leakedSay () {
+export function leakedSay () {
   if (process.platform !== 'darwin') return 0
   const r = spawnSync('pgrep', ['-x', 'say'], { encoding: 'utf8' })
   if (r.status !== 0) return 0
   return r.stdout.trim() === '' ? 0 : r.stdout.trim().split('\n').length
+}
+
+/** Same basename rule as `scripts/ci/voice-lab-ci.mjs` `classifySpawn`. */
+export function spawnBase (cmd) {
+  return String(cmd).replaceAll('\\', '/').split('/').pop().toLowerCase().replace(/\.exe$/, '')
+}
+
+/**
+ * P31: `say -o <file>` writes a WAV and never opens the device. Bare `say "text"` speaks.
+ * `say -v '?'` lists voices to stdout. Restated from voice-lab-ci.mjs `classifySpawn`'s
+ * `say` branch — that module starts the Lab on import, so we cannot import the judge.
+ */
+export function classifySayArgs (args) {
+  const argv = (args ?? []).map(String)
+  const writesFile = argv.includes('-o')
+  const listsVoices = argv[argv.indexOf('-v') + 1] === '?'
+  if (!writesFile && !listsVoices) {
+    return { violation: 'aloud', why: 'macOS `say` with no -o <file> speaks through the audio device' }
+  }
+  return null
+}
+
+export function readSpawnLog (logPath) {
+  if (typeof logPath !== 'string' || logPath.length === 0 || !existsSync(logPath)) return []
+  return readFileSync(logPath, 'utf8').split('\n').filter((l) => l.trim().length > 0).map((l) => JSON.parse(l))
+}
+
+export function auditSaySpawns (entries) {
+  const says = []
+  const violations = []
+  for (const e of entries ?? []) {
+    if (spawnBase(e.cmd) !== 'say') continue
+    const rec = { cmd: e.cmd, args: e.args ?? [], api: e.api }
+    says.push(rec)
+    const v = classifySayArgs(rec.args)
+    if (v !== null) violations.push({ ...v, cmd: rec.cmd, args: rec.args })
+  }
+  return { sayCount: says.length, says, violations }
+}
+
+export function spawnLogPath (arm, wavDir) {
+  return join(wavDir, `${arm}-spawns.ndjson`)
+}
+
+export function spawnFields (logPath) {
+  const audit = auditSaySpawns(readSpawnLog(logPath))
+  return {
+    spawnLog: logPath ?? null,
+    saySpawns: audit.says,
+    spawnViolations: audit.violations,
+  }
+}
+
+/**
+ * P42 leftover `say` (the field R18-03 found write-only) AND P31 argv (no bare `say`).
+ * Both halves are required: `pgrep -x say` cannot see a completed bare `say`, and an
+ * orphaned `say -o` is silent but still poisons later timings.
+ */
+export function p31Rows (label, r, platform = process.platform) {
+  const rows = []
+  if (r == null) return rows
+  if (typeof r.leakedSayAfter !== 'number') {
+    rows.push(`${label} omitted leakedSayAfter — the P42 leftover-say detector is absent`)
+  } else if (r.leakedSayAfter !== 0) {
+    rows.push(
+      `${label} leakedSayAfter=${r.leakedSayAfter} (want 0). ` +
+      'A leftover `say` process serialises synthesis (P42). This field is now read.',
+    )
+  }
+  if (!Array.isArray(r.spawnViolations)) {
+    rows.push(`${label} omitted spawnViolations — the P31 argv recorder is absent`)
+  } else {
+    for (const v of r.spawnViolations) {
+      rows.push(`${label} P31: spawned ${v.cmd} ${JSON.stringify(v.args)} — ${v.why}`)
+    }
+  }
+  if (platform === 'darwin' && r.chunkSampleRate === OS_RATE && (r.bytes ?? 0) > 0) {
+    const n = (r.saySpawns ?? []).length
+    if (n === 0) {
+      rows.push(
+        `${label} produced OS-rate audio (${r.bytes} bytes) but recorded zero say spawns — ` +
+        'the P31 recorder is blind (a check that cannot fail)',
+      )
+    }
+  }
+  return rows
 }
 
 /* ------------------------------------------------------------------------- one arm against the bundle */
@@ -393,12 +495,30 @@ async function summarize ({ arm, forceOsDown, sink, logs, notifications, wavDir,
     logs: relevantLogs,
     notifications: notifications.filter((n) => n.length > 0),
     leakedSayAfter: leakedSay(),
+    ...spawnFields(process.env.VOICE_LAB_SPAWN_LOG),
   }
 }
 
 /* ------------------------------------------------------------------------- child entry */
 
-if (flag('--child')) {
+function reexecUnderRecorderIfNeeded () {
+  if (typeof process.env.VOICE_LAB_SPAWN_LOG === 'string' && process.env.VOICE_LAB_SPAWN_LOG.length > 0) {
+    return
+  }
+  const arm = arg('--arm', 'unknown')
+  const out = arg('--out')
+  const wavDir = arg('--wav-dir', dirname(out ?? tmpdir()))
+  const spawnLog = spawnLogPath(arm, wavDir)
+  const recorder = pathToFileURL(join(ROOT, 'scripts/ci/no-audio-recorder.mjs')).href
+  const r = spawnSync(process.execPath, ['--import', recorder, SELF, ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    env: { ...process.env, VOICE_LAB_SPAWN_LOG: spawnLog },
+  })
+  process.exit(r.status ?? 1)
+}
+
+async function runChild () {
+  reexecUnderRecorderIfNeeded()
   const arm = arg('--arm', 'unknown')
   const modelDir = arg('--model-dir')
   const out = arg('--out')
@@ -417,7 +537,11 @@ if (flag('--child')) {
     await writeFile(out, JSON.stringify(result, null, 2))
     process.exit(0)
   } catch (err) {
-    const fail = { arm, error: String(err), engineReady: null, chunkSampleRate: null }
+    const fail = {
+      arm, error: String(err), engineReady: null, chunkSampleRate: null,
+      leakedSayAfter: leakedSay(),
+      ...spawnFields(process.env.VOICE_LAB_SPAWN_LOG),
+    }
     await writeFile(out, JSON.stringify(fail, null, 2)).catch(() => {})
     console.error(err)
     process.exit(3)
@@ -427,56 +551,45 @@ if (flag('--child')) {
 /* ------------------------------------------------------------------------- parent: two arms + verdict */
 
 function spawnArm (args) {
+  const armIdx = args.indexOf('--arm')
+  const wavIdx = args.indexOf('--wav-dir')
+  const arm = armIdx >= 0 ? (args[armIdx + 1] ?? 'unknown') : 'unknown'
+  const wavDir = wavIdx >= 0 ? (args[wavIdx + 1] ?? tmpdir()) : tmpdir()
+  const spawnLog = spawnLogPath(arm, wavDir)
+  const recorder = pathToFileURL(join(ROOT, 'scripts/ci/no-audio-recorder.mjs')).href
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [SELF, '--child', ...args], {
+    const child = spawn(process.execPath, ['--import', recorder, SELF, '--child', ...args], {
       stdio: ['ignore', 'inherit', 'inherit'],
-      env: process.env,
+      env: { ...process.env, VOICE_LAB_SPAWN_LOG: spawnLog },
     })
     child.on('error', reject)
     child.on('close', (code) => resolve(code ?? 1))
   })
 }
 
-function failRows (present, absent) {
-  const rows = []
-  if (present.error) rows.push(`PRESENT error: ${present.error}`)
-  if (present.chunkSampleRate !== POCKET_RATE) {
-    rows.push(
-      `PRESENT chunk.sampleRate is ${present.chunkSampleRate}, want ${POCKET_RATE} (Pocket), ` +
-      `not ${OS_RATE} (macOS OS). engine=${JSON.stringify(present.displayName)} rung=${present.rung}`,
-    )
+function attachSpawnAudit (r, logPath) {
+  const fields = spawnFields(logPath)
+  r.spawnLog = fields.spawnLog
+  r.saySpawns = fields.saySpawns
+  r.spawnViolations = fields.spawnViolations
+  return r
+}
+
+export function applyP31 (decision, arms, platform = process.platform) {
+  const extra = []
+  for (const { label, r } of arms) extra.push(...p31Rows(label, r, platform))
+  if (platform === 'darwin') {
+    const leftover = leakedSay()
+    if (leftover > 0) {
+      extra.push(`parent re-pgrep: ${leftover} say process(es) still running (P42)`)
+    }
   }
-  if (present.signal !== true) {
-    rows.push(
-      `PRESENT audio is not signal: rms=${present.rms?.toFixed?.(4) ?? present.rms} ` +
-      `peak=${present.peak?.toFixed?.(4) ?? present.peak} (need rms>=${SIGNAL_RMS} peak>=${SIGNAL_PEAK})`,
-    )
+  if (extra.length === 0) return decision
+  return {
+    exit: 1,
+    rows: [...extra, ...decision.rows],
+    summary: `FAIL: ${extra[0]}`,
   }
-  if (absent.error) rows.push(`ABSENT error: ${absent.error}`)
-  if (absent.chunkSampleRate !== OS_RATE) {
-    rows.push(
-      `ABSENT chunk.sampleRate is ${absent.chunkSampleRate}, want ${OS_RATE} (OS floor)`,
-    )
-  }
-  if (absent.substitution === null) {
-    rows.push(
-      'ABSENT did not NAME the substitution. Expected a log/announcement matching ' +
-      '"was unavailable" + "using <floor>". engine=' +
-      JSON.stringify(absent.displayName) + ' rung=' + absent.rung,
-    )
-  }
-  if (
-    present.chunkSampleRate === absent.chunkSampleRate &&
-    present.displayName === absent.displayName &&
-    present.rung === absent.rung
-  ) {
-    rows.push(
-      `BOTH ARMS PRODUCED THE SAME ANSWER (sampleRate=${present.chunkSampleRate} ` +
-      `engine=${JSON.stringify(present.displayName)} rung=${present.rung}). ` +
-      'The probe cannot tell Pocket from the OS floor — the plugin never consulted the model dir.',
-    )
-  }
-  return rows
 }
 
 function printArm (label, r) {
@@ -490,6 +603,13 @@ function printArm (label, r) {
   console.log(`signal:       ${r.signal}`)
   console.log(`substitution: ${r.substitution ?? '(none named)'}`)
   console.log(`elapsedMs:    ${r.elapsedMs}`)
+  console.log(`leakedSayAfter: ${r.leakedSayAfter}`)
+  console.log(`say spawns:   ${(r.saySpawns ?? []).length}`)
+  for (const s of r.saySpawns ?? []) console.log(`  say ${JSON.stringify(s.args)}`)
+  if ((r.spawnViolations ?? []).length > 0) {
+    console.log(`P31 VIOLATIONS: ${r.spawnViolations.length}`)
+    for (const v of r.spawnViolations) console.log(`  ${v.why}: ${v.cmd} ${JSON.stringify(v.args)}`)
+  }
   if (r.wavPath) console.log(`wav:          ${r.wavPath}`)
   if (r.error) console.log(`error:        ${r.error}`)
   for (const l of r.logs ?? []) console.log(`  [log] ${l}`)
@@ -532,12 +652,16 @@ async function main () {
 
     const product = await productModelStatus()
     let presentDir = null
-    if (product.status.kind !== 'ready') {
-      console.log(`Pocket product cache is ${product.status.kind}: ${product.detail}`)
-      console.log('PRESENT arm INCONCLUSIVE. Reuse an existing download with: node scripts/stage-pocket-model.mjs')
-    } else {
+    if (product.status.kind === 'ready') {
       presentDir = product.status.dir
       console.log(`product cache ready at ${presentDir} (modelStatus.kind=ready)`)
+    } else if (product.status.kind === 'absent') {
+      console.log(`Pocket product cache is absent: ${product.detail}`)
+      console.log('PRESENT arm cannot run. Reuse an existing download with: node scripts/stage-pocket-model.mjs')
+    } else {
+      // incomplete / stale: a cache that cannot speak. Scored as exit 1 after ABSENT.
+      console.log(`Pocket product cache is ${product.status.kind}: ${product.detail}`)
+      console.log('PRESENT will not run against a broken cache. This is a defect, not a skip.')
     }
 
     const absentOut = join(runDir, 'absent.json')
@@ -550,7 +674,10 @@ async function main () {
       await cleanup()
       process.exit(3)
     }
-    const absent = JSON.parse(await readFile(absentOut, 'utf8'))
+    const absent = attachSpawnAudit(
+      JSON.parse(await readFile(absentOut, 'utf8')),
+      spawnLogPath('absent', runDir),
+    )
     printArm('ABSENT (production, no model)', absent)
 
     let present = null
@@ -565,21 +692,31 @@ async function main () {
         await cleanup()
         process.exit(3)
       }
-      present = JSON.parse(await readFile(presentOut, 'utf8'))
+      present = attachSpawnAudit(
+        JSON.parse(await readFile(presentOut, 'utf8')),
+        spawnLogPath('present', runDir),
+      )
       printArm('PRESENT (production, model staged)', present)
     }
 
-    if (present === null) {
-      console.log('\nINCONCLUSIVE: no Pocket model on this machine, so the neural arm could not run.')
-      console.log('The absent arm is recorded above. This is not a pass.')
-      await cleanup()
-      process.exit(2)
-    }
+    // R18-02: score ABSENT first, always. Exit 2 is ONLY "PRESENT could not run".
+    // Swallowing nameSubstitution used to print `substitution: (none named)` and
+    // still EXIT 2 because this used to `process.exit(2)` before failRows().
+    const decision = applyP31(
+      judge({
+        productKind: product.status.kind,
+        productDetail: product.detail,
+        present,
+        absent,
+      }),
+      [
+        { label: 'ABSENT', r: absent },
+        { label: 'PRESENT', r: present },
+      ],
+    )
+    const productionPass = decision.exit === 0
 
-    const rows = failRows(present, absent)
-    const productionPass = rows.length === 0
-
-    if (!productionPass && present.chunkSampleRate !== POCKET_RATE && presentDir !== null) {
+    if (decision.exit === 1 && present !== null && present.chunkSampleRate !== POCKET_RATE && presentDir !== null) {
       const diagOut = join(runDir, 'diagnostic.json')
       console.log('\nDiagnostic — OS floor forced down, so the bundled PocketSynthProvider is the only engine that can prepare.')
       await spawnArm([
@@ -605,18 +742,14 @@ async function main () {
     }
 
     console.log('\n=== verdict ===')
+    console.log(decision.summary)
     if (productionPass) {
-      console.log(`PASS: PRESENT spoke at ${POCKET_RATE} Hz with signal; ABSENT named the OS substitution at ${OS_RATE} Hz.`)
       console.log(`PRESENT rms=${Number(present.rms).toFixed(4)} peak=${Number(present.peak).toFixed(4)}`)
       console.log(`ABSENT  substitution: ${absent.substitution}`)
-      await cleanup()
-      process.exit(0)
     }
-
-    console.log('FAIL: the shipped artifact did not speak with the neural backend on the production path.')
-    for (const row of rows) console.log(`  - ${row}`)
+    for (const row of decision.rows) console.log(`  - ${row}`)
     await cleanup()
-    process.exit(1)
+    process.exit(decision.exit)
   } catch (err) {
     console.error(err)
     await cleanup()
@@ -624,4 +757,101 @@ async function main () {
   }
 }
 
-await main()
+/**
+ * Negative control for R18-03. A PATH stub named `say` exits 0 and never reaches
+ * `/usr/bin/say`, so this does not open the audio device (P31). The recorder still
+ * sees argv, which is the property under test.
+ */
+export async function proveP31 () {
+  const dir = await mkdtemp(join(tmpdir(), 'artifact-e2e-p31-'))
+  const recorder = pathToFileURL(join(ROOT, 'scripts/ci/no-audio-recorder.mjs')).href
+  const stub = join(dir, process.platform === 'win32' ? 'say.cmd' : 'say')
+  await writeFile(stub, process.platform === 'win32' ? '@echo off\r\nexit /b 0\r\n' : '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  const pathWithStub = `${dir}${delimiter}${process.env.PATH ?? ''}`
+
+  const record = async (args, name) => {
+    const log = join(dir, `${name}.ndjson`)
+    const decoy = join(dir, `${name}.mjs`)
+    await writeFile(decoy, `import { spawnSync } from 'node:child_process'\nspawnSync('say', ${JSON.stringify(args)}, { stdio: 'ignore' })\n`)
+    spawnSync(process.execPath, ['--import', recorder, decoy], {
+      env: { ...process.env, VOICE_LAB_SPAWN_LOG: log, PATH: pathWithStub },
+      encoding: 'utf8',
+    })
+    return readSpawnLog(log)
+  }
+
+  const cases = []
+  const bareLog = await record(['hello there'], 'bare')
+  const bareAudit = auditSaySpawns(bareLog)
+  cases.push({
+    name: 'RED: recorded bare `say` (PATH stub, device never opened)',
+    ok: bareAudit.violations.length > 0,
+    detail: bareAudit,
+  })
+
+  const fileLog = await record(['-o', join(dir, 'out.wav'), '--data-format=LEI16@22050', '--', 'hello'], 'file')
+  const fileAudit = auditSaySpawns(fileLog)
+  cases.push({
+    name: 'GREEN: recorded `say -o` is not a P31 violation',
+    ok: fileAudit.violations.length === 0 && fileAudit.sayCount > 0,
+    detail: fileAudit,
+  })
+
+  const leakRows = p31Rows('ABSENT', {
+    leakedSayAfter: 99,
+    spawnViolations: [],
+    saySpawns: [{ cmd: 'say', args: ['-o', '/tmp/x.wav'] }],
+  })
+  cases.push({
+    name: 'RED: leakedSayAfter=99 is now read (the R18-03 mutant)',
+    ok: leakRows.some((row) => row.includes('leakedSayAfter=99')),
+    detail: leakRows,
+  })
+
+  const cleanRows = p31Rows('ABSENT', {
+    leakedSayAfter: 0,
+    spawnViolations: [],
+    saySpawns: [{ cmd: 'say', args: ['-o', '/tmp/x.wav', '--', 'hello'] }],
+    chunkSampleRate: OS_RATE,
+    bytes: 1000,
+  }, 'darwin')
+  cases.push({
+    name: 'GREEN: leftover 0 + say -o produces no P31 rows',
+    ok: cleanRows.length === 0,
+    detail: cleanRows,
+  })
+
+  const leakDecision = applyP31(
+    { exit: 2, rows: [], summary: 'INCONCLUSIVE' },
+    [{ label: 'ABSENT', r: { leakedSayAfter: 99, spawnViolations: [], saySpawns: [] } }],
+    'linux',
+  )
+  cases.push({
+    name: 'RED: applyP31 turns exit 2 into exit 1 when leakedSayAfter is 99',
+    ok: leakDecision.exit === 1 && leakDecision.rows.some((row) => row.includes('leakedSayAfter=99')),
+    detail: leakDecision,
+  })
+
+  console.log('\n=== R18-03 P31 prove ===\n')
+  let allOk = true
+  for (const c of cases) {
+    console.log(`  ${c.ok ? 'ok' : 'FAILED'}  — ${c.name}`)
+    if (!c.ok) {
+      allOk = false
+      console.log(`     detail: ${JSON.stringify(c.detail)}`)
+    }
+  }
+  await rm(dir, { recursive: true, force: true })
+  if (!allOk) {
+    console.error('\nP31 guard could not be shown to fail in both directions.')
+    return 1
+  }
+  console.log('\nP31: bare `say` goes RED, `say -o` stays GREEN, leakedSayAfter=99 is read.\n')
+  return 0
+}
+
+if (import.meta.main) {
+  if (flag('--child')) await runChild()
+  else if (flag('--prove-p31')) process.exit(await proveP31())
+  else await main()
+}
