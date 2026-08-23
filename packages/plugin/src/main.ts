@@ -9,7 +9,7 @@
  */
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { OsSynthProvider, ProviderRegistry } from '@orca-tts/providers'
+import { OsSynthProvider, PocketSynthProvider, ProviderRegistry } from '@orca-tts/providers'
 import type { PlaybackSink, TtsProvider } from '@orca-tts/core'
 import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi } from './adapter/index.ts'
 import { readClipboard, ClipboardUnavailableError } from './clipboard.ts'
@@ -49,6 +49,19 @@ export interface ActivateOptions {
    * runtime for tests that are not exercising G2.
    */
   readonly controlDir?: string | false
+  /**
+   * The neural backend, registered BESIDE the OS floor and never in front of it.
+   *
+   * R16-10: without this the shipped plugin registered `OsSynthProvider` and nothing else, so
+   * `PocketSynthProvider` was tree-shaken out of `dist/plugin/main.mjs` entirely -- 0 occurrences.
+   * Every Pocket test passed, the Voice Lab spoke with neural voices, and the artifact ORCA
+   * actually loads had no neural backend in it at all. That is R16-01's shape a second time: a
+   * path with no production caller is not a path.
+   *
+   * `false` disables it. Tests pass `false` or a fake, so no test reads the author's real model
+   * cache and starts depending on how he last tuned it (P40, R061).
+   */
+  readonly pocket?: TtsProvider | false
 }
 
 /** How many commands `orca-plugin.json` declares. Pinned by main.test.ts, not by memory. */
@@ -195,6 +208,12 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     options.provider ?? new OsSynthProvider({ notify: (m) => { announce(m) } }),
     { preferred: true }
   )
+
+  // Beside the floor, never in front of it (principle VI, and R16-10). An absent model makes this
+  // provider report itself unavailable, which the registry already handles by naming the
+  // substitution -- so a machine with no neural weights behaves exactly as it does today.
+  const pocket = options.pocket ?? new PocketSynthProvider()
+  if (pocket !== false) registry.register(pocket)
 
   // Resolve the engine in the background: activate() must return promptly so command registration
   // is never delayed behind a process spawn.

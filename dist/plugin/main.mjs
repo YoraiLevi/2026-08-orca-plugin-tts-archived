@@ -1,6 +1,1269 @@
-// packages/plugin/src/main.ts
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// packages/providers/src/pocket-synth/audio.ts
+function readNpy(buf) {
+  if (buf.toString("latin1", 0, 6) !== "\x93NUMPY") throw new Error("not a .npy file");
+  const major = buf[6];
+  if (major !== 1 && major !== 2) throw new Error(`unsupported .npy version ${major}`);
+  const headerLen = major === 1 ? buf.readUInt16LE(8) : buf.readUInt32LE(8);
+  const headerStart = major === 1 ? 10 : 12;
+  const header = buf.toString("latin1", headerStart, headerStart + headerLen);
+  const descr = /'descr'\s*:\s*'([^']+)'/.exec(header)?.[1];
+  if (descr !== "<f4") throw new Error(`only little-endian float32 .npy is supported, got ${String(descr)}`);
+  if (/'fortran_order'\s*:\s*True/.test(header)) throw new Error("fortran-ordered .npy is not supported");
+  const shapeText = /'shape'\s*:\s*\(([^)]*)\)/.exec(header)?.[1] ?? "";
+  const shape = [...shapeText.matchAll(/\d+/g)].map((m) => Number(m[0] ?? 0));
+  const count = shape.reduce((a, b) => a * b, 1);
+  const body = headerStart + headerLen;
+  if (body + count * 4 > buf.length) {
+    throw new Error(`.npy declares ${count} float32 values but the file holds ${(buf.length - body) / 4}`);
+  }
+  const data = new Float32Array(count);
+  for (let i = 0; i < count; i++) data[i] = buf.readFloatLE(body + i * 4);
+  return { data, shape };
+}
+function readWav(buf) {
+  if (buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") {
+    throw new Error("not a RIFF/WAVE file");
+  }
+  let pos = 12;
+  let fmt = null;
+  while (pos + 8 <= buf.length) {
+    const id = buf.toString("ascii", pos, pos + 4);
+    const size = buf.readUInt32LE(pos + 4);
+    const body = pos + 8;
+    if (id === "fmt ") {
+      fmt = {
+        channels: buf.readUInt16LE(body + 2),
+        rate: buf.readUInt32LE(body + 4),
+        bits: buf.readUInt16LE(body + 14)
+      };
+    } else if (id === "data") {
+      if (fmt === null) throw new Error("WAV data chunk arrived before its fmt chunk");
+      if (fmt.bits !== 16) throw new Error(`only 16-bit PCM WAV is supported, got ${fmt.bits}-bit`);
+      if (fmt.channels < 1) throw new Error("WAV declares zero channels");
+      const available = Math.min(size, buf.length - body);
+      const frames = Math.floor(available / 2 / fmt.channels);
+      const mono = new Float32Array(frames);
+      for (let i = 0; i < frames; i++) {
+        let acc = 0;
+        for (let c = 0; c < fmt.channels; c++) acc += buf.readInt16LE(body + (i * fmt.channels + c) * 2);
+        mono[i] = acc / fmt.channels / 32768;
+      }
+      return { samples: mono, rate: fmt.rate };
+    }
+    pos = body + size + size % 2;
+  }
+  throw new Error("WAV has no data chunk");
+}
+function writeWav(samples, rate) {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + samples.length * 2, 4);
+  header.write("WAVEfmt ", 8, "ascii");
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(samples.length * 2, 40);
+  const body = Buffer.alloc(samples.length * 2);
+  for (let i = 0; i < samples.length; i++) {
+    const v = Math.max(-1, Math.min(1, samples[i] ?? 0));
+    body.writeInt16LE(Math.round(v * 32767), i * 2);
+  }
+  return Buffer.concat([header, body]);
+}
+function reflectedIndex(index, length) {
+  if (index >= 0 && index < length) return index;
+  if (length === 1) return 0;
+  const period = 2 * (length - 1);
+  const wrapped = (index % period + period) % period;
+  return wrapped < length ? wrapped : period - wrapped;
+}
+function resample(input, fromRate, toRate, width = 16) {
+  if (fromRate <= 0 || toRate <= 0) throw new Error("sample rates must be positive");
+  if (fromRate === toRate) return input;
+  if (input.length === 0) return input;
+  const ratio = toRate / fromRate;
+  const cutoff = Math.min(1, ratio) * 0.95;
+  const outLen = Math.floor(input.length * ratio);
+  const out = new Float32Array(outLen);
+  const half = Math.ceil(width / Math.min(1, ratio));
+  for (let i = 0; i < outLen; i++) {
+    const centre = i / ratio;
+    const first = Math.ceil(centre - half);
+    const last = Math.floor(centre + half);
+    let acc = 0;
+    let norm = 0;
+    for (let j = first; j <= last; j++) {
+      const d2 = centre - j;
+      const w = 0.42 + 0.5 * Math.cos(Math.PI * d2 / half) + 0.08 * Math.cos(2 * Math.PI * d2 / half);
+      const x = cutoff * d2;
+      const k = (x === 0 ? cutoff : Math.sin(Math.PI * x) / (Math.PI * x) * cutoff) * w;
+      acc += (input[reflectedIndex(j, input.length)] ?? 0) * k;
+      norm += k;
+    }
+    out[i] = norm === 0 ? 0 : acc / norm;
+  }
+  return out;
+}
+var init_audio = __esm({
+  "packages/providers/src/pocket-synth/audio.ts"() {
+    "use strict";
+  }
+});
+
+// packages/providers/src/pocket-synth/voices.ts
+function parseVoiceKey(key) {
+  const at = key.indexOf(":");
+  if (at < 0) return { backend: OS_BACKEND, voice: key };
+  return { backend: key.slice(0, at), voice: key.slice(at + 1) };
+}
+function formatVoiceKey(backend, voice) {
+  return `${backend}:${voice}`;
+}
+var OS_BACKEND, POCKET_BACKEND, POCKET_VOICES, POCKET_DEFAULT_VOICE;
+var init_voices = __esm({
+  "packages/providers/src/pocket-synth/voices.ts"() {
+    "use strict";
+    OS_BACKEND = "os";
+    POCKET_BACKEND = "pocket";
+    POCKET_VOICES = [
+      {
+        key: "pocket:anna",
+        displayName: "Anna",
+        file: "anna.wav",
+        upstream: "p228_023_enhanced.wav",
+        sha256: "0a6de25cf12bf1540beb85979f306a92be81fecc051c547c5395e7e5237a3856",
+        bytes: 804630,
+        source: "VCTK p228"
+      },
+      {
+        key: "pocket:vera",
+        displayName: "Vera",
+        file: "vera.wav",
+        upstream: "p229_023_enhanced.wav",
+        sha256: "309cf91a895830f15842b398f69a4962cb1f7e0bfab10e25dd27838e826c204b",
+        bytes: 691416,
+        source: "VCTK p229"
+      },
+      {
+        key: "pocket:fantine",
+        displayName: "Fantine",
+        file: "fantine.wav",
+        upstream: "p244_023_enhanced.wav",
+        sha256: "5f07d4e2a3f20a15572aae885156b43ef3fc12ef3812996fd135680d9956448b",
+        bytes: 674852,
+        source: "VCTK p244"
+      },
+      {
+        key: "pocket:charles",
+        displayName: "Charles",
+        file: "charles.wav",
+        upstream: "p254_023_enhanced.wav",
+        sha256: "6b681a429198f16e378d53bccb08d06939da7b00144a7696111d4f8f76be7756",
+        bytes: 639272,
+        source: "VCTK p254"
+      },
+      {
+        key: "pocket:paul",
+        displayName: "Paul",
+        file: "paul.wav",
+        upstream: "p259_023_enhanced.wav",
+        sha256: "7aba504fe0b3b16478b69eb27ce6007e3cb42b0c1915b5f1c6a6024ae37d679b",
+        bytes: 717182,
+        source: "VCTK p259"
+      },
+      {
+        key: "pocket:eponine",
+        displayName: "Eponine",
+        file: "eponine.wav",
+        upstream: "p262_023_enhanced.wav",
+        sha256: "a13c27fb47627b05223691a0ef2974358a18c886e6c2f9d2762ff1d02c20926b",
+        bytes: 716330,
+        source: "VCTK p262"
+      },
+      {
+        key: "pocket:azelma",
+        displayName: "Azelma",
+        file: "azelma.wav",
+        upstream: "p303_023_enhanced.wav",
+        sha256: "60e3d26cdf2efdec5df712152c839928f4d5522821e6554ae11fd96c57ab1026",
+        bytes: 823852,
+        source: "VCTK p303"
+      },
+      {
+        key: "pocket:george",
+        displayName: "George",
+        file: "george.wav",
+        upstream: "p315_023_enhanced.wav",
+        sha256: "29a41f93bf5236e5b21501091d7774c255d5f3d4e62fa4f9fdf0a92a793c84ae",
+        bytes: 642692,
+        source: "VCTK p315"
+      },
+      {
+        key: "pocket:mary",
+        displayName: "Mary",
+        file: "reference_sample.wav",
+        upstream: "p333_023_enhanced.wav",
+        sha256: "a35b0468382218e9f37a9a7494d1e4b74deaf18d7ced22265b4e325bb55c183f",
+        bytes: 639084,
+        source: "VCTK p333"
+      },
+      {
+        key: "pocket:jane",
+        displayName: "Jane",
+        file: "jane.wav",
+        upstream: "p339_023_enhanced.wav",
+        sha256: "2f12e7f155eb3118f55425394f1b049e5b1b67bdc9b3932c8ba4521420aeb84a",
+        bytes: 759340,
+        source: "VCTK p339"
+      },
+      {
+        key: "pocket:michael",
+        displayName: "Michael",
+        file: "michael.wav",
+        upstream: "p360_023_enhanced.wav",
+        sha256: "b6743e9195e5e3fd34fe9d1633ae93f7ffab787b249e45f6467d7d6f7a6ee6ad",
+        bytes: 751140,
+        source: "VCTK p360"
+      },
+      {
+        key: "pocket:eve",
+        displayName: "Eve",
+        file: "eve.wav",
+        upstream: "p361_023_enhanced.wav",
+        sha256: "396e7cbd066b0f3fb6d67fa26e7904076958239d736d4390f15b5fe88feb14cd",
+        bytes: 671872,
+        source: "VCTK p361"
+      }
+    ];
+    POCKET_DEFAULT_VOICE = "pocket:mary";
+  }
+});
+
+// packages/providers/src/pocket-synth/safe-swap.ts
+import { readFile as readFile2, rename, rm as rm2, readdir, open } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { readFile as readFile4 } from "node:fs/promises";
+import { join as join2, dirname, basename } from "node:path";
+function lockPathFor(dir) {
+  return `${dir}.lock`;
+}
+function journalPathFor(dir) {
+  return `${dir}.swap-journal`;
+}
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+async function readLockPid(lockPath) {
+  try {
+    const raw = (await readFile2(lockPath, "utf8")).trim();
+    const pid = Number(raw);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+function isBackupName(base, name) {
+  return name === `${base}.previous` || name.startsWith(`${base}.previous-`);
+}
+async function recoverLiveFromBackup(dir) {
+  if (existsSync(dir)) return;
+  const lockPath = lockPathFor(dir);
+  if (existsSync(lockPath)) {
+    const holder = await readLockPid(lockPath);
+    if (holder !== null && pidAlive(holder)) return;
+  }
+  const parent = dirname(dir);
+  const base = basename(dir);
+  if (!existsSync(parent)) return;
+  const backups = (await readdir(parent)).filter((n) => isBackupName(base, n)).toSorted((a, b) => {
+    if (a === `${base}.previous`) return -1;
+    if (b === `${base}.previous`) return 1;
+    return a.localeCompare(b);
+  });
+  if (backups.length === 0) return;
+  const chosen = backups[0];
+  if (chosen === void 0) return;
+  try {
+    await rename(join2(parent, chosen), dir);
+  } catch (err) {
+    if (err.code === "ENOENT") return;
+    throw err;
+  }
+  await rm2(journalPathFor(dir), { force: true });
+}
+var init_safe_swap = __esm({
+  "packages/providers/src/pocket-synth/safe-swap.ts"() {
+    "use strict";
+  }
+});
+
+// packages/providers/src/pocket-synth/models.ts
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, readFile as readFile3, writeFile, rename as rename2, rm as rm3, readdir as readdir2 } from "node:fs/promises";
+import { existsSync as existsSync2 } from "node:fs";
+import { homedir } from "node:os";
+import { join as join3, dirname as dirname2 } from "node:path";
+function modelDir(env = process.env) {
+  const override = env.ORCA_TTS_MODEL_DIR;
+  if (override !== void 0 && override !== "") return override;
+  if (process.platform === "win32") {
+    const base2 = env.LOCALAPPDATA ?? join3(homedir(), "AppData", "Local");
+    return join3(base2, "orca-tts", "models", "pocket-tts");
+  }
+  if (process.platform === "darwin") {
+    return join3(homedir(), "Library", "Application Support", "orca-tts", "models", "pocket-tts");
+  }
+  const base = env.XDG_CACHE_HOME ?? join3(homedir(), ".cache");
+  return join3(base, "orca-tts", "models", "pocket-tts");
+}
+function requiredFiles() {
+  return [
+    ...MODEL_ARTIFACTS.map((a) => a.file),
+    ...VOICE_ARTIFACTS.map((a) => a.file),
+    UPSTREAM_LICENSE_FILE,
+    LICENSE_FILE,
+    MANIFEST_FILE
+  ];
+}
+async function modelStatus(dir = modelDir()) {
+  await recoverLiveFromBackup(dir);
+  if (!existsSync2(dir)) return { kind: "absent", dir, missing: requiredFiles() };
+  const present = new Set(await readdir2(dir));
+  const missing = requiredFiles().filter((f) => !present.has(f));
+  if (missing.length > 0) return { kind: "absent", dir, missing };
+  const found = (await readFile3(join3(dir, MANIFEST_FILE), "utf8")).trim();
+  const want = String(MANIFEST_VERSION);
+  if (found !== want) return { kind: "stale", dir, found, want };
+  return { kind: "ready", dir };
+}
+var MODEL_REPO, MODEL_REVISION, BUNDLE_ID, MANIFEST_VERSION, MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, MANIFEST_FILE, LICENSE_FILE, UPSTREAM_LICENSE_FILE, LICENSE_TEXT, VOICE_ARTIFACTS, VOICES_TOTAL_BYTES, INSTALL_TOTAL_BYTES;
+var init_models = __esm({
+  "packages/providers/src/pocket-synth/models.ts"() {
+    "use strict";
+    init_voices();
+    init_safe_swap();
+    init_safe_swap();
+    MODEL_REPO = "KevinAHM/pocket-tts-onnx";
+    MODEL_REVISION = "58a6d00cf13d239b6748cb0769f35c580a8f606c";
+    BUNDLE_ID = "english_2026-04";
+    MANIFEST_VERSION = 2;
+    MODEL_ARTIFACTS = [
+      { file: "bundle.json", sha256: "bab643150f437f37df080a710520ff39ed9ebd9a339f8ebdc739f7eddfc28b3f", bytes: 24381 },
+      { file: "bos_before_voice.npy", sha256: "f46edf4f7007b7ba4ea58831f49d003e59e167b4641c44bb3addfe9231a780b1", bytes: 4224 },
+      { file: "tokenizer.model", sha256: "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6", bytes: 59339 },
+      { file: "flow_lm_main_int8.onnx", sha256: "f9bd8106b79a0192c1c43399ab938fb24900a95c1c599870d75a884e99000116", bytes: 76341079 },
+      { file: "flow_lm_flow_int8.onnx", sha256: "3dd781ee5abee9e195320bf0106bebd6372a852b3b36352524ee78b40554635d", bytes: 9962530 },
+      { file: "mimi_decoder_int8.onnx", sha256: "3630450a3297a101792a6ac66619ebc70ab916b265e6220c2afaef8b1673f925", bytes: 22684077 },
+      { file: "mimi_encoder.onnx", sha256: "853e2ca623b8782d94c3745ec6133bfdff7ce33d9b11128bd29ea03f28d76e3d", bytes: 39768446 },
+      { file: "text_conditioner.onnx", sha256: "4ecee995fb69f85c7a7493d11f7b5ee15d9950facc7ab3f5c9c49ef1e03847bb", bytes: 16388344 }
+    ];
+    MODEL_TOTAL_BYTES = MODEL_ARTIFACTS.reduce((n, a) => n + a.bytes, 0);
+    MANIFEST_FILE = ".orca-tts-model-manifest";
+    LICENSE_FILE = "MODEL_LICENSE.txt";
+    UPSTREAM_LICENSE_FILE = "LICENSE";
+    LICENSE_TEXT = `Pocket TTS model files
+======================
+
+Model:       Pocket TTS, by Kyutai (https://huggingface.co/kyutai/pocket-tts)
+ONNX export: ${MODEL_REPO} at ${MODEL_REVISION}, bundle ${BUNDLE_ID}
+Licence:     CC-BY-4.0 (https://creativecommons.org/licenses/by/4.0/)
+
+Reference voices are VCTK speakers from kyutai/tts-voices, ai-coustics-enhanced,
+also CC-BY-4.0.
+
+These files are downloaded unmodified and are not part of the orca-plugin-tts
+distribution. Provided AS IS, without warranty of any kind.
+`;
+    VOICE_ARTIFACTS = POCKET_VOICES.map((v) => ({
+      file: v.file,
+      sha256: v.sha256,
+      bytes: v.bytes
+    }));
+    VOICES_TOTAL_BYTES = VOICE_ARTIFACTS.reduce((n, a) => n + a.bytes, 0);
+    INSTALL_TOTAL_BYTES = MODEL_TOTAL_BYTES + VOICES_TOTAL_BYTES;
+  }
+});
+
+// packages/providers/src/pocket-synth/sentencepiece.ts
+function readVarint(buf, pos) {
+  let result = 0n;
+  let shift = 0n;
+  for (; ; ) {
+    const byte = buf[pos++];
+    if (byte === void 0) throw new Error("truncated varint");
+    result |= BigInt(byte & 127) << shift;
+    if ((byte & 128) === 0) break;
+    shift += 7n;
+    if (shift > 63n) throw new Error("varint longer than 64 bits");
+  }
+  return [result, pos];
+}
+function skipField(buf, pos, wireType) {
+  switch (wireType) {
+    case 0:
+      return readVarint(buf, pos)[1];
+    case 1:
+      return pos + 8;
+    case 2: {
+      const [len, p] = readVarint(buf, pos);
+      return p + Number(len);
+    }
+    case 5:
+      return pos + 4;
+    default:
+      throw new Error(`unsupported protobuf wire type ${wireType}`);
+  }
+}
+function parsePiece(buf, start, end) {
+  let pos = start;
+  let piece = "";
+  let score = 0;
+  let type = PieceType.NORMAL;
+  while (pos < end) {
+    const [key, p] = readVarint(buf, pos);
+    pos = p;
+    const field = Number(key >> 3n);
+    const wire = Number(key & 7n);
+    if (field === 1 && wire === 2) {
+      const [len, q] = readVarint(buf, pos);
+      piece = buf.toString("utf8", q, q + Number(len));
+      pos = q + Number(len);
+    } else if (field === 2 && wire === 5) {
+      score = buf.readFloatLE(pos);
+      pos += 4;
+    } else if (field === 3 && wire === 0) {
+      const [v, q] = readVarint(buf, pos);
+      type = Number(v);
+      pos = q;
+    } else {
+      pos = skipField(buf, pos, wire);
+    }
+  }
+  return { piece, score, type };
+}
+function parseModelProto(buf) {
+  const pieces = [];
+  let pos = 0;
+  while (pos < buf.length) {
+    const [key, p] = readVarint(buf, pos);
+    pos = p;
+    const field = Number(key >> 3n);
+    const wire = Number(key & 7n);
+    if (field === 1 && wire === 2) {
+      const [len, q] = readVarint(buf, pos);
+      pieces.push(parsePiece(buf, q, q + Number(len)));
+      pos = q + Number(len);
+    } else {
+      pos = skipField(buf, pos, wire);
+    }
+  }
+  return pieces;
+}
+var SPACE, PieceType, SentencePieceUnigram;
+var init_sentencepiece = __esm({
+  "packages/providers/src/pocket-synth/sentencepiece.ts"() {
+    "use strict";
+    SPACE = "\u2581";
+    PieceType = {
+      NORMAL: 1,
+      UNKNOWN: 2,
+      CONTROL: 3,
+      USER_DEFINED: 4,
+      BYTE: 6
+    };
+    SentencePieceUnigram = class _SentencePieceUnigram {
+      pieces;
+      byId;
+      unkId;
+      #byteId;
+      #usable;
+      #maxPieceLen;
+      #unkPenalty;
+      constructor(pieces) {
+        this.pieces = pieces;
+        this.byId = pieces.map((p) => p.piece);
+        this.unkId = Math.max(0, pieces.findIndex((p) => p.type === PieceType.UNKNOWN));
+        this.#byteId = new Int32Array(256).fill(-1);
+        for (const [i, p] of pieces.entries()) {
+          if (p.type !== PieceType.BYTE) continue;
+          const m = /^<0x([0-9A-Fa-f]{2})>$/.exec(p.piece);
+          if (m?.[1] !== void 0) this.#byteId[Number.parseInt(m[1], 16)] = i;
+        }
+        this.#usable = /* @__PURE__ */ new Map();
+        let maxLen = 0;
+        for (const [i, p] of pieces.entries()) {
+          if (p.type === PieceType.CONTROL || p.type === PieceType.UNKNOWN || p.type === PieceType.BYTE) continue;
+          if (!this.#usable.has(p.piece)) this.#usable.set(p.piece, { id: i, score: p.score });
+          maxLen = Math.max(maxLen, [...p.piece].length);
+        }
+        this.#maxPieceLen = maxLen;
+        const normals = pieces.filter((p) => p.type === PieceType.NORMAL).map((p) => p.score);
+        this.#unkPenalty = (normals.length > 0 ? Math.min(...normals) : 0) - 10;
+      }
+      static fromBuffer(buf) {
+        return new _SentencePieceUnigram(parseModelProto(buf));
+      }
+      /** `add_dummy_prefix` then `escape_whitespaces`, exactly as this bundle's proto declares them. */
+      normalize(text) {
+        return (" " + text).replaceAll(" ", SPACE);
+      }
+      /** `noUncheckedIndexedAccess` is on: reads past the end are a real possibility, not a formality. */
+      #charAt(chars, i) {
+        const c = chars[i];
+        if (c === void 0) throw new Error(`tokenizer read past the end of the input at ${i}`);
+        return c;
+      }
+      /**
+       * Encode as Python `sentencepiece.SentencePieceProcessor.Encode` does it.
+       *
+       * **That is `Model::EncodeOptimized`, not `Lattice::Viterbi`, and the difference was
+       * measurable.** `d6f6c80` ported the lattice: one node per candidate, first-wins among
+       * `end_nodes_` on a float32 tie. That took an 11,344-input corpus from 17 disagreements to 1
+       * (`Zggggg`). Round 16 then found seven more of the same class on a 728-input `Xyyyyy` grid —
+       * the lattice remainder is not a singleton, and Python never ran Viterbi for `Encode()` at all.
+       *
+       * `EncodeOptimized` (unigram_model.cc) keeps **one best path ending at each position**. For
+       * each start it walks matching pieces shortest-first and replaces the path ending at
+       * `start + length` only when `starts_at == -1` (first to arrive) or the candidate score is
+       * strictly greater. Ties therefore go to the earlier start — the longer piece — which is the
+       * opposite of "first node in `end_nodes_`". `>` and `>=` on the lattice have both been
+       * measured (17 and 21 disagreements, opposite directions) and are not this fix.
+       *
+       * Two other details are load-bearing and both were settled by the oracle rather than by
+       * reasoning:
+       *
+       *  - **empty input is empty output.** The dummy prefix would otherwise make `''` encode to
+       *    `[▁]`, which is one spurious token of silence at the head of every empty utterance.
+       *  - **byte fallback is a post-process of UNK**, not a lattice alternative scored per byte.
+       *    Unknown characters are one UNK node at `min_score - 10`; the processor then emits one
+       *    byte piece per UTF-8 byte. Scoring `unk * nbytes` in the lattice is a different path.
+       */
+      encode(text) {
+        if (text === "") return [];
+        const chars = [...this.normalize(text)];
+        const n = chars.length;
+        if (n === 0) return [];
+        const best = Array.from({ length: n + 1 }, () => ({
+          ids: [],
+          score: 0,
+          startsAt: -1
+        }));
+        const kScoreResetThreshold = 1e5;
+        let maxFrontier = 0;
+        for (let startsAt = 0; startsAt < n; startsAt++) {
+          const here = best[startsAt];
+          if (here === void 0) throw new Error(`tokenizer read past the end of the input at ${startsAt}`);
+          let till = here.score;
+          if (till < -kScoreResetThreshold || till > kScoreResetThreshold) {
+            const offset = till;
+            for (let i = startsAt; i <= maxFrontier; i++) {
+              const node = best[i];
+              if (node !== void 0 && (i === startsAt || node.startsAt !== -1)) {
+                node.score = Math.fround(node.score - offset);
+              }
+            }
+            till = 0;
+          }
+          let hasSingleChar = false;
+          const limit = Math.min(this.#maxPieceLen, n - startsAt);
+          let candidate = "";
+          for (let len = 1; len <= limit; len++) {
+            candidate += this.#charAt(chars, startsAt + len - 1);
+            const hit = this.#usable.get(candidate);
+            if (hit === void 0) continue;
+            maxFrontier = Math.max(maxFrontier, startsAt + len);
+            const candScore = Math.fround(hit.score + till);
+            const target = best[startsAt + len];
+            if (target === void 0) continue;
+            if (target.startsAt === -1 || candScore > target.score) {
+              target.score = candScore;
+              target.startsAt = startsAt;
+              target.ids = [hit.id];
+            }
+            if (len === 1) hasSingleChar = true;
+          }
+          if (!hasSingleChar) {
+            const one = this.#charAt(chars, startsAt);
+            const bytes = Buffer.from(one, "utf8");
+            const ids = [];
+            for (const b of bytes) {
+              const id = this.#byteId[b] ?? -1;
+              ids.push(id >= 0 ? id : this.unkId);
+            }
+            maxFrontier = Math.max(maxFrontier, startsAt + 1);
+            const target = best[startsAt + 1];
+            const candScore = Math.fround(this.#unkPenalty + till);
+            if (target !== void 0 && (target.startsAt === -1 || candScore > target.score)) {
+              target.score = candScore;
+              target.startsAt = startsAt;
+              target.ids = ids;
+            }
+          }
+        }
+        const out = [];
+        let endsAt = n;
+        while (endsAt > 0) {
+          const node = best[endsAt];
+          if (node === void 0 || node.startsAt < 0) {
+            throw new Error("no path through the tokenizer lattice");
+          }
+          for (let k = node.ids.length - 1; k >= 0; k--) out.push(node.ids[k] ?? this.unkId);
+          endsAt = node.startsAt;
+        }
+        return out.toReversed();
+      }
+      /**
+       * Ids back to text.
+       *
+       * Byte pieces must be reassembled as BYTES, not concatenated as the literal string `<0x2F>`.
+       * Encoding `src/core/…` produces `<0x2F>` for each slash, so a naive decode turns a file path
+       * into `src<0x2F>core<0x2F>…` — and chunk splitting decodes id ranges back to text before
+       * re-encoding them, which means the corruption would reach the synthesizer as real words.
+       * Caught by the round-trip case, which is why it is a test and not a comment.
+       */
+      decode(ids) {
+        const out = [];
+        let pending = [];
+        const flush = () => {
+          if (pending.length === 0) return;
+          out.push(Buffer.from(pending));
+          pending = [];
+        };
+        for (const id of ids) {
+          const piece = this.byId[id];
+          if (piece === void 0) continue;
+          if (this.pieces[id]?.type === PieceType.BYTE) {
+            const m = /^<0x([0-9A-Fa-f]{2})>$/.exec(piece);
+            if (m?.[1] !== void 0) {
+              pending.push(Number.parseInt(m[1], 16));
+              continue;
+            }
+          }
+          flush();
+          out.push(Buffer.from(piece, "utf8"));
+        }
+        flush();
+        return Buffer.concat(out).toString("utf8").replaceAll(SPACE, " ").replace(/^ /, "");
+      }
+    };
+  }
+});
+
+// packages/providers/src/pocket-synth/runtime.ts
+import { createHash as createHash2 } from "node:crypto";
+import { existsSync as existsSync3 } from "node:fs";
+import { mkdir as mkdir2, readFile as readFile4, writeFile as writeFile2, rename as rename3, rm as rm4, readdir as readdir3, chmod } from "node:fs/promises";
+import { gunzipSync } from "node:zlib";
+import { join as join4, dirname as dirname3 } from "node:path";
+function platformKey(platform = process.platform, arch = process.arch) {
+  return `${platform}-${arch}`;
+}
+function runtimeDir(env = process.env) {
+  const override = env.ORCA_TTS_RUNTIME_DIR;
+  if (override !== void 0 && override !== "") return override;
+  return join4(dirname3(modelDir(env)), "onnxruntime", RUNTIME_VERSION);
+}
+async function runtimeStatus(dir = runtimeDir(), key = platformKey()) {
+  const wanted = RUNTIME_FILES[key];
+  if (wanted === void 0) {
+    return {
+      kind: "unsupported",
+      platform: key,
+      why: key === "darwin-x64" ? `${RUNTIME_PACKAGE} ${RUNTIME_VERSION} publishes no Intel-Mac binary, so the neural voices cannot run on this machine. Your system voices are unaffected.` : `${RUNTIME_PACKAGE} ${RUNTIME_VERSION} publishes no binary for ${key}. Your system voices are unaffected.`
+    };
+  }
+  const bytes = RUNTIME_APPROX_BYTES[key] ?? 0;
+  if (!existsSync3(dir)) return { kind: "absent", dir, missing: [...wanted], bytes };
+  const present = new Set(await readdir3(dir));
+  const missing = [...wanted, RUNTIME_MANIFEST_FILE].filter((f) => !present.has(f));
+  if (missing.length > 0) return { kind: "absent", dir, missing, bytes };
+  const found = (await readFile4(join4(dir, RUNTIME_MANIFEST_FILE), "utf8")).trim();
+  const want = `${RUNTIME_VERSION}/${RUNTIME_MANIFEST_VERSION}`;
+  if (found !== want) return { kind: "stale", dir, found, want };
+  return { kind: "ready", dir, binding: join4(dir, "onnxruntime_binding.node") };
+}
+var RUNTIME_VERSION, RUNTIME_PACKAGE, RUNTIME_MANIFEST_VERSION, RUNTIME_MANIFEST_FILE, RUNTIME_TARBALL, RUNTIME_FILES, RUNTIME_APPROX_BYTES;
+var init_runtime = __esm({
+  "packages/providers/src/pocket-synth/runtime.ts"() {
+    "use strict";
+    init_models();
+    init_safe_swap();
+    RUNTIME_VERSION = "1.27.0";
+    RUNTIME_PACKAGE = "onnxruntime-node";
+    RUNTIME_MANIFEST_VERSION = 1;
+    RUNTIME_MANIFEST_FILE = ".orca-tts-runtime-manifest";
+    RUNTIME_TARBALL = `https://registry.npmjs.org/${RUNTIME_PACKAGE}/-/${RUNTIME_PACKAGE}-${RUNTIME_VERSION}.tgz`;
+    RUNTIME_FILES = {
+      "darwin-arm64": ["libonnxruntime.1.27.0.dylib", "libonnxruntime.1.dylib", "onnxruntime_binding.node"],
+      "linux-x64": ["libonnxruntime.so.1", "onnxruntime_binding.node"],
+      "linux-arm64": ["libonnxruntime.so.1", "onnxruntime_binding.node"],
+      "win32-x64": ["onnxruntime.dll", "onnxruntime_binding.node", "DirectML.dll", "dxcompiler.dll", "dxil.dll"],
+      "win32-arm64": ["onnxruntime.dll", "onnxruntime_binding.node"]
+    };
+    RUNTIME_APPROX_BYTES = {
+      "darwin-arm64": 391e5,
+      "linux-x64": 37e6,
+      "linux-arm64": 19e6,
+      "win32-x64": 61e6,
+      "win32-arm64": 67e6
+    };
+  }
+});
+
+// packages/providers/src/pocket-synth/engine.ts
+var engine_exports = {};
+__export(engine_exports, {
+  OnnxRuntimeMissingError: () => OnnxRuntimeMissingError,
+  PocketTts: () => PocketTts,
+  loadOrt: () => loadOrt,
+  makeRng: () => makeRng,
+  splitAtNaturalBoundaries: () => splitAtNaturalBoundaries
+});
+import { readFile as readFile5 } from "node:fs/promises";
+import { join as join5 } from "node:path";
+async function loadOrt() {
+  ortPromise ??= (async () => {
+    try {
+      const mod = await import("onnxruntime-node");
+      return mod.default ?? mod;
+    } catch (bundled) {
+      const status = await runtimeStatus();
+      if (status.kind === "unsupported") {
+        ortPromise = null;
+        throw new OnnxRuntimeMissingError(status.why, "unsupported");
+      }
+      if (status.kind === "ready") {
+        try {
+          const mod = await import(status.dir + "/onnxruntime_binding.node");
+          return mod.default ?? mod;
+        } catch (cached) {
+          ortPromise = null;
+          throw new OnnxRuntimeMissingError(
+            `an ONNX Runtime is cached at ${status.dir} but could not be loaded: ${cached instanceof Error ? cached.message : String(cached)}. The operating system voices are unaffected.`
+          );
+        }
+      }
+      ortPromise = null;
+      const size = status.kind === "absent" ? Math.round(status.bytes / 1e6) : 0;
+      throw new OnnxRuntimeMissingError(
+        `The neural voices need the ONNX Runtime, which is not on this machine yet (about ${size} MB). The operating system voices are unaffected, and the Voice Lab can fetch it. (${bundled instanceof Error ? bundled.message : String(bundled)})`
+      );
+    }
+  })();
+  return ortPromise;
+}
+function makeRng(seed = 1) {
+  let s = seed >>> 0 || 1;
+  const next = () => {
+    s ^= s << 13;
+    s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    s >>>= 0;
+    return s / 4294967296;
+  };
+  let spare = null;
+  return (std) => {
+    if (spare !== null) {
+      const v2 = spare;
+      spare = null;
+      return v2 * std;
+    }
+    let u = 0;
+    let v = 0;
+    let r = 0;
+    do {
+      u = next() * 2 - 1;
+      v = next() * 2 - 1;
+      r = u * u + v * v;
+    } while (r === 0 || r >= 1);
+    const f = Math.sqrt(-2 * Math.log(r) / r);
+    spare = v * f;
+    return u * f * std;
+  };
+}
+function isSpace(ch) {
+  return ch !== void 0 && ch.trim() === "";
+}
+function isCloser(ch) {
+  return ch !== void 0 && CLOSERS.has(ch);
+}
+function lastWord(candidate) {
+  const trimmed = candidate.trimEnd();
+  const parts = trimmed.split(/\s+/);
+  return parts[parts.length - 1] ?? "";
+}
+function looksLikeAbbreviation(candidate) {
+  let s = candidate;
+  while (s.length > 0 && isCloser(s[s.length - 1])) s = s.slice(0, -1);
+  const word = lastWord(s);
+  if (ABBREVIATIONS.has(word)) return true;
+  if (word.endsWith(".")) {
+    const stem = word.slice(0, -1);
+    if (stem.length > 0 && [...stem].every((c) => c >= "0" && c <= "9")) return true;
+  }
+  return false;
+}
+function naturalBoundary(candidate, isEndOfText) {
+  if (isEndOfText) return "sentence";
+  let i = candidate.length;
+  while (i > 0) {
+    const ch = candidate[i - 1];
+    if (ch === void 0 || !isCloser(ch)) break;
+    i -= 1;
+  }
+  const last = candidate[i - 1];
+  if (last !== void 0 && SENTENCE_ENDERS.has(last) && !looksLikeAbbreviation(candidate)) {
+    return "sentence";
+  }
+  if (last !== void 0 && CLAUSE_ENDERS.has(last)) return "clause";
+  return "word";
+}
+function splitAtNaturalBoundaries(text, maxTokens, tokenCount) {
+  if (text === "") return [];
+  if (tokenCount(text) <= maxTokens) return [text];
+  const chunks = [];
+  let start = 0;
+  const len = text.length;
+  while (start < len) {
+    while (start < len && isSpace(text[start])) start += text[start].length;
+    if (start >= len) break;
+    let sentenceEnd;
+    let clauseEnd;
+    let wordEnd;
+    let i = start;
+    overflow:
+      for (const ch of text.slice(start)) {
+        const end2 = i + ch.length;
+        const next = text[end2];
+        const atWordEnd = end2 === len || isSpace(next);
+        const atUnspacedDash = (ch === "\u2014" || ch === "\u2013") && !isCloser(next);
+        i = end2;
+        if (!atWordEnd && !atUnspacedDash) continue;
+        if (tokenCount(text.slice(start, end2)) > maxTokens) break overflow;
+        wordEnd = end2;
+        const kind = naturalBoundary(text.slice(start, end2), end2 === len);
+        if (kind === "sentence") sentenceEnd = end2;
+        else if (kind === "clause") clauseEnd = end2;
+      }
+    let end = sentenceEnd ?? clauseEnd ?? wordEnd;
+    if (end === void 0) {
+      let scalarEnd;
+      let j = start;
+      for (const ch of text.slice(start)) {
+        if (isSpace(ch)) break;
+        const next = j + ch.length;
+        if (tokenCount(text.slice(start, next)) <= maxTokens) scalarEnd = next;
+        else break;
+        j = next;
+      }
+      if (scalarEnd === void 0) {
+        throw new Error(
+          `Pocket TTS prompt cannot fit one character within the ${maxTokens}-token limit`
+        );
+      }
+      end = scalarEnd;
+    }
+    let nextStart = end;
+    while (nextStart < len && isSpace(text[nextStart])) nextStart += text[nextStart].length;
+    chunks.push(text.slice(start, nextStart));
+    start = nextStart;
+  }
+  return chunks;
+}
+var OnnxRuntimeMissingError, ortPromise, SENTENCE_ENDERS, CLAUSE_ENDERS, CLOSERS, ABBREVIATIONS, PocketTts;
+var init_engine = __esm({
+  "packages/providers/src/pocket-synth/engine.ts"() {
+    "use strict";
+    init_sentencepiece();
+    init_audio();
+    init_runtime();
+    OnnxRuntimeMissingError = class extends Error {
+      code = "onnxruntime_missing";
+      /** `absent` — it can be downloaded. `unsupported` — it cannot, on this machine, ever. */
+      reason;
+      constructor(message, reason = "absent") {
+        super(message);
+        this.name = "OnnxRuntimeMissingError";
+        this.reason = reason;
+      }
+    };
+    ortPromise = null;
+    SENTENCE_ENDERS = /* @__PURE__ */ new Set([".", "!", "?", "\u3002"]);
+    CLAUSE_ENDERS = /* @__PURE__ */ new Set([",", ";", ":", "\u2014", "\u2013"]);
+    CLOSERS = /* @__PURE__ */ new Set(['"', "'", "\u201D", "\u2019", ")", "]", "}"]);
+    ABBREVIATIONS = /* @__PURE__ */ new Set([
+      "Dr.",
+      "Mr.",
+      "Mrs.",
+      "Ms.",
+      "Prof.",
+      "Sr.",
+      "Jr.",
+      "St.",
+      "Ave.",
+      "Rd.",
+      "Blvd.",
+      "Dept.",
+      "Inc.",
+      "Ltd.",
+      "Co.",
+      "Corp.",
+      "etc.",
+      "vs.",
+      "i.e.",
+      "e.g.",
+      "Ph.D."
+    ]);
+    PocketTts = class _PocketTts {
+      sampleRate;
+      latentDim;
+      conditioningDim;
+      frameRate;
+      maxTokenPerChunk;
+      tokenizer;
+      #ort;
+      #meta;
+      #bos;
+      #zeroFill;
+      #mimiEncoder;
+      #textConditioner;
+      #flowMain;
+      #flowNet;
+      #mimiDecoder;
+      #voiceStates = /* @__PURE__ */ new Map();
+      constructor(parts) {
+        this.#ort = parts.ort;
+        this.#meta = parts.meta;
+        this.#bos = parts.bos;
+        this.#zeroFill = parts.zeroFill;
+        this.tokenizer = parts.tokenizer;
+        this.#mimiEncoder = parts.mimiEncoder;
+        this.#textConditioner = parts.textConditioner;
+        this.#flowMain = parts.flowMain;
+        this.#flowNet = parts.flowNet;
+        this.#mimiDecoder = parts.mimiDecoder;
+        this.sampleRate = parts.meta.sample_rate;
+        this.latentDim = parts.meta.latent_dim;
+        this.conditioningDim = parts.meta.conditioning_dim;
+        this.frameRate = parts.meta.frame_rate;
+        this.maxTokenPerChunk = parts.meta.max_token_per_chunk ?? 50;
+      }
+      static async load(dir, options = {}) {
+        const ort = await loadOrt();
+        const meta = JSON.parse(await readFile5(join5(dir, "bundle.json"), "utf8"));
+        const sessionOptions = {
+          // The model card's number, and it is not a micro-optimisation: the autoregressive loop is a
+          // chain of small matmuls and letting ORT use every core makes them fight for cache. buzz
+          // ships 1; the card measures ~2x at min(cpu, 4). Both are defensible and it is measurable.
+          intraOpNumThreads: options.intraOpNumThreads ?? 4,
+          interOpNumThreads: 1,
+          executionMode: "sequential",
+          graphOptimizationLevel: "all"
+        };
+        const open2 = (file) => ort.InferenceSession.create(join5(dir, file), sessionOptions);
+        const [mimiEncoder, textConditioner, flowMain, flowNet, mimiDecoder] = await Promise.all([
+          open2("mimi_encoder.onnx"),
+          open2("text_conditioner.onnx"),
+          open2("flow_lm_main_int8.onnx"),
+          open2("flow_lm_flow_int8.onnx"),
+          open2("mimi_decoder_int8.onnx")
+        ]);
+        const tokenizer = SentencePieceUnigram.fromBuffer(await readFile5(join5(dir, meta.tokenizer_file)));
+        const bos = meta.bos_before_voice_file === void 0 ? null : readNpy(await readFile5(join5(dir, meta.bos_before_voice_file)));
+        return new _PocketTts({
+          ort,
+          meta,
+          bos,
+          tokenizer,
+          zeroFill: options.__proveZeroFill === true,
+          mimiEncoder,
+          textConditioner,
+          flowMain,
+          flowNet,
+          mimiDecoder
+        });
+      }
+      /* ---- recurrent state, from the bundle's own manifest ---------------------- */
+      /**
+       * Build the initial state for one graph.
+       *
+       * **`fill` is load-bearing and this is the most dangerous line in the file.** The flow LM's
+       * attention cache is filled with NaN so that unwritten positions poison anything that reads
+       * them — that is how the graph knows a slot is empty. Zero-filling it produces perfectly
+       * plausible audio that says nothing, which is exactly why `--prove` breaks it here.
+       */
+      #initState(manifest) {
+        const state = {};
+        for (const entry of manifest) {
+          const size = entry.shape.reduce((a, b) => a * b, 1);
+          let data;
+          if (entry.dtype === "int64") data = new BigInt64Array(size);
+          else if (entry.dtype === "bool") data = new Uint8Array(size);
+          else if (entry.dtype === "float32") data = new Float32Array(size);
+          else throw new Error(`unsupported state dtype ${entry.dtype} for ${entry.input_name}`);
+          if (!this.#zeroFill) {
+            if (entry.fill === "nan" && data instanceof Float32Array) data.fill(Number.NaN);
+            else if (entry.fill === "ones") {
+              if (data instanceof BigInt64Array) data.fill(1n);
+              else data.fill(1);
+            }
+          }
+          state[entry.input_name] = new this.#ort.Tensor(entry.dtype, data, entry.shape);
+        }
+        return state;
+      }
+      /**
+       * Carry each `out_state_N` back to its `state_N`.
+       *
+       * BY NAME, not by output position. The reference indexes a positional list with an offset, which
+       * is correct there and would be one silent renumber away from wrong here — the same species as
+       * `FIXED_BY_DESIGN_STAGES` denoting different transforms after an insert (P37).
+       */
+      #advance(state, result, manifest) {
+        for (const entry of manifest) {
+          const next = result[entry.output_name];
+          if (next === void 0) throw new Error(`the graph produced no ${entry.output_name}`);
+          state[entry.input_name] = next;
+        }
+      }
+      #clone(state) {
+        const out = {};
+        for (const [k, t] of Object.entries(state)) {
+          out[k] = new this.#ort.Tensor(t.type, t.data.slice(), t.dims);
+        }
+        return out;
+      }
+      /* ---- voices --------------------------------------------------------------- */
+      /** Encode a reference clip into voice embeddings. ~1 s for a 10 s clip, hence the cache above. */
+      async encodeVoice(wavBuffer) {
+        const { samples, rate } = readWav(wavBuffer);
+        const audio = resample(samples, rate, this.sampleRate);
+        const out = await this.#mimiEncoder.run({
+          audio: new this.#ort.Tensor("float32", audio, [1, 1, audio.length])
+        });
+        const name = this.#mimiEncoder.outputNames[0];
+        const tensor = name === void 0 ? void 0 : out[name];
+        if (tensor === void 0) throw new Error("the Mimi encoder produced no output");
+        return tensor;
+      }
+      /**
+       * The state every utterance in a voice starts from.
+       *
+       * Expensive and dependent on nothing else, so it is computed once and cloned per utterance —
+       * 746 ms then 7 ms `[measured-here]`. `wavBuffer` may be null once the voice is cached, which is
+       * what lets a caller avoid reading 600 KB it will not use.
+       */
+      async voiceState(key, wavBuffer) {
+        const cached = this.#voiceStates.get(key);
+        if (cached !== void 0) return this.#clone(cached);
+        if (wavBuffer === null) throw new Error(`voice ${key} is not cached and no audio was given`);
+        const emb = await this.encodeVoice(wavBuffer);
+        let dims = [...emb.dims];
+        let data = emb.data;
+        if (dims.length > 3) dims = dims.slice(dims.length - 3);
+        if (dims.length < 3) dims = [1, dims[0] ?? 0, this.conditioningDim];
+        if (this.#meta.insert_bos_before_voice === true && this.#bos !== null) {
+          const bosFrames = this.#bos.shape[this.#bos.shape.length - 2] ?? 0;
+          const merged = new Float32Array(this.#bos.data.length + data.length);
+          merged.set(this.#bos.data, 0);
+          merged.set(data, this.#bos.data.length);
+          data = merged;
+          dims = [1, bosFrames + (dims[1] ?? 0), dims[2] ?? this.conditioningDim];
+        }
+        const state = this.#initState(this.#meta.flow_lm_state_manifest);
+        const result = await this.#flowMain.run({
+          sequence: new this.#ort.Tensor("float32", new Float32Array(0), [1, 0, this.latentDim]),
+          text_embeddings: new this.#ort.Tensor("float32", data, dims),
+          ...state
+        });
+        this.#advance(state, result, this.#meta.flow_lm_state_manifest);
+        this.#voiceStates.set(key, this.#clone(state));
+        return state;
+      }
+      /** Whether a voice's state is already built, so a caller can report a cold first utterance. */
+      hasVoice(key) {
+        return this.#voiceStates.has(key);
+      }
+      /* ---- text ----------------------------------------------------------------- */
+      /**
+       * The reference's prompt hygiene, kept verbatim.
+       *
+       * It changes the tokens, so it changes the audio: capitalising the first letter and adding a
+       * final full stop are not cosmetic, they are what the model was trained to receive.
+       */
+      preparePrompt(text) {
+        let t = text.trim();
+        if (t === "") throw new Error("cannot synthesize empty text");
+        t = t.replaceAll("\n", " ").replaceAll("\r", " ").replaceAll("  ", " ");
+        if (this.#meta.remove_semicolons === true) t = t.replaceAll(";", ",");
+        const words = t.split(/\s+/).length;
+        const framesAfterEos = words <= 4 ? 3 : 1;
+        const first = t[0] ?? "";
+        if (first !== first.toUpperCase()) t = first.toUpperCase() + t.slice(1);
+        const last = t[t.length - 1] ?? "";
+        if (/[\p{L}\p{N}]/u.test(last)) t += ".";
+        if (this.#meta.pad_with_spaces_for_short_inputs === true && t.split(/\s+/).length < 5) {
+          t = " ".repeat(8) + t;
+        }
+        return { text: t, framesAfterEos };
+      }
+      /**
+       * Split at the bundle's token cap.
+       *
+       * The cap is the model's, not ours: `max_token_per_chunk` is 50 for this bundle, and a longer
+       * prompt does not error — it degrades. Sentence ends are preferred so prosody does not break
+       * mid-phrase; when a single sentence (or a single word) still overflows, the fallback ladder
+       * in `splitAtNaturalBoundaries` cuts at a clause, then a word, then a Unicode scalar. Nothing
+       * is dropped at any rung.
+       */
+      splitIntoChunks(text) {
+        const { text: prepared } = this.preparePrompt(text);
+        return splitAtNaturalBoundaries(
+          prepared,
+          this.maxTokenPerChunk,
+          (s) => this.tokenizer.encode(s).length
+        );
+      }
+      /* ---- generation ----------------------------------------------------------- */
+      /**
+       * One chunk of text into latent frames. This loop is the entire cost of speaking.
+       *
+       * **EOS is a logit, not a token.** The graph reports `eos_logit > -4.0`, and the reference then
+       * runs `framesAfterEos` MORE frames before stopping — cutting on the first EOS clips the tail of
+       * the last word, which is the kind of defect a listener hears as a swallowed consonant and
+       * cannot name.
+       */
+      async *framesFor(baseState, tokenIds, opts) {
+        const state = this.#clone(baseState);
+        const ids = BigInt64Array.from(tokenIds.map((n) => BigInt(n)));
+        const conditioned = await this.#textConditioner.run({
+          token_ids: new this.#ort.Tensor("int64", ids, [1, ids.length])
+        });
+        const teName = this.#textConditioner.outputNames[0];
+        const te = teName === void 0 ? void 0 : conditioned[teName];
+        if (te === void 0) throw new Error("the text conditioner produced no output");
+        const teDims = te.dims.length === 2 ? [1, ...te.dims] : [...te.dims];
+        const primed = await this.#flowMain.run({
+          sequence: new this.#ort.Tensor("float32", new Float32Array(0), [1, 0, this.latentDim]),
+          text_embeddings: new this.#ort.Tensor("float32", te.data, teDims),
+          ...state
+        });
+        this.#advance(state, primed, this.#meta.flow_lm_state_manifest);
+        let curr = new this.#ort.Tensor(
+          "float32",
+          new Float32Array(this.latentDim).fill(this.#zeroFill ? 0 : Number.NaN),
+          [1, 1, this.latentDim]
+        );
+        const emptyText = new this.#ort.Tensor("float32", new Float32Array(0), [1, 0, this.conditioningDim]);
+        const limit = opts.maxFrames ?? Math.ceil((tokenIds.length / 3 + 2) * this.frameRate);
+        const dt = 1 / opts.lsdSteps;
+        const std = opts.temperature > 0 ? Math.sqrt(opts.temperature) : 0;
+        let eosStep = null;
+        for (let step = 0; step < limit; step++) {
+          const out = await this.#flowMain.run({ sequence: curr, text_embeddings: emptyText, ...state });
+          const conditioning = out.conditioning;
+          const eos = out.eos_logit;
+          if (conditioning === void 0 || eos === void 0) {
+            throw new Error("the flow LM produced no conditioning or no eos_logit");
+          }
+          this.#advance(state, out, this.#meta.flow_lm_state_manifest);
+          const eosValue = eos.data[0] ?? Number.NEGATIVE_INFINITY;
+          if (eosValue > -4 && eosStep === null) eosStep = step;
+          if (eosStep !== null && step >= eosStep + opts.framesAfterEos) return;
+          const x = new Float32Array(this.latentDim);
+          if (std > 0) for (let i = 0; i < x.length; i++) x[i] = opts.rng(std);
+          for (let j = 0; j < opts.lsdSteps; j++) {
+            const s = j / opts.lsdSteps;
+            const flow = await this.#flowNet.run({
+              c: conditioning,
+              s: new this.#ort.Tensor("float32", Float32Array.of(s), [1, 1]),
+              t: new this.#ort.Tensor("float32", Float32Array.of(s + dt), [1, 1]),
+              x: new this.#ort.Tensor("float32", x, [1, this.latentDim])
+            });
+            const dirName = this.#flowNet.outputNames[0];
+            const dir = dirName === void 0 ? void 0 : flow[dirName];
+            if (dir === void 0) throw new Error("the flow network produced no direction");
+            const d2 = dir.data;
+            for (let i = 0; i < x.length; i++) x[i] = (x[i] ?? 0) + (d2[i] ?? 0) * dt;
+          }
+          curr = new this.#ort.Tensor("float32", x.slice(), [1, 1, this.latentDim]);
+          yield x.slice();
+        }
+      }
+      /** Latent frames into audio, in batches, carrying the decoder's own recurrent state. */
+      async decodeFrames(frames, chunkSize = 15) {
+        const state = this.#initState(this.#meta.mimi_state_manifest);
+        const pieces = [];
+        for (let i = 0; i < frames.length; i += chunkSize) {
+          const batch = frames.slice(i, i + chunkSize);
+          const flat = new Float32Array(batch.length * this.latentDim);
+          for (const [b, frame] of batch.entries()) flat.set(frame, b * this.latentDim);
+          const out = await this.#mimiDecoder.run({
+            latent: new this.#ort.Tensor("float32", flat, [1, batch.length, this.latentDim]),
+            ...state
+          });
+          const audio = out.audio_frame;
+          if (audio === void 0) throw new Error("the Mimi decoder produced no audio_frame");
+          pieces.push(audio.data);
+          this.#advance(state, out, this.#meta.mimi_state_manifest);
+        }
+        const total = pieces.reduce((n, p) => n + p.length, 0);
+        const merged = new Float32Array(total);
+        let at = 0;
+        for (const p of pieces) {
+          merged.set(p, at);
+          at += p.length;
+        }
+        return merged;
+      }
+      /** Text plus a voice into 24 kHz mono float32. */
+      async synthesize(text, voice, params = {}) {
+        const temperature = params.temperature ?? 0.7;
+        const lsdSteps = params.lsdSteps ?? 1;
+        const rng = makeRng(params.seed ?? 1);
+        const frames = [];
+        for (const chunk of this.splitIntoChunks(text)) {
+          const trimmed = chunk.trim();
+          if (trimmed === "") continue;
+          const { framesAfterEos } = this.preparePrompt(trimmed);
+          const effective = this.#meta.model_recommended_frames_after_eos ?? framesAfterEos + 2;
+          for await (const frame of this.framesFor(voice, this.tokenizer.encode(trimmed), {
+            temperature,
+            lsdSteps,
+            maxFrames: params.maxFrames ?? null,
+            framesAfterEos: effective,
+            rng
+          })) frames.push(frame);
+        }
+        return this.decodeFrames(frames);
+      }
+    };
+  }
+});
+
+// packages/plugin/src/main.ts
+import { existsSync as existsSync4 } from "node:fs";
+import { readFile as readFile9 } from "node:fs/promises";
 
 // packages/providers/src/os-synth/index.ts
 import { spawn } from "node:child_process";
@@ -103,6 +1366,7 @@ var OsSynthProvider = class {
   #child = null;
   #cancelled = false;
   #linuxBackend = void 0;
+  #linuxCandidates = LINUX_BACKENDS;
   #announcedFloor = false;
   #unavailableReason = null;
   /**
@@ -119,6 +1383,7 @@ var OsSynthProvider = class {
     this.#notify = opts.notify ?? (() => {
     });
     if (opts.linuxBackend !== void 0) this.#linuxBackend = opts.linuxBackend;
+    if (opts.linuxBackendCandidates !== void 0) this.#linuxCandidates = opts.linuxBackendCandidates;
   }
   get isWarm() {
     return this.#warm;
@@ -211,7 +1476,7 @@ var OsSynthProvider = class {
   async #resolveLinuxBackend() {
     if (this.#linuxBackend !== void 0 && this.#linuxBackend !== null) return this.#linuxBackend;
     const tried = [];
-    for (const backend of LINUX_BACKENDS) {
+    for (const backend of this.#linuxCandidates) {
       tried.push(backend);
       const ok = await this.#capture(backend, ["--version"]).then(() => true, () => false);
       if (!ok) continue;
@@ -369,6 +1634,297 @@ var OsSynthProvider = class {
   }
 };
 
+// packages/providers/src/pocket-synth/index.ts
+init_audio();
+init_models();
+init_voices();
+import { readFile as readFile6 } from "node:fs/promises";
+import { join as join6 } from "node:path";
+var ORT_MODULE = "onnxruntime-node";
+var ENGINE_MODULE = "./engine.ts";
+var POCKET_CAPABILITIES = {
+  streaming: false,
+  offline: true,
+  needsApiKey: false,
+  needsModelDownload: INSTALL_TOTAL_BYTES,
+  licence: "CC-BY-4.0",
+  cloning: true,
+  sampleRate: 24e3
+};
+var PocketOrtUnavailableError = class extends Error {
+  constructor(cause) {
+    const why = cause instanceof Error ? cause.message : String(cause);
+    super(`Pocket TTS needs the optional module "${ORT_MODULE}", but it could not be loaded: ${why}`, {
+      cause
+    });
+    this.name = "PocketOrtUnavailableError";
+  }
+};
+var PocketModelUnavailableError = class extends Error {
+  status;
+  constructor(status) {
+    const detail = status.kind === "absent" ? `missing ${status.missing.join(", ")}` : `model manifest is stale (found ${status.found}, need ${status.want})`;
+    super(`Pocket TTS model is not ready in ${status.dir}: ${detail}`);
+    this.name = "PocketModelUnavailableError";
+    this.status = status;
+  }
+};
+var PocketVoiceUnavailableError = class extends Error {
+  voice;
+  constructor(voice) {
+    super(`Pocket TTS has no voice named ${voice}`);
+    this.name = "PocketVoiceUnavailableError";
+    this.voice = voice;
+  }
+};
+function cancellation(external) {
+  const controller = new AbortController();
+  let settleStopped;
+  let settleFinished;
+  const token = {
+    cancelled: external?.aborted === true,
+    iterator: null,
+    signal: controller.signal,
+    stopped: new Promise((resolve) => {
+      settleStopped = resolve;
+    }),
+    finished: new Promise((resolve) => {
+      settleFinished = resolve;
+    }),
+    stop: () => {
+      if (token.cancelled) return;
+      token.cancelled = true;
+      controller.abort();
+      void token.iterator?.return?.()?.then(() => void 0, () => void 0);
+      settleStopped?.();
+    },
+    finish: () => {
+      settleFinished?.();
+    },
+    dispose: () => {
+      external?.removeEventListener("abort", token.stop);
+      settleFinished?.();
+    }
+  };
+  if (token.cancelled) {
+    controller.abort();
+    settleStopped?.();
+  } else {
+    external?.addEventListener("abort", token.stop, { once: true });
+  }
+  return token;
+}
+function hasFrameLoop(engine) {
+  return typeof engine.framesFor === "function" && typeof engine.decodeFrames === "function" && engine.tokenizer !== void 0;
+}
+function applySpeechRate(samples, sampleRate, rate) {
+  if (rate === void 0 || rate === 1) return samples;
+  if (!(rate > 0) || !Number.isFinite(rate)) {
+    throw new RangeError(`Pocket TTS speaking rate must be a positive finite number, got ${String(rate)}`);
+  }
+  return resample(samples, sampleRate, sampleRate / rate);
+}
+function pocketRng(seed = 1) {
+  let s = seed >>> 0 || 1;
+  const next = () => {
+    s ^= s << 13;
+    s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    s >>>= 0;
+    return s / 4294967296;
+  };
+  let spare = null;
+  return (std) => {
+    if (spare !== null) {
+      const v2 = spare;
+      spare = null;
+      return v2 * std;
+    }
+    let u = 0;
+    let v = 0;
+    let r = 0;
+    do {
+      u = next() * 2 - 1;
+      v = next() * 2 - 1;
+      r = u * u + v * v;
+    } while (r === 0 || r >= 1);
+    const mag = Math.sqrt(-2 * Math.log(r) / r);
+    spare = v * mag;
+    return u * mag * std;
+  };
+}
+var PocketSynthProvider = class {
+  id = "pocket";
+  displayName = "Pocket TTS (neural)";
+  capabilities = POCKET_CAPABILITIES;
+  #dir;
+  #loadOrt;
+  #loadEngine;
+  #modelStatus;
+  #readFile;
+  #voiceStates = /* @__PURE__ */ new Map();
+  #active = /* @__PURE__ */ new Set();
+  #engine = null;
+  #preparing = null;
+  constructor(opts = {}) {
+    this.#dir = opts.dir ?? modelDir();
+    this.#loadOrt = opts.loadOrt ?? (async () => {
+      const { loadOrt: loadOrt2 } = await Promise.resolve().then(() => (init_engine(), engine_exports));
+      return loadOrt2();
+    });
+    this.#loadEngine = opts.loadEngine ?? (async () => await import(ENGINE_MODULE));
+    this.#modelStatus = opts.modelStatus ?? modelStatus;
+    this.#readFile = opts.readFile ?? (async (path) => readFile6(path));
+  }
+  get isWarm() {
+    return this.#engine !== null;
+  }
+  async prepare() {
+    if (this.#engine !== null) return;
+    if (this.#preparing !== null) return this.#preparing;
+    const preparing = this.#prepareOnce();
+    this.#preparing = preparing;
+    try {
+      await preparing;
+    } finally {
+      if (this.#preparing === preparing) this.#preparing = null;
+    }
+  }
+  async #prepareOnce() {
+    const status = await this.#modelStatus(this.#dir);
+    if (status.kind !== "ready") throw new PocketModelUnavailableError(status);
+    try {
+      await this.#loadOrt();
+    } catch (err) {
+      throw new PocketOrtUnavailableError(err);
+    }
+    const { PocketTts: PocketTts2 } = await this.#loadEngine();
+    this.#engine = await PocketTts2.load(this.#dir);
+  }
+  async listVoices() {
+    return POCKET_VOICES.map((voice) => voice.key);
+  }
+  async *generate(text, opts = {}) {
+    if (text.trim().length === 0) return;
+    const active = cancellation(opts.signal);
+    this.#active.add(active);
+    try {
+      if (active.cancelled) return;
+      await this.prepare();
+      if (active.cancelled) return;
+      const engine = this.#engine;
+      if (engine === null) throw new Error("Pocket TTS prepare completed without an engine");
+      const voice = this.#resolveVoice(opts.voice ?? POCKET_DEFAULT_VOICE);
+      const state = await this.#voiceState(engine, voice);
+      if (active.cancelled) return;
+      const samples = hasFrameLoop(engine) ? await this.#renderFrames(engine, state, text, active) : await this.#renderSynthesize(engine, state, text, active);
+      if (samples === null || active.cancelled) return;
+      const timed = applySpeechRate(samples, engine.sampleRate, opts.rate);
+      const wav = writeWav(timed, engine.sampleRate);
+      yield {
+        data: new Uint8Array(wav),
+        format: "wav",
+        sampleRate: engine.sampleRate,
+        channels: 1
+      };
+    } finally {
+      this.#active.delete(active);
+      active.finish();
+      active.dispose();
+    }
+  }
+  async cancel() {
+    const pending = [...this.#active];
+    for (const active of pending) active.stop();
+    await Promise.all(pending.map((active) => active.finished));
+  }
+  /**
+   * Drive `framesFor` so cancel can close the generator between ONNX frames.
+   * The real engine exposes this loop; tests that only stub `synthesize` take the other path.
+   */
+  async #renderFrames(engine, state, text, active) {
+    const chunks = engine.splitIntoChunks?.(text) ?? [text];
+    const frames = [];
+    const rng = pocketRng(1);
+    for (const chunk of chunks) {
+      if (active.cancelled) return null;
+      const ids = [...engine.tokenizer.encode(chunk)];
+      const framesAfterEos = (engine.preparePrompt?.(chunk).framesAfterEos ?? 1) + 2;
+      const iterator = engine.framesFor(state, ids, {
+        temperature: 0.7,
+        lsdSteps: 1,
+        maxFrames: null,
+        framesAfterEos,
+        rng,
+        signal: active.signal
+      })[Symbol.asyncIterator]();
+      active.iterator = iterator;
+      try {
+        for (; ; ) {
+          const next = await iterator.next();
+          if (next.done === true || active.cancelled) break;
+          frames.push(next.value);
+        }
+      } finally {
+        if (active.iterator === iterator) active.iterator = null;
+      }
+      if (active.cancelled) return null;
+    }
+    if (active.cancelled) return null;
+    return engine.decodeFrames(frames);
+  }
+  async #renderSynthesize(engine, state, text, active) {
+    const rendered = engine.synthesize(text, state, { signal: active.signal }).then(
+      (samples) => ({ kind: "audio", samples }),
+      (error) => ({ kind: "error", error })
+    );
+    const outcome = await Promise.race([
+      rendered,
+      active.stopped.then(() => ({ kind: "cancelled" }))
+    ]);
+    if (outcome.kind === "cancelled" || active.cancelled) return null;
+    if (outcome.kind === "error") throw outcome.error;
+    return outcome.samples;
+  }
+  /**
+   * R16-08: accept BOTH spellings, because the seam produces both and neither half was wrong.
+   *
+   * `listVoices()` advertises qualified keys (`pocket:anna`) so the picker cannot confuse a Pocket
+   * voice with an OS one. But `scripts/voice-lab.mjs` strips the qualifier before dispatch, on
+   * purpose -- "a qualified key is never handed to either provider" -- so what actually arrives
+   * here is the bare `anna`. This used to run it through `parseVoiceKey`, whose documented rule is
+   * that an unqualified name means `os:`, and throw. Every advertised voice 503'd.
+   *
+   * A bare name is therefore provider-local and means THIS backend. A qualified one must name this
+   * backend or be refused. What is never allowed is falling back to a default: a listener who
+   * asked for Anna and silently got Mary has been lied to about who is speaking (principle VIII),
+   * so an unknown name is still an error in both spellings.
+   */
+  #resolveVoice(key) {
+    const qualified = key.includes(":");
+    if (qualified && parseVoiceKey(key).backend !== POCKET_BACKEND) {
+      throw new PocketVoiceUnavailableError(key);
+    }
+    const wanted = qualified ? key : formatVoiceKey(POCKET_BACKEND, key);
+    const voice = POCKET_VOICES.find((candidate) => candidate.key === wanted);
+    if (voice === void 0) throw new PocketVoiceUnavailableError(key);
+    return voice;
+  }
+  async #voiceState(engine, voice) {
+    const cached = this.#voiceStates.get(voice.key);
+    if (cached !== void 0) return cached;
+    const loading = this.#readFile(join6(this.#dir, voice.file)).then(async (wav) => engine.voiceState(voice.key, wav));
+    this.#voiceStates.set(voice.key, loading);
+    try {
+      return await loading;
+    } catch (err) {
+      if (this.#voiceStates.get(voice.key) === loading) this.#voiceStates.delete(voice.key);
+      throw err;
+    }
+  }
+};
+
 // packages/providers/src/registry.ts
 var ProviderRegistry = class {
   #providers = /* @__PURE__ */ new Map();
@@ -436,7 +1992,11 @@ var ProviderRegistry = class {
         this.#lastFailure = why;
         continue;
       }
-      const reason = rung === "preferred" ? void 0 : `${requestedId ?? this.#preferredId ?? "preferred engine"} was unavailable; using ${p.displayName}`;
+      const unavailable = [
+        ...failures,
+        ...unknown.map((missing) => `${missing}: no provider with that id is registered`)
+      ];
+      const reason = rung === "preferred" ? void 0 : `${requestedId ?? this.#preferredId ?? "preferred engine"} was unavailable${unavailable.length === 0 ? "" : ` (${unavailable.join("; ")})`}; using ${p.displayName}`;
       return { provider: p, status: reason === void 0 ? { providerId: p.id, rung } : { providerId: p.id, rung, reason } };
     }
     this.#lastFailureDetail = this.#describeFailure(tried, unknown, failures);
@@ -480,7 +2040,8 @@ function makeHost(orca, hooks = {}) {
     logFailures: () => logFailures,
     registeredCommands: () => registered,
     notify(title, body, opts = {}) {
-      const params = { title: title.slice(0, 120) };
+      const safeTitle = title.trim() !== "" ? title : (body ?? "").trim() !== "" ? body : "Read aloud";
+      const params = { title: safeTitle.slice(0, 120) };
       if (body !== void 0) params["body"] = body.slice(0, 1e3);
       const message = body ?? title;
       const undelivered = (why) => {
@@ -846,18 +2407,18 @@ function stripHtmlComments(src) {
   let out = "";
   let i = 0;
   while (i < src.length) {
-    const open = src.indexOf("<!--", i);
-    if (open === -1) {
+    const open2 = src.indexOf("<!--", i);
+    if (open2 === -1) {
       out += src.slice(i);
       break;
     }
-    out += src.slice(i, open);
-    const close = src.indexOf("-->", open + 4);
+    out += src.slice(i, open2);
+    const close = src.indexOf("-->", open2 + 4);
     if (close === -1) {
-      out += src.slice(open + 4);
+      out += src.slice(open2 + 4);
       break;
     }
-    const newlines = src.slice(open, close + 3).split("\n").length - 1;
+    const newlines = src.slice(open2, close + 3).split("\n").length - 1;
     out += newlines > 0 ? "\n".repeat(newlines) : " ";
     i = close + 3;
   }
@@ -1265,12 +2826,21 @@ function under1000(n) {
   const r = n % 100;
   return r === 0 ? h : `${h} ${under100(r)}`;
 }
+var SCALES = [
+  [1e9, "billion"],
+  [1e6, "million"],
+  [1e3, "thousand"]
+];
 function numberToWords(n) {
   if (n < 1e3) return under1000(n);
-  const th = Math.floor(n / 1e3);
-  const r = n % 1e3;
-  const head = `${under1000(th)} thousand`;
-  return r === 0 ? head : `${head} ${under1000(r)}`;
+  for (const [size, name] of SCALES) {
+    if (n >= size) {
+      const head = `${numberToWords(Math.floor(n / size))} ${name}`;
+      const rest = n % size;
+      return rest === 0 ? head : `${head} ${numberToWords(rest)}`;
+    }
+  }
+  return under1000(n);
 }
 function spokenTime(h, m) {
   const hh = under100(h);
@@ -1347,7 +2917,7 @@ function expandNumbers(src) {
       continue;
     }
     const value = Number(digits);
-    if (value >= 1e6 || digits.length > 6) {
+    if (value >= 1e9 || digits.length > 12) {
       out += raw;
       i = j;
       continue;
@@ -1434,9 +3004,9 @@ function hasSpeakableGlyph2(text) {
 }
 var SENTENCE_END = /* @__PURE__ */ new Set([".", "!", "?"]);
 var CLAUSE_END = /* @__PURE__ */ new Set([",", ";", ":", "\u2014", "\u2013"]);
-var CLOSERS = /* @__PURE__ */ new Set([")", "]", "}", '"', "'", "\u201D", "\u2019"]);
-var SPACE = /* @__PURE__ */ new Set([" ", "\n", "	", "\r"]);
-var ABBREVIATIONS = /* @__PURE__ */ new Set([
+var CLOSERS2 = /* @__PURE__ */ new Set([")", "]", "}", '"', "'", "\u201D", "\u2019"]);
+var SPACE2 = /* @__PURE__ */ new Set([" ", "\n", "	", "\r"]);
+var ABBREVIATIONS2 = /* @__PURE__ */ new Set([
   "e.g",
   "i.e",
   "etc",
@@ -1529,7 +3099,7 @@ var Chunker = class {
     let firstSentence = -1;
     let lastSentence = -1;
     let lastClause = -1;
-    let lastWord = -1;
+    let lastWord2 = -1;
     let lastFitting = -1;
     let overflowed = false;
     for (let i = 0; i < buf.length; i++) {
@@ -1555,10 +3125,10 @@ var Chunker = class {
         if (this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits && this.#carriesSpeech(cut)) {
           lastClause = cut;
         }
-      } else if (SPACE.has(ch)) {
+      } else if (SPACE2.has(ch)) {
         const cut = this.#absorbSpaces(i);
         if (cut > 0 && this.#countUnits(buf.slice(0, cut)) <= this.#maxUnits && this.#carriesSpeech(cut)) {
-          lastWord = cut;
+          lastWord2 = cut;
         }
       }
     }
@@ -1574,7 +3144,7 @@ var Chunker = class {
     }
     if (lastSentence > 0) return { index: lastSentence, kind: "sentence" };
     if (lastClause > 0) return { index: lastClause, kind: "clause" };
-    if (lastWord > 0) return { index: lastWord, kind: "word" };
+    if (lastWord2 > 0) return { index: lastWord2, kind: "word" };
     if (lastFitting > 0) return { index: lastFitting, kind: "scalar" };
     return { index: 1, kind: "scalar" };
   }
@@ -1620,12 +3190,12 @@ var Chunker = class {
   }
   #skipClosers(from) {
     let i = from;
-    while (i < this.#buffer.length && CLOSERS.has(this.#buffer[i])) i++;
+    while (i < this.#buffer.length && CLOSERS2.has(this.#buffer[i])) i++;
     return i;
   }
   #absorbSpaces(from) {
     let i = from;
-    while (i < this.#buffer.length && SPACE.has(this.#buffer[i])) i++;
+    while (i < this.#buffer.length && SPACE2.has(this.#buffer[i])) i++;
     return i;
   }
   /** Is the '.' at `dot` a real sentence end, given the next non-closer is at `after`? */
@@ -1634,9 +3204,9 @@ var Chunker = class {
     if (buf[dot] !== ".") return true;
     if (isDigit2(buf[after])) return false;
     let start = dot;
-    while (start > 0 && !SPACE.has(buf[start - 1])) start--;
+    while (start > 0 && !SPACE2.has(buf[start - 1])) start--;
     const token = buf.slice(start, dot).toLowerCase();
-    if (ABBREVIATIONS.has(token)) return false;
+    if (ABBREVIATIONS2.has(token)) return false;
     if (token.includes(".")) return false;
     if (token.length > 0 && [...token].every((c) => c >= "0" && c <= "9")) return false;
     if (token.length === 1 && token !== token.toUpperCase()) return false;
@@ -3413,9 +4983,9 @@ var SpeechService = class {
 
 // packages/plugin/src/sinks/subprocess-sink.ts
 import { spawn as spawn3 } from "node:child_process";
-import { mkdtemp as mkdtemp2, writeFile, rm as rm2 } from "node:fs/promises";
+import { mkdtemp as mkdtemp2, writeFile as writeFile3, rm as rm5 } from "node:fs/promises";
 import { tmpdir as tmpdir2 } from "node:os";
-import { join as join2 } from "node:path";
+import { join as join7 } from "node:path";
 var PLAYERS = {
   darwin: [{ cmd: "afplay", args: (f) => [f] }],
   win32: [{
@@ -3479,10 +5049,10 @@ var SubprocessSink = class {
     return this.#lastExit;
   }
   async enqueue(chunk) {
-    const dir = await mkdtemp2(join2(tmpdir2(), "orca-tts-play-"));
+    const dir = await mkdtemp2(join7(tmpdir2(), "orca-tts-play-"));
     const ext = FORMAT_EXTENSION[chunk.format] ?? sanitiseExtension(chunk.format);
-    const file = join2(dir, `chunk.${ext}`);
-    await writeFile(file, chunk.data);
+    const file = join7(dir, `chunk.${ext}`);
+    await writeFile3(file, chunk.data);
     try {
       const played = await this.#play(file);
       if (!played) return;
@@ -3498,7 +5068,7 @@ var SubprocessSink = class {
       this.#log(`read-aloud: ${failure.reason}`);
       this.#onFailure(failure);
     } finally {
-      await rm2(dir, { recursive: true, force: true }).catch(() => void 0);
+      await rm5(dir, { recursive: true, force: true }).catch(() => void 0);
     }
   }
   async stop() {
@@ -3558,10 +5128,10 @@ function sanitiseExtension(format) {
 }
 
 // packages/plugin/src/huddle/index.ts
-import { readFile as readFile2, readdir, stat } from "node:fs/promises";
+import { readFile as readFile7, readdir as readdir4, stat } from "node:fs/promises";
 import { watch } from "node:fs";
-import { homedir } from "node:os";
-import { join as join3 } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { join as join8 } from "node:path";
 
 // packages/plugin/src/huddle/decoders.ts
 var UNSUPPORTED_AGENTS = [
@@ -4096,7 +5666,7 @@ var HuddleController = class {
     });
   }
   #projectsRoot() {
-    return this.#deps.projectsDir ?? join3(homedir(), ".claude", "projects");
+    return this.#deps.projectsDir ?? join8(homedir2(), ".claude", "projects");
   }
   async #newestTranscript(worktreePath) {
     return (await this.#findNewest(worktreePath)).file;
@@ -4113,7 +5683,7 @@ var HuddleController = class {
     const root = this.#projectsRoot();
     let dirs;
     try {
-      dirs = await readdir(root);
+      dirs = await readdir4(root);
     } catch (err) {
       const code = err.code;
       this.#deps.log(`read-aloud: cannot read ${root}: ${String(code ?? err)}`);
@@ -4127,14 +5697,14 @@ var HuddleController = class {
     for (const d2 of search) {
       let entries;
       try {
-        entries = await readdir(join3(root, d2));
+        entries = await readdir4(join8(root, d2));
       } catch {
         skipped++;
         continue;
       }
       for (const e of entries) {
         if (!e.endsWith(".jsonl")) continue;
-        const p = join3(root, d2, e);
+        const p = join8(root, d2, e);
         try {
           files.push({ path: p, mtime: (await stat(p)).mtimeMs });
         } catch {
@@ -4189,7 +5759,7 @@ var HuddleController = class {
   async #read(file) {
     let raw;
     try {
-      raw = await readFile2(file, "utf8");
+      raw = await readFile7(file, "utf8");
     } catch (err) {
       this.#deps.log(`read-aloud: cannot read ${file}: ${String(err)}`);
       return { replies: [], format: "unknown", truncated: false, boundaries: 0 };
@@ -4227,16 +5797,16 @@ function inboxDir(env, platform) {
   const home = env["HOME"] ?? env["USERPROFILE"] ?? ".";
   if (platform === "win32") {
     const appData = env["APPDATA"];
-    return join4(appData !== void 0 && appData.length > 0 ? appData : join4(home, "AppData", "Roaming"), INBOX_DIRNAME);
+    return join9(appData !== void 0 && appData.length > 0 ? appData : join9(home, "AppData", "Roaming"), INBOX_DIRNAME);
   }
-  if (platform === "darwin") return join4(home, "Library", "Application Support", INBOX_DIRNAME);
+  if (platform === "darwin") return join9(home, "Library", "Application Support", INBOX_DIRNAME);
   const xdg = env["XDG_CONFIG_HOME"];
-  return join4(xdg !== void 0 && xdg.length > 0 ? xdg : join4(home, ".config"), INBOX_DIRNAME);
+  return join9(xdg !== void 0 && xdg.length > 0 ? xdg : join9(home, ".config"), INBOX_DIRNAME);
 }
 function inboxPath(env, platform) {
-  return join4(inboxDir(env, platform), INBOX_FILENAME);
+  return join9(inboxDir(env, platform), INBOX_FILENAME);
 }
-function join4(...parts) {
+function join9(...parts) {
   return parts.join("/");
 }
 function nativeInboxPath(env, platform) {
@@ -4440,9 +6010,9 @@ function relativeAge(writtenAt, now) {
 
 // packages/plugin/src/control/dashboard.ts
 import { createConnection, createServer } from "node:net";
-import { mkdir, readFile as readFile3, rename, writeFile as writeFile2 } from "node:fs/promises";
-import { homedir as homedir2 } from "node:os";
-import { join as join5 } from "node:path";
+import { mkdir as mkdir3, readFile as readFile8, rename as rename4, writeFile as writeFile4 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { join as join10 } from "node:path";
 var DASHBOARD_FILE = "dashboard.json";
 var COMMAND_MAX_BYTES = 4096;
 var COMMAND_MAX_AGE_MS = 5e3;
@@ -4455,12 +6025,12 @@ var EMPTY_SPEECH_STATUS = {
 function defaultControlDir(env = process.env, platform = process.platform) {
   if (env["ORCA_TTS_CONTROL_DIR"]) return env["ORCA_TTS_CONTROL_DIR"];
   if (platform === "win32") {
-    return join5(env["LOCALAPPDATA"] ?? env["APPDATA"] ?? homedir2(), "orca-tts", "control");
+    return join10(env["LOCALAPPDATA"] ?? env["APPDATA"] ?? homedir3(), "orca-tts", "control");
   }
-  if (platform === "darwin") return join5(homedir2(), "Library", "Application Support", "orca-tts", "control");
-  return join5(env["XDG_STATE_HOME"] ?? join5(homedir2(), ".local", "state"), "orca-tts", "control");
+  if (platform === "darwin") return join10(homedir3(), "Library", "Application Support", "orca-tts", "control");
+  return join10(env["XDG_STATE_HOME"] ?? join10(homedir3(), ".local", "state"), "orca-tts", "control");
 }
-var endpointFor = (dir) => process.platform === "win32" ? `\\\\.\\pipe\\orca-tts-${process.pid}` : join5(dir, `control-${process.pid}.sock`);
+var endpointFor = (dir) => process.platform === "win32" ? `\\\\.\\pipe\\orca-tts-${process.pid}` : join10(dir, `control-${process.pid}.sock`);
 var responseLine = (socket, response) => {
   socket.end(`${JSON.stringify(response)}
 `);
@@ -4498,7 +6068,7 @@ var DashboardRuntime = class {
   constructor(dir, handlers, log = () => {
   }) {
     this.#dir = dir;
-    this.#path = join5(dir, DASHBOARD_FILE);
+    this.#path = join10(dir, DASHBOARD_FILE);
     this.#endpoint = endpointFor(dir);
     this.#handlers = handlers;
     this.#log = log;
@@ -4507,7 +6077,7 @@ var DashboardRuntime = class {
     return this.#path;
   }
   async start() {
-    await mkdir(this.#dir, { recursive: true, mode: 448 });
+    await mkdir3(this.#dir, { recursive: true, mode: 448 });
     await new Promise((resolve, reject) => {
       const server = createServer((socket) => {
         this.#accept(socket);
@@ -4561,8 +6131,8 @@ var DashboardRuntime = class {
 `;
     this.#writeSerial = this.#writeSerial.then(async () => {
       const temp = `${this.#path}.${process.pid}.tmp`;
-      await writeFile2(temp, json, { encoding: "utf8", mode: 384 });
-      await rename(temp, this.#path);
+      await writeFile4(temp, json, { encoding: "utf8", mode: 384 });
+      await rename4(temp, this.#path);
     }).catch((err) => {
       this.#log(`could not publish dashboard status: ${String(err)}`);
     });
@@ -4726,6 +6296,8 @@ function activate(orca, options = {}) {
     } }),
     { preferred: true }
   );
+  const pocket = options.pocket ?? new PocketSynthProvider();
+  if (pocket !== false) registry.register(pocket);
   void registry.resolve().then((resolved) => {
     if (resolved === null) {
       const detail = registry.lastFailureDetail;
@@ -4756,7 +6328,7 @@ function activate(orca, options = {}) {
        * filesystem, not by re-reading the string we built: a session whose transcript is gone
        * has ended, and C1's dead-agent-in-a-live-voice depends on nobody ever checking.
        */
-      resolveLabel: (id) => existsSync(id) ? sessionLabel(id) : null,
+      resolveLabel: (id) => existsSync4(id) ? sessionLabel(id) : null,
       onDropped: (n2) => {
         host.notify("Read Aloud", `Skipped ${n2} older repl${n2 === 1 ? "y" : "ies"} to keep up`);
       }
@@ -4861,7 +6433,7 @@ function activate(orca, options = {}) {
     const huddleOn = await huddleRestored.catch(() => false);
     const outcome = await loadSettings(
       {
-        readInbox: (path) => readFile4(path, "utf8"),
+        readInbox: (path) => readFile9(path, "utf8"),
         mirrorGet: () => host.settingsGet(),
         log: host.log
       },

@@ -176,7 +176,12 @@ async function boot(projectsDir: string, settingsDir?: string, controlDir?: stri
   activate(orca, {
     provider, sink, projectsDir, announceDelayMs: 5,
     settingsDir: settingsDir ?? join(projectsDir, 'no-settings-inbox-here'),
-    controlDir: controlDir ?? false
+    controlDir: controlDir ?? false,
+    // Same reason as `settingsDir` above, one directory over: the default is a real
+    // `PocketSynthProvider`, which would stat the AUTHOR'S model cache. Whether these assertions
+    // ran against a machine with neural weights on it would then depend on what he downloaded
+    // last (P40), and no test may read his install (R061). R16-10's own tests pass a fake.
+    pocket: false
   })
   await settle(10)   // let registry.resolve() finish so `speech` exists
   return {
@@ -699,5 +704,94 @@ describe('G2 terminal dashboard and control channel', () => {
     }, 'the effect of Stop to clear the rendered speech state')
 
     h.provider.release()
+  })
+})
+
+/**
+ * R16-10 — the shipped plugin had no neural backend in it at all.
+ *
+ * `main.ts` registered `OsSynthProvider` and nothing else, so esbuild tree-shook
+ * `PocketSynthProvider` out of `dist/plugin/main.mjs` completely. Measured on the artifact ORCA
+ * actually loads:
+ *
+ *   grep -c PocketSynthProvider dist/plugin/main.mjs   ->  0
+ *
+ * Meanwhile 975 tests passed, the Voice Lab spoke with neural voices, and `specs/003-pocket-voices`
+ * read as delivered. Every Pocket test drove the provider directly or through the Lab's own
+ * server; none asked whether the PLUGIN reaches it. R16-01 was this same defect one layer down --
+ * "the delivery path had no production caller" -- and that repair did not go far enough up.
+ *
+ * Wiring is checked here by effect. The BUNDLE is guarded in `scripts/build.mjs`, because a source
+ * import proves nothing about what survives tree-shaking, and tree-shaking is what did the damage.
+ */
+describe('R16-10 the plugin registers the neural backend beside the OS floor', () => {
+  /** Unavailable on purpose: the interesting case is a machine with no weights, which is most. */
+  function fakePocket(): TtsProvider & { prepared: number } {
+    return {
+      id: 'pocket',
+      displayName: 'Pocket TTS',
+      prepared: 0,
+      isWarm: false,
+      capabilities: { canPause: false, canChangeRateLive: false, canQueue: true, offline: true },
+      async prepare(): Promise<void> {
+        ;(this as { prepared: number }).prepared++
+        throw new Error('no model on this machine')
+      },
+      // eslint-disable-next-line require-yield
+      async *generate(): AsyncIterable<AudioChunk> { throw new Error('unreachable') },
+      cancel(): void { /* nothing to cancel */ }
+    } as unknown as TtsProvider & { prepared: number }
+  }
+
+  /**
+   * An OS floor that cannot start. That is the ONLY way registration is observable from outside:
+   * `registry.resolve()` walks the ladder and stops at the first provider that prepares, so while
+   * the OS voice works -- which is the normal case, and the correct behaviour -- Pocket is never
+   * touched. Making the floor fail forces the walk to continue, and whether it reaches Pocket is
+   * exactly the question R16-10 asks.
+   */
+  function unusableOs(): TtsProvider {
+    return {
+      id: 'os', displayName: 'System voice', isWarm: false,
+      capabilities: { canPause: false, canChangeRateLive: false, canQueue: true, offline: true },
+      prepare: async () => { throw new Error('no system synthesizer on this machine') },
+      // eslint-disable-next-line require-yield
+      generate: async function *(): AsyncIterable<AudioChunk> { throw new Error('unreachable') },
+      cancel: () => { /* nothing */ }
+    } as unknown as TtsProvider
+  }
+
+  function bootWith(pocket: TtsProvider | false): { pocket: TtsProvider | false } {
+    const orca: OrcaApi = {
+      commands: { register: () => { /* ignored */ } },
+      events: { on: () => { /* ignored */ } },
+      host: {
+        call: async (action) => (action === 'storage.get' ? { value: undefined } : {})
+      },
+      log: () => { /* ignored */ }
+    }
+    activate(orca, {
+      provider: unusableOs(), sink: new FakeSink(),
+      projectsDir: '/nonexistent', settingsDir: '/nonexistent/settings',
+      controlDir: false, pocket
+    })
+    return { pocket }
+  }
+
+  it('registers Pocket, so the registry actually consults it', async () => {
+    const pocket = fakePocket()
+    bootWith(pocket)
+    await settle(20)
+    expect(pocket.prepared,
+      'the registry never consulted Pocket, so the plugin did not register it at all')
+      .toBeGreaterThan(0)
+  })
+
+  it('CONTROL: pocket:false removes it, so the assertion above can fail', async () => {
+    const pocket = fakePocket()
+    bootWith(false)
+    await settle(20)
+    expect(pocket.prepared, 'the probe reports registration for a provider never passed in')
+      .toBe(0)
   })
 })
