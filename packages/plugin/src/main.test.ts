@@ -721,8 +721,9 @@ describe('G2 terminal dashboard and control channel', () => {
  * server; none asked whether the PLUGIN reaches it. R16-01 was this same defect one layer down --
  * "the delivery path had no production caller" -- and that repair did not go far enough up.
  *
- * Wiring is checked here by effect. The BUNDLE is guarded in `scripts/build.mjs`, because a source
- * import proves nothing about what survives tree-shaking, and tree-shaking is what did the damage.
+ * Wiring is checked here by effect. The BUNDLE is guarded in `scripts/build.mjs` by importing
+ * the artifact and demanding `prepare()` ran — a substring search is how R17-02 kept a log
+ * string and deleted the class. Tree-shaking is still what did the original damage (P49).
  */
 describe('R16-10 the plugin registers the neural backend beside the OS floor', () => {
   /** Unavailable on purpose: the interesting case is a machine with no weights, which is most. */
@@ -761,21 +762,40 @@ describe('R16-10 the plugin registers the neural backend beside the OS floor', (
     } as unknown as TtsProvider
   }
 
-  function bootWith(pocket: TtsProvider | false): { pocket: TtsProvider | false } {
+  function usable(id: string, displayName: string): TtsProvider & { prepared: number } {
+    return {
+      id, displayName, prepared: 0, isWarm: false,
+      capabilities: { canPause: false, canChangeRateLive: false, canQueue: true, offline: true },
+      async prepare(): Promise<void> {
+        ;(this as { prepared: number }).prepared++
+      },
+      async listVoices(): Promise<readonly string[]> { return [] },
+      // eslint-disable-next-line require-yield
+      async *generate(): AsyncIterable<AudioChunk> { throw new Error('unreachable') },
+      cancel(): void { /* nothing to cancel */ }
+    } as unknown as TtsProvider & { prepared: number }
+  }
+
+  function bootWith(
+    pocket: TtsProvider | false | undefined,
+    opts: { provider?: TtsProvider, logs?: string[] } = {}
+  ): { pocket: TtsProvider | false | undefined, logs: string[] } {
+    const logs = opts.logs ?? []
     const orca: OrcaApi = {
       commands: { register: () => { /* ignored */ } },
       events: { on: () => { /* ignored */ } },
       host: {
         call: async (action) => (action === 'storage.get' ? { value: undefined } : {})
       },
-      log: () => { /* ignored */ }
+      log: (m: string) => { logs.push(m) }
     }
+    const pocketOpt = pocket === undefined ? {} : { pocket }
     activate(orca, {
-      provider: unusableOs(), sink: new FakeSink(),
+      provider: opts.provider ?? unusableOs(), sink: new FakeSink(),
       projectsDir: '/nonexistent', settingsDir: '/nonexistent/settings',
-      controlDir: false, pocket
+      controlDir: false, ...pocketOpt
     })
-    return { pocket }
+    return { pocket, logs }
   }
 
   it('registers Pocket, so the registry actually consults it', async () => {
@@ -793,5 +813,68 @@ describe('R16-10 the plugin registers the neural backend beside the OS floor', (
     await settle(20)
     expect(pocket.prepared, 'the probe reports registration for a provider never passed in')
       .toBe(0)
+  })
+
+  /**
+   * R17-02: the two tests above inject a fake, so `options.pocket ?? new PocketSynthProvider()`
+   * never ran. Round 17 deleted that constructor, logged the name, and this file stayed 2/2
+   * green. Omitting `pocket` is the production default.
+   *
+   * Isolated empty cache (R061): we assert the registry CONSULTED pocket (prepare was
+   * invoked and named in the failure), not that neural audio came back.
+   */
+  it('R17-02: production default constructs Pocket and the registry consults it', async () => {
+    const modelDir = await mkdtemp(join(tmpdir(), 'orca-tts-r17-pocket-cache-'))
+    const prev = process.env.ORCA_TTS_MODEL_DIR
+    process.env.ORCA_TTS_MODEL_DIR = modelDir
+    const logs: string[] = []
+    try {
+      bootWith(undefined, { logs })
+      await until(
+        () => logs.some((l) => l.includes('no speech engine is available') || l.includes('engine ready (')),
+        'engine resolution to name pocket or become ready'
+      )
+      expect(logs.join('\n'),
+        'production constructor never ran — registry failure does not name pocket:')
+        .toMatch(/pocket:/)
+    } finally {
+      if (prev === undefined) delete process.env.ORCA_TTS_MODEL_DIR
+      else process.env.ORCA_TTS_MODEL_DIR = prev
+    }
+  })
+
+  it('CONTROL: pocket:false drops pocket: from the failure, so the assertion above can fail', async () => {
+    const logs: string[] = []
+    bootWith(false, { logs })
+    await until(
+      () => logs.some((l) => l.includes('no speech engine is available') || l.includes('engine ready (')),
+      'engine resolution to finish without pocket'
+    )
+    expect(logs.join('\n'), 'pocket:false still named pocket in the failure')
+      .not.toMatch(/pocket:/)
+    expect(logs.join('\n')).toMatch(/no speech engine is available/)
+  })
+
+  /**
+   * R17-06: both backends prepare, so resolve() stops at preferred. Inverting
+   * `createProviderRegistry` (Pocket preferred, OS beside) makes this log
+   * `engine ready (Pocket TTS, rung=preferred)` and this row goes red. The
+   * R16-10 injection tests cannot see that — they force OS down, so whichever
+   * is preferred, Pocket is consulted either way.
+   */
+  it('R17-06: OS is preferred; Pocket is beside it, not in front', async () => {
+    const os = usable('os-synth', 'System voice')
+    const pocket = usable('pocket', 'Pocket TTS')
+    const logs: string[] = []
+    bootWith(pocket, { provider: os, logs })
+    await until(
+      () => logs.some((l) => l.includes('engine ready (') || l.includes('no speech engine is available')),
+      'engine ready on the preferred floor'
+    )
+    expect(logs.join('\n'),
+      'preferred engine was not the OS floor — createProviderRegistry preference was inverted or unused')
+      .toMatch(/engine ready \(System voice, rung=preferred\)/)
+    expect(os.prepared, 'OS floor never prepared').toBeGreaterThan(0)
+    expect(pocket.prepared, 'default resolve must not prepare Pocket when OS works').toBe(0)
   })
 })

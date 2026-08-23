@@ -9,7 +9,7 @@
  */
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { OsSynthProvider, PocketSynthProvider, ProviderRegistry } from '@orca-tts/providers'
+import { OsSynthProvider, createProviderRegistry } from '@orca-tts/providers'
 import type { PlaybackSink, TtsProvider } from '@orca-tts/core'
 import { asAgentStatus, makeHost, worktreePathFrom, type OrcaApi } from './adapter/index.ts'
 import { readClipboard, ClipboardUnavailableError } from './clipboard.ts'
@@ -111,8 +111,6 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
   })
   host.log('read-aloud: activating')
 
-  const registry = new ProviderRegistry()
-
   /**
    * 006 site 35/36 and section 19 rank 1. `#play` resolved `true` on `close` regardless of exit
    * code, so a failing player ended the ladder AND "the plugin is broken" was indistinguishable
@@ -201,19 +199,23 @@ export default function activate(orca: OrcaApi, options: ActivateOptions = {}): 
     })
   }
 
-  // The provider talks to the user directly for detection failures and degraded rungs: on Linux
-  // the interesting failure ("espeak-ng is not installed") happens inside prepare(), far from any
-  // command the user pressed.
-  registry.register(
-    options.provider ?? new OsSynthProvider({ notify: (m) => { announce(m) } }),
-    { preferred: true }
-  )
-
-  // Beside the floor, never in front of it (principle VI, and R16-10). An absent model makes this
-  // provider report itself unavailable, which the registry already handles by naming the
-  // substitution -- so a machine with no neural weights behaves exactly as it does today.
-  const pocket = options.pocket ?? new PocketSynthProvider()
-  if (pocket !== false) registry.register(pocket)
+  /**
+   * R17-06: one assembler. `createProviderRegistry` is OS-preferred, Pocket beside
+   * it. Duplicating the two `register()` calls here meant inverting the factory
+   * left every plugin test green (R17-06's mutant: 2/2 passing).
+   *
+   * `pocket: false` is the test seam so no test constructs a real
+   * `PocketSynthProvider` against the author's model cache (R061). Omitting
+   * `pocket` is the production path: the factory constructs it, which is also
+   * what keeps the class reachable for esbuild (R16-10 / P49).
+   *
+   * Constructed AFTER `announce` is assigned so Linux `espeak-ng` detection
+   * failures still reach the audio stream through `OsSynthProvider`'s notify.
+   */
+  const registry = createProviderRegistry({
+    os: options.provider ?? new OsSynthProvider({ notify: (m) => { announce(m) } }),
+    ...(options.pocket === undefined ? {} : { pocket: options.pocket })
+  })
 
   // Resolve the engine in the background: activate() must return promptly so command registration
   // is never delayed behind a process spawn.

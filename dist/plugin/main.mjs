@@ -255,7 +255,8 @@ var init_voices = __esm({
 });
 
 // packages/providers/src/pocket-synth/safe-swap.ts
-import { readFile as readFile2, rename, rm as rm2, readdir, open } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { readFile as readFile2, rename, rm as rm2, readdir, open, mkdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join as join2, dirname, basename } from "node:path";
 function lockPathFor(dir) {
@@ -317,11 +318,11 @@ var init_safe_swap = __esm({
 });
 
 // packages/providers/src/pocket-synth/models.ts
-import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile as readFile3, writeFile, rename as rename2, rm as rm3, readdir as readdir2 } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile as readFile3, writeFile as writeFile2, readdir as readdir2 } from "node:fs/promises";
 import { existsSync as existsSync2 } from "node:fs";
 import { homedir } from "node:os";
-import { join as join3, dirname as dirname2 } from "node:path";
+import { join as join3 } from "node:path";
 function modelDir(env = process.env) {
   const override = env.ORCA_TTS_MODEL_DIR;
   if (override !== void 0 && override !== "") return override;
@@ -671,16 +672,16 @@ var init_sentencepiece = __esm({
 // packages/providers/src/pocket-synth/runtime.ts
 import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync3 } from "node:fs";
-import { mkdir as mkdir2, readFile as readFile4, writeFile as writeFile2, rename as rename3, rm as rm4, readdir as readdir3, chmod } from "node:fs/promises";
+import { readFile as readFile4, writeFile as writeFile3, readdir as readdir3, chmod } from "node:fs/promises";
 import { gunzipSync } from "node:zlib";
-import { join as join4, dirname as dirname3 } from "node:path";
+import { join as join4, dirname as dirname2 } from "node:path";
 function platformKey(platform = process.platform, arch = process.arch) {
   return `${platform}-${arch}`;
 }
 function runtimeDir(env = process.env) {
   const override = env.ORCA_TTS_RUNTIME_DIR;
   if (override !== void 0 && override !== "") return override;
-  return join4(dirname3(modelDir(env)), "onnxruntime", RUNTIME_VERSION);
+  return join4(dirname2(modelDir(env)), "onnxruntime", RUNTIME_VERSION);
 }
 async function runtimeStatus(dir = runtimeDir(), key = platformKey()) {
   const wanted = RUNTIME_FILES[key];
@@ -2022,6 +2023,16 @@ var ProviderRegistry = class {
     return { kind: "prepare-failed", reason: failures.join("; "), tried, unknown };
   }
 };
+
+// packages/providers/src/index.ts
+function createProviderRegistry(options = {}) {
+  const registry = new ProviderRegistry();
+  registry.register(options.os ?? new OsSynthProvider(), { preferred: true });
+  if (options.pocket !== false) {
+    registry.register(options.pocket ?? new PocketSynthProvider());
+  }
+  return registry;
+}
 
 // packages/plugin/src/adapter/index.ts
 function makeHost(orca, hooks = {}) {
@@ -4982,7 +4993,7 @@ var SpeechService = class {
 
 // packages/plugin/src/sinks/subprocess-sink.ts
 import { spawn as spawn3 } from "node:child_process";
-import { mkdtemp as mkdtemp2, writeFile as writeFile3, rm as rm5 } from "node:fs/promises";
+import { mkdtemp as mkdtemp2, writeFile as writeFile4, rm as rm3 } from "node:fs/promises";
 import { tmpdir as tmpdir2 } from "node:os";
 import { join as join7 } from "node:path";
 var PLAYERS = {
@@ -5051,7 +5062,7 @@ var SubprocessSink = class {
     const dir = await mkdtemp2(join7(tmpdir2(), "orca-tts-play-"));
     const ext = FORMAT_EXTENSION[chunk.format] ?? sanitiseExtension(chunk.format);
     const file = join7(dir, `chunk.${ext}`);
-    await writeFile3(file, chunk.data);
+    await writeFile4(file, chunk.data);
     try {
       const played = await this.#play(file);
       if (!played) return;
@@ -5067,7 +5078,7 @@ var SubprocessSink = class {
       this.#log(`read-aloud: ${failure.reason}`);
       this.#onFailure(failure);
     } finally {
-      await rm5(dir, { recursive: true, force: true }).catch(() => void 0);
+      await rm3(dir, { recursive: true, force: true }).catch(() => void 0);
     }
   }
   async stop() {
@@ -6009,7 +6020,7 @@ function relativeAge(writtenAt, now) {
 
 // packages/plugin/src/control/dashboard.ts
 import { createConnection, createServer } from "node:net";
-import { mkdir as mkdir3, readFile as readFile8, rename as rename4, writeFile as writeFile4 } from "node:fs/promises";
+import { mkdir as mkdir2, readFile as readFile8, rename as rename2, writeFile as writeFile5 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { join as join10 } from "node:path";
 var DASHBOARD_FILE = "dashboard.json";
@@ -6076,7 +6087,7 @@ var DashboardRuntime = class {
     return this.#path;
   }
   async start() {
-    await mkdir3(this.#dir, { recursive: true, mode: 448 });
+    await mkdir2(this.#dir, { recursive: true, mode: 448 });
     await new Promise((resolve, reject) => {
       const server = createServer((socket) => {
         this.#accept(socket);
@@ -6130,8 +6141,8 @@ var DashboardRuntime = class {
 `;
     this.#writeSerial = this.#writeSerial.then(async () => {
       const temp = `${this.#path}.${process.pid}.tmp`;
-      await writeFile4(temp, json, { encoding: "utf8", mode: 384 });
-      await rename4(temp, this.#path);
+      await writeFile5(temp, json, { encoding: "utf8", mode: 384 });
+      await rename2(temp, this.#path);
     }).catch((err) => {
       this.#log(`could not publish dashboard status: ${String(err)}`);
     });
@@ -6245,7 +6256,6 @@ function activate(orca, options = {}) {
     }
   });
   host.log("read-aloud: activating");
-  const registry = new ProviderRegistry();
   const sink = options.sink ?? new SubprocessSink({
     log: host.log,
     onFailure: (f) => {
@@ -6289,14 +6299,12 @@ function activate(orca, options = {}) {
       announce(`The Read Aloud control pane could not connect: ${String(err)}.`, "next");
     });
   }
-  registry.register(
-    options.provider ?? new OsSynthProvider({ notify: (m) => {
+  const registry = createProviderRegistry({
+    os: options.provider ?? new OsSynthProvider({ notify: (m) => {
       announce(m);
     } }),
-    { preferred: true }
-  );
-  const pocket = options.pocket ?? new PocketSynthProvider();
-  if (pocket !== false) registry.register(pocket);
+    ...options.pocket === void 0 ? {} : { pocket: options.pocket }
+  });
   void registry.resolve().then((resolved) => {
     if (resolved === null) {
       const detail = registry.lastFailureDetail;
