@@ -1641,7 +1641,6 @@ init_voices();
 import { readFile as readFile6 } from "node:fs/promises";
 import { join as join6 } from "node:path";
 var ORT_MODULE = "onnxruntime-node";
-var ENGINE_MODULE = "./engine.ts";
 var POCKET_CAPABILITIES = {
   streaming: false,
   offline: true,
@@ -1773,7 +1772,7 @@ var PocketSynthProvider = class {
       const { loadOrt: loadOrt2 } = await Promise.resolve().then(() => (init_engine(), engine_exports));
       return loadOrt2();
     });
-    this.#loadEngine = opts.loadEngine ?? (async () => await import(ENGINE_MODULE));
+    this.#loadEngine = opts.loadEngine ?? (async () => await Promise.resolve().then(() => (init_engine(), engine_exports)));
     this.#modelStatus = opts.modelStatus ?? modelStatus;
     this.#readFile = opts.readFile ?? (async (path) => readFile6(path));
   }

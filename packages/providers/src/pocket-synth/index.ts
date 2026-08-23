@@ -21,7 +21,6 @@ import {
 } from './voices.ts'
 
 const ORT_MODULE = 'onnxruntime-node'
-const ENGINE_MODULE = './engine.ts'
 
 /** Options the provider forwards into `PocketTts.synthesize`. */
 export interface PocketSynthesizeOpts {
@@ -259,8 +258,16 @@ export class PocketSynthProvider implements TtsProvider {
       const { loadOrt } = await import('./engine.ts')
       return loadOrt()
     })
+    // R17-01/R17-04: this WAS `import(ENGINE_MODULE)`, a variable, and that one indirection broke
+    // the shipped plugin. esbuild cannot follow a variable specifier, so it left a literal runtime
+    // `import()` in `dist/plugin/main.mjs` pointing at `dist/plugin/engine.ts` -- a sibling the
+    // artifact does not contain. The engine was inlined in the bundle the whole time, reached by
+    // the LITERAL import three lines above; production took the other door and found a wall.
+    //
+    // SC-14's graph walk missed it for the same reason: it followed the literal and could not
+    // follow the variable. One specifier, three instruments, three costumes.
     this.#loadEngine = opts.loadEngine ?? (async () =>
-      await import(ENGINE_MODULE) as unknown as PocketTtsModule)
+      await import('./engine.ts') as unknown as PocketTtsModule)
     this.#modelStatus = opts.modelStatus ?? readModelStatus
     this.#readFile = opts.readFile ?? (async (path) => readFile(path))
   }
