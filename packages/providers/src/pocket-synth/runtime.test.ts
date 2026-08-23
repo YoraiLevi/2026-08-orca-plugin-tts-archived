@@ -222,6 +222,42 @@ describe('downloadRuntime', () => {
   const stillPrevious = (dir: string): boolean =>
     existsSync(join(dir, FILES[0] ?? '')) && readFileSync(join(dir, FILES[0] ?? ''), 'utf8') === 'PREVIOUS'
 
+  it('KEEPS a working runtime when staging fails BEFORE the live directory is touched', async () => {
+    // R17-03. The named swap-safety tests injected afterBackup / afterSwap, never afterStage.
+    // downloadRuntime's catch did rm(dir) on EVERY failure, including a throw before the swap,
+    // so a failed download deleted the LIVE runtime. Models already has an inner catch that only
+    // removes staging; this row is the one that would have gone red for the catch that did not.
+    const dir = join(scratch(), 'rt')
+    seedPrevious(dir)
+    expect(stillPrevious(dir)).toBe(true)
+    const tgz = makeTarball(KEY, FILES)
+    await expect(downloadRuntime({
+      dir, key: KEY, fetchImpl: tarballFetch(tgz), integrity: integrityOf(tgz),
+      hooks: { afterStage: () => { throw new Error('injected: died while staging') } },
+    })).rejects.toThrow(/injected: died while staging/)
+    expect(existsSync(dir), 'afterStage throw deleted the live runtime directory').toBe(true)
+    expect(stillPrevious(dir), 'afterStage throw destroyed the working runtime').toBe(true)
+    expect((await runtimeStatus(dir, KEY)).kind).toBe('ready')
+  })
+
+  it('cleans a leftover .staging-* from a killed predecessor after a successful download', async () => {
+    // R17-05. Runtime's finally callback swapped (base, name) arguments to isStagingName, so
+    // leftover staging was never a match. Models' isStagingName cleans the same debris.
+    // The production cleanup must do this — restating the callback here would be P36.
+    const root = scratch()
+    const dir = join(root, 'rt')
+    seedPrevious(dir)
+    const leftover = `${dir}.staging-99999`
+    mkdirSync(leftover, { recursive: true })
+    writeFileSync(join(leftover, 'onnxruntime_binding.node'), 'ORPHAN')
+    expect(existsSync(leftover)).toBe(true)
+    const tgz = makeTarball(KEY, FILES)
+    await downloadRuntime({ dir, key: KEY, fetchImpl: tarballFetch(tgz), integrity: integrityOf(tgz) })
+    expect(existsSync(leftover), 'leftover staging from a killed predecessor survived a successful download').toBe(false)
+    expect(readdirSync(root).filter((n) => n.includes('.staging-'))).toEqual([])
+    expect(stillPrevious(dir)).toBe(false)
+  })
+
   it('KEEPS a working runtime when the swap fails AFTER the live directory moved aside', async () => {
     const dir = join(scratch(), 'rt')
     seedPrevious(dir)

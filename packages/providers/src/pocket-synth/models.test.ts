@@ -341,6 +341,34 @@ describe('R14-06 — the swap is reversible at every step', () => {
     expect(stillPrevious(dir)).toBe(false)
   })
 
+  it('KEEPS THE OLD MODEL when staging fails BEFORE the live directory is touched', async () => {
+    // R17-03's window, on the caller that already had the inner catch. A throw at afterStage
+    // must not rm(dir). The runtime caller did, and its named tests could not see it.
+    const dir = join(scratch(), 'model')
+    seedReady(dir)
+    await expect(downloadModel({
+      dir, artifacts: TINY, fetchImpl: tinyFetch(),
+      hooks: { afterStage: () => { throw new Error('injected: died while staging') } },
+    })).rejects.toThrow(/injected: died while staging/)
+    expect(existsSync(dir), 'afterStage throw deleted the live model directory').toBe(true)
+    expect(stillPrevious(dir), 'afterStage throw destroyed the working model').toBe(true)
+  })
+
+  it('cleans a leftover .staging-* from a killed predecessor after a successful download', async () => {
+    // R17-05. The production cleanup must do this — restating the callback here would be P36.
+    const root = scratch()
+    const dir = join(root, 'model')
+    seedReady(dir)
+    const leftover = `${dir}.staging-99999`
+    mkdirSync(leftover, { recursive: true })
+    writeFileSync(join(leftover, 'orphan.bin'), 'ORPHAN')
+    expect(existsSync(leftover)).toBe(true)
+    await downloadModel({ dir, artifacts: TINY, fetchImpl: tinyFetch() })
+    expect(existsSync(leftover), 'leftover staging from a killed predecessor survived a successful download').toBe(false)
+    expect(readdirSync(root).filter((n) => n.includes('.staging-'))).toEqual([])
+    expect(stillPrevious(dir)).toBe(false)
+  })
+
   it('leaves no staging or backup directory behind, on success or on failure', async () => {
     const root = scratch()
     const dir = join(root, 'model')

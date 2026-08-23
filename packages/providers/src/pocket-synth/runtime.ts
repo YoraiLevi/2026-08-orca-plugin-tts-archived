@@ -27,13 +27,12 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile, rename, rm, readdir, chmod } from 'node:fs/promises'
+import { readFile, writeFile, readdir, chmod } from 'node:fs/promises'
 import { gunzipSync } from 'node:zlib'
 import { join, dirname } from 'node:path'
 import { modelDir } from './models.ts'
 import {
-  DownloadInProgressError, acquireDownloadLock, backupPathFor, recoverLiveFromBackup,
-  removeMatchingSiblings, isBackupName, isStagingName,
+  DownloadInProgressError, swapLiveDirectory, type SwapHooks,
 } from './safe-swap.ts'
 
 export { DownloadInProgressError }
@@ -224,11 +223,7 @@ export async function downloadRuntime(options: {
   /** Tests inject the integrity of that archive. Production never passes this. */
   integrity?: string
   /** Failure-injection points, so a test can fail AFTER each rename. Tests only. */
-  hooks?: {
-    afterStage?: () => void | Promise<void>
-    afterBackup?: () => void | Promise<void>
-    afterSwap?: () => void | Promise<void>
-  }
+  hooks?: SwapHooks
 } = {}): Promise<string> {
   const key = options.key ?? platformKey()
   const wanted = RUNTIME_FILES[key]
@@ -283,27 +278,14 @@ export async function downloadRuntime(options: {
   options.onProgress?.({ stage: 'installing' })
 
   /*
-   * R16-03. This cache was written AFTER the model cache had been fixed twice for the same
-   * defect — R14-06 (delete-then-rename) and R15-02 (survives an exception but not SIGKILL or a
-   * second writer) — and it shipped with the original bug anyway. Its test named
-   * "KEEPS a working runtime when the swap fails" threw at the wanted-files check, before
-   * `mkdir(staging)` and before either rename, so it never touched the window it was named for.
-   *
-   * Fixing one call site three times is how a defect becomes a habit. The machinery is now
-   * `./safe-swap.ts`, shared with the model cache, so neither can have a different answer and the
-   * next cache cannot either.
+   * R16-03 / R17-03 / R17-05. This cache was written AFTER the model cache had been fixed
+   * twice for the same defect, then "shared" into `./safe-swap.ts` without moving the swap
+   * itself. The inlined catch did `rm(dir)` on a throw before the swap (a failed download
+   * deleted the live runtime) and leftover `.staging-*` was never cleaned because the
+   * `finally` callback swapped `(base, name)`. The two-rename sequence lives in
+   * `swapLiveDirectory`. Inlining it here is how the defect comes back.
    */
-  await mkdir(dirname(dir), { recursive: true })
-  // Anything left by a killed predecessor is recovered BEFORE we take the lock, because a stable
-  // `.previous` is only a recovery if something reads it.
-  await recoverLiveFromBackup(dir)
-  const lock = await acquireDownloadLock(dir)
-  const staging = `${dir}.staging-${process.pid}`
-  const backup = backupPathFor(dir)
-
-  try {
-    await rm(staging, { recursive: true, force: true })
-    await mkdir(staging, { recursive: true })
+  return swapLiveDirectory(dir, async (staging) => {
     for (const [name, body] of found) {
       await writeFile(join(staging, name), body)
       // The binding is loaded rather than executed, but the shared libraries must be readable and
@@ -314,23 +296,5 @@ export async function downloadRuntime(options: {
       options.onProgress?.({ stage: 'installing', file: name })
     }
     await writeFile(join(staging, RUNTIME_MANIFEST_FILE), `${RUNTIME_VERSION}/${RUNTIME_MANIFEST_VERSION}\n`)
-    await options.hooks?.afterStage?.()
-
-    const hadPrevious = existsSync(dir)
-    await rm(backup, { recursive: true, force: true })
-    if (hadPrevious) await rename(dir, backup)
-    await options.hooks?.afterBackup?.()
-    await rename(staging, dir)
-    await options.hooks?.afterSwap?.()
-    await rm(backup, { recursive: true, force: true })
-    return dir
-  } catch (err) {
-    await rm(dir, { recursive: true, force: true })
-    if (existsSync(backup)) await rename(backup, dir)
-    await rm(staging, { recursive: true, force: true })
-    throw err
-  } finally {
-    await lock.release()
-    await removeMatchingSiblings(dir, (name, base) => isStagingName(base, name) && !isBackupName(base, name))
-  }
+  }, options.hooks ?? {})
 }

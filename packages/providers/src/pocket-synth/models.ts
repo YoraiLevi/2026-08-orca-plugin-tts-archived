@@ -21,11 +21,11 @@
  * CC-BY-4.0 requires and as buzz does.
  */
 
-import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, readFile, writeFile, rename, rm, readdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { readFile, writeFile, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, dirname } from 'node:path'
+import { join } from 'node:path'
 // `.ts`, not `.js`, and the extension is load-bearing rather than a style choice. The Voice Lab
 // imports this module under PLAIN NODE, whose resolver does not rewrite `.js` to `.ts` — vitest
 // does, which is exactly how a suite goes green over a tree that cannot boot (P37, SC-14). The
@@ -212,7 +212,7 @@ export {
   DownloadInProgressError as ModelDownloadInProgressError,
 } from './safe-swap.ts'
 import {
-  backupPathFor, journalPathFor, acquireDownloadLock, isBackupName, isStagingName, recoverLiveFromBackup, removeMatchingSiblings,
+  recoverLiveFromBackup, swapLiveDirectory, type SwapHooks,
 } from './safe-swap.ts'
 
 export function urlFor(file: string): string {
@@ -242,14 +242,7 @@ export interface DownloadProgress {
  * end. An interrupted download therefore leaves the previous model exactly as it was — the machine
  * whose network died halfway is the one that can least afford to lose the copy it had.
  */
-export interface DownloadHooks {
-  /** After every artifact is staged, before the live directory is touched. */
-  readonly afterStage?: () => void | Promise<void>
-  /** After the live directory has been moved aside, before staging is renamed into place. */
-  readonly afterBackup?: () => void | Promise<void>
-  /** After staging is live, before the backup is discarded. */
-  readonly afterSwap?: () => void | Promise<void>
-}
+export type DownloadHooks = SwapHooks
 
 export interface DownloadOptions {
   dir?: string
@@ -301,110 +294,64 @@ export async function downloadModel(options: DownloadOptions = {}): Promise<stri
   const artifacts = options.artifacts ?? [...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS]
   const hooks = options.hooks ?? {}
 
-  await mkdir(dirname(dir), { recursive: true })
-  const lock = await acquireDownloadLock(dir)
-  // Unique per attempt, not per pid: two in-process callers used to share `${dir}.staging-${pid}`.
-  const staging = `${dir}.staging-${process.pid}-${randomBytes(6).toString('hex')}`
-  const backup = backupPathFor(dir)
-  const journal = journalPathFor(dir)
-
-  try {
-    await recoverLiveFromBackup(dir)
-    await rm(journalPathFor(dir), { force: true })
-    // Live is the source of truth now. Leftover backups/staging are debris, not recovery.
-    if (existsSync(dir)) {
-      await removeMatchingSiblings(dir, isBackupName)
-    }
-    await removeMatchingSiblings(dir, isStagingName)
-    await mkdir(staging, { recursive: true })
-
+  // The two-rename sequence lives in `swapLiveDirectory`. Inlining it here is how this
+  // defect was fixed three times in two places (R14-06, R15-02, R16-03) and then found
+  // a fourth (R17-03 / R17-05).
+  return swapLiveDirectory(dir, async (staging) => {
     const pinned = new Map(artifacts.map((a) => [a.file, a]))
     const files = artifacts.map((a) => a.file)
 
-    try {
-      for (const [index, file] of files.entries()) {
-        // `exactOptionalPropertyTypes` is on, so an explicit `undefined` is not the same as absent.
-        const init: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
-        const res = await doFetch(urlFor(file), init)
-        if (!res.ok) throw new Error(`downloading ${file}: HTTP ${res.status} ${res.statusText}`)
-        const total = Number(res.headers.get('content-length') ?? 0)
-        const body = Buffer.from(await res.arrayBuffer())
-        options.onProgress?.({ file, received: body.length, total, fileIndex: index, fileCount: files.length })
+    for (const [index, file] of files.entries()) {
+      // `exactOptionalPropertyTypes` is on, so an explicit `undefined` is not the same as absent.
+      const init: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
+      const res = await doFetch(urlFor(file), init)
+      if (!res.ok) throw new Error(`downloading ${file}: HTTP ${res.status} ${res.statusText}`)
+      const total = Number(res.headers.get('content-length') ?? 0)
+      const body = Buffer.from(await res.arrayBuffer())
+      options.onProgress?.({ file, received: body.length, total, fileIndex: index, fileCount: files.length })
 
-        const want = pinned.get(file)
-        if (want === undefined) throw new Error(`${file} is not in the pinned manifest`)
-        // Both checks, not either. A length check alone passes for any file of the right size; a
-        // digest alone gives a much worse message when a CDN hands back an HTML error page, which
-        // is the common failure and the one a person has to act on.
-        if (body.length !== want.bytes) {
-          throw new Error(`${file} is ${body.length} bytes, expected ${want.bytes} — refusing it`)
-        }
-        const got = sha256(body)
-        if (got !== want.sha256) {
-          throw new Error(`${file} hashes to ${got}, expected ${want.sha256} — refusing it`)
-        }
-        await writeFile(join(staging, file), body)
+      const want = pinned.get(file)
+      if (want === undefined) throw new Error(`${file} is not in the pinned manifest`)
+      // Both checks, not either. A length check alone passes for any file of the right size; a
+      // digest alone gives a much worse message when a CDN hands back an HTML error page, which
+      // is the common failure and the one a person has to act on.
+      if (body.length !== want.bytes) {
+        throw new Error(`${file} is ${body.length} bytes, expected ${want.bytes} — refusing it`)
       }
-
-      // Attribution beside the bytes, as CC-BY-4.0 requires. R14-08: fetching is REQUIRED.
-      // R15-09: the bytes are also pinned — a 200 that is not the licence is still a violation.
-      const licenceInit: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
-      const licence = await doFetch(urlFor('LICENSE'), licenceInit)
-      if (!licence.ok) {
-        throw new Error(
-          `the upstream LICENSE could not be fetched (HTTP ${licence.status} ${licence.statusText}). ` +
-          'These models are CC-BY-4.0 and may not be installed without it.',
-        )
+      const got = sha256(body)
+      if (got !== want.sha256) {
+        throw new Error(`${file} hashes to ${got}, expected ${want.sha256} — refusing it`)
       }
-      const licenceBody = Buffer.from(await licence.arrayBuffer())
-      if (licenceBody.length !== UPSTREAM_LICENSE.bytes) {
-        throw new Error(
-          `LICENSE is ${licenceBody.length} bytes, expected ${UPSTREAM_LICENSE.bytes} — refusing it`,
-        )
-      }
-      const licenceHash = sha256(licenceBody)
-      if (licenceHash !== UPSTREAM_LICENSE.sha256) {
-        throw new Error(
-          `LICENSE hashes to ${licenceHash}, expected ${UPSTREAM_LICENSE.sha256} — refusing it`,
-        )
-      }
-      await writeFile(join(staging, UPSTREAM_LICENSE_FILE), licenceBody)
-      await writeFile(join(staging, LICENSE_FILE), LICENSE_TEXT)
-
-      // The manifest goes LAST. A directory holding every file but this one reads as `absent`,
-      // which is exactly right for a download that died before it finished.
-      await writeFile(join(staging, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
-      await hooks.afterStage?.()
-    } catch (err) {
-      await rm(staging, { recursive: true, force: true })
-      throw err
+      await writeFile(join(staging, file), body)
     }
 
-    // ---- the swap. Exceptions roll back here; a hard signal is recovered on the next entry. ----
-    const hadPrevious = existsSync(dir)
-    try {
-      if (hadPrevious) {
-        await writeFile(journal, 'backing-up\n')
-        await rename(dir, backup)
-      }
-      await hooks.afterBackup?.()
-      await writeFile(journal, 'installing\n')
-      await rename(staging, dir)
-      await hooks.afterSwap?.()
-      await writeFile(journal, 'committed\n')
-    } catch (err) {
-      // Put back exactly what was there. `force` on the staging cleanup because it may or may not
-      // still exist depending on where this threw.
-      await rm(dir, { recursive: true, force: true })
-      if (hadPrevious && existsSync(backup)) await rename(backup, dir)
-      await rm(staging, { recursive: true, force: true })
-      await rm(journal, { force: true })
-      throw err
+    // Attribution beside the bytes, as CC-BY-4.0 requires. R14-08: fetching is REQUIRED.
+    // R15-09: the bytes are also pinned — a 200 that is not the licence is still a violation.
+    const licenceInit: RequestInit = options.signal === undefined ? {} : { signal: options.signal }
+    const licence = await doFetch(urlFor('LICENSE'), licenceInit)
+    if (!licence.ok) {
+      throw new Error(
+        `the upstream LICENSE could not be fetched (HTTP ${licence.status} ${licence.statusText}). ` +
+        'These models are CC-BY-4.0 and may not be installed without it.',
+      )
     }
-    await removeMatchingSiblings(dir, isBackupName)
-    await rm(journal, { force: true })
-    return dir
-  } finally {
-    await lock.release()
-  }
+    const licenceBody = Buffer.from(await licence.arrayBuffer())
+    if (licenceBody.length !== UPSTREAM_LICENSE.bytes) {
+      throw new Error(
+        `LICENSE is ${licenceBody.length} bytes, expected ${UPSTREAM_LICENSE.bytes} — refusing it`,
+      )
+    }
+    const licenceHash = sha256(licenceBody)
+    if (licenceHash !== UPSTREAM_LICENSE.sha256) {
+      throw new Error(
+        `LICENSE hashes to ${licenceHash}, expected ${UPSTREAM_LICENSE.sha256} — refusing it`,
+      )
+    }
+    await writeFile(join(staging, UPSTREAM_LICENSE_FILE), licenceBody)
+    await writeFile(join(staging, LICENSE_FILE), LICENSE_TEXT)
+
+    // The manifest goes LAST. A directory holding every file but this one reads as `absent`,
+    // which is exactly right for a download that died before it finished.
+    await writeFile(join(staging, MANIFEST_FILE), `${MANIFEST_VERSION}\n`)
+  }, hooks)
 }

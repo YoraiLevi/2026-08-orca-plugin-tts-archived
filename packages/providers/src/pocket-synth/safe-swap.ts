@@ -25,7 +25,8 @@
  * The machine that fails halfway is the machine that can least afford to lose the copy it had.
  */
 
-import { readFile, rename, rm, readdir, open } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { readFile, rename, rm, readdir, open, mkdir, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, dirname, basename } from 'node:path'
 
@@ -173,5 +174,89 @@ export async function removeMatchingSiblings(
   }
 }
 
-/* --------------------------------------------------------------------------------- fetching */
+/* --------------------------------------------------------------------------------- the swap */
+
+export interface SwapHooks {
+  /** After the new tree is fully staged, before the live directory is touched. */
+  readonly afterStage?: () => void | Promise<void>
+  /** After the live directory has been moved aside, before staging is renamed into place. */
+  readonly afterBackup?: () => void | Promise<void>
+  /** After staging is live, before the backup is discarded. */
+  readonly afterSwap?: () => void | Promise<void>
+}
+
+/**
+ * Stage a new tree beside `dir`, then swap it in so a failure leaves whatever was there.
+ *
+ * This is the body R16-03 claimed was here. It was not: `models.ts` and `runtime.ts` each
+ * inlined a different one. Runtime's catch did `rm(dir)` on a throw *before* the swap
+ * (R17-03) and its leftover-staging cleanup swapped `(base, name)` (R17-05). One function,
+ * both callers, so the next cache cannot pick a third answer.
+ *
+ * `populate` writes into the staging directory and must not touch `dir`. A throw from
+ * `populate` or `afterStage` removes only staging. A throw from `afterBackup` or
+ * `afterSwap` rolls the previous tree back.
+ *
+ * Staging names are unique per attempt (`${dir}.staging-${pid}-${hex}`), not per pid:
+ * two in-process callers used to share one scratch path. Leftover `.staging-*` from a
+ * killed predecessor is debris and is removed before the new tree is staged — via
+ * `isStagingName(base, name)`, the argument order `removeMatchingSiblings` actually
+ * calls.
+ */
+export async function swapLiveDirectory(
+  dir: string,
+  populate: (staging: string) => Promise<void>,
+  hooks: SwapHooks = {},
+): Promise<string> {
+  await mkdir(dirname(dir), { recursive: true })
+  const lock = await acquireDownloadLock(dir)
+  const staging = `${dir}.staging-${process.pid}-${randomBytes(6).toString('hex')}`
+  const backup = backupPathFor(dir)
+  const journal = journalPathFor(dir)
+
+  try {
+    await recoverLiveFromBackup(dir)
+    await rm(journal, { force: true })
+    // Live is the source of truth now. Leftover backups/staging are debris, not recovery.
+    if (existsSync(dir)) {
+      await removeMatchingSiblings(dir, isBackupName)
+    }
+    await removeMatchingSiblings(dir, isStagingName)
+    await mkdir(staging, { recursive: true })
+
+    try {
+      await populate(staging)
+      await hooks.afterStage?.()
+    } catch (err) {
+      await rm(staging, { recursive: true, force: true })
+      throw err
+    }
+
+    const hadPrevious = existsSync(dir)
+    try {
+      if (hadPrevious) {
+        await writeFile(journal, 'backing-up\n')
+        await rename(dir, backup)
+      }
+      await hooks.afterBackup?.()
+      await writeFile(journal, 'installing\n')
+      await rename(staging, dir)
+      await hooks.afterSwap?.()
+      await writeFile(journal, 'committed\n')
+    } catch (err) {
+      // Put back exactly what was there. `force` on the staging cleanup because it may or may
+      // not still exist depending on where this threw.
+      await rm(dir, { recursive: true, force: true })
+      if (hadPrevious && existsSync(backup)) await rename(backup, dir)
+      await rm(staging, { recursive: true, force: true })
+      await rm(journal, { force: true })
+      throw err
+    }
+    await removeMatchingSiblings(dir, isBackupName)
+    await rm(journal, { force: true })
+    return dir
+  } finally {
+    await lock.release()
+  }
+}
 
