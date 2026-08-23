@@ -1,6 +1,6 @@
 # STATE — orca-plugin-tts
 
-**Updated:** 2026-08-21 · **Phase:** v1 shipped to a public repo · **Branch:** `main` ·
+**Updated:** 2026-08-23 · **Phase:** Pocket TTS backend complete; awaiting the author's review · **Branch:** `main` ·
 **Repo:** https://github.com/YoraiLevi/orca-plugin-tts
 
 > **Amended 2026-08-21 — forced by the latency measurement pass** (`docs/.research/latency-measurements.md`).
@@ -13,63 +13,70 @@
 
 ## IN PROGRESS — one task, named, per R041
 
-**`PV-081` — R16-05/R16-06: the UI probe is calibrated to the FALLBACK.**
+**Nothing is in progress. The next move is the author's ear.**
 
-**Both agents were cut off mid-task and their work is PRESERVED, NOT REVIEWED, at `87f8a57`.**
-It was tested before committing — 967 passing, typecheck 0, lint 0 — so the tree is safe to resume
-from, but neither agent reported and neither change is verified.
+### What closed this session, and how it was checked
 
-**First three things on resume, in this order:**
-1. `orca orchestration check` — their reports are in the mailbox, and reading `git log` instead has
-   already cost this project a critical defect once.
-2. `node scripts/ui-probe.mjs --prove`, **and then run it with the model absent** — that is the
-   entire point of R16-05 and the reason the author cannot yet be told the picker works.
-3. Re-derive the tokenizer's true disagreement rate over a corpus its fixer did not choose. The
-   `it.fails` rows are gone; whether the class is CLOSED or merely BOUNDED is unknown.
+Round 16's six findings are **all closed**, and closing the last of them uncovered four more, which
+are also closed. The pattern held to the end: every one was *a check that could not fail for the
+thing it watches.*
 
-- **Gate:** with Pocket ABSENT, `node scripts/ui-probe.mjs` must NOT report U6–U9 green. Today it
-  does, which means the nine green checks I reported to the author twice **do not prove a neural
-  voice was ever heard.** That is the single most important open item, because his review is the
-  critical path and this is the instrument that would tell him it works.
-- The other open agent task is **`PV-079`/R16-04**, the tokenizer: my `it.fails` names `Zggggg` as
-  "the one survivor" and round 16 found **seven** in a 728-input `Xyyyyy` grid. My 1-in-11,344 was a
-  statement about my corpus, not about the tokenizer.
+| | closed by | verified by |
+|---|---|---|
+| R16-04 tokenizer remainder | an agent's `EncodeOptimized` port | **27,309 inputs, 0 disagreements** against Python `sentencepiece`, on corpora its fixer did not choose |
+| R16-05/06 the probe was calibrated to the fallback | `afbdcc8` | Pocket ABSENT -> `[INCONC] U6`; Pocket PRESENT -> `U6/U9` green and **"Arm B heard Pocket TTS, not the OS fallback"** |
+| R16-07 the engine could not load | `44c9d0a` | `engine.ts` under plain node: **FAILS -> LOADS** |
+| R16-08 every offered voice 503'd | `3902a00` | real model: **503 -> 200**, `backend:"pocket"`, 24 kHz, 1.76 s, rms 0.14 |
+| R16-09 `pnpm build` was red | `0c66191` | un-externalise ORT -> esbuild errors again |
+| R16-10 the plugin shipped no neural backend | `0c66191` | unregister -> **"does not contain PocketSynthProvider"** |
 
-### Where the feature stands at `b94ad8a`
+**The chain is worth reading in order**, because each defect was hidden by the one before it. The
+probe could not tell the OS from Pocket (R16-05), so nobody saw that the engine would not load
+(R16-07); once it loaded, every voice returned 503 (R16-08); once they spoke, the build turned out
+to have been red (R16-09) and the plugin turned out never to have registered the backend at all
+(R16-10). **Four defects stacked behind one blind instrument.** Fixing the instrument first is what
+made the rest findable, and that is the argument for fixing instruments first.
 
-**967 tests, 43 files, 44/44 mutants, typecheck 0, lint 0, all pushed.**
+### The two that should sting
 
-Round 15's nine are closed. Round 16 found six; **four are closed** (R16-01, R16-02, R16-03 by me;
-R16-04 and R16-05/06 are the two open agent tasks).
+- **R16-10.** 975 tests, a working Voice Lab, a review round of its own — and `grep -c
+  PocketSynthProvider dist/plugin/main.mjs` was **0**. Every test reached the provider by a path the
+  plugin does not take. Recorded as **P49**; the guard is now on the artifact, not the source.
+- **R16-08 was already in the mailbox.** PV-074's worker wrote: *"a peer still needs
+  PocketSynthProvider.#resolveVoice to accept that bare name or a ready model will throw."* Nobody
+  actioned it. **Reading `git log` instead of `orca orchestration check` has now cost this project
+  twice.** Read the mailbox.
 
-**The engine works and the oracle that says so is now sound** — `scripts/pocket-e2e.mjs` gates at
-WER **0** over four sentences, plus DURATION, WAVEFORM and DETERMINISM gates the transcriber cannot
-provide, and `--prove` runs a five-mutation matrix in which four go red and one is a declared
-equivalence.
+### Where the feature stands at `0c66191`
 
-### The pattern this session should be judged by
+**977 passed | 9 skipped · typecheck 0 · lint 0 errors · build green · size-gate 4 files, 0.24 MB.**
 
-Thirteen costumes of one defect: **a check that cannot fail for the thing it watches.** Three of
-round 15's nine and three of round 16's six were HALF-FINISHED REPAIRS OF MINE — the licence fetch
-fixed while its status check stayed unaware, a swap called "reversible at every step" on one tested
-path, an integrity pin for an executable that only checked the string's shape. And my own mutation
-matrix was vacuous three times before it was real.
+`node scripts/ui-probe.mjs` reports **all nine checks arm A plus two arm B, exit 0**, and its last
+line is the one that was missing for three rounds: *"Arm B heard Pocket TTS, not the OS fallback."*
+Those green checks now mean what they say. `--prove` still drives every declared mutation red.
 
-**`safe-swap.ts` is the response that generalises**: the swap defect was fixed three times in two
-places before it became one shared module. Prefer that shape.
+**NOT run in this tree:** `pnpm check:mutants` (P41 — never in the shared working tree). CI runs it.
 
-### A PROCESS FAILURE WORTH NOT REPEATING
+### What is actually left
 
-Agents reported through `orca orchestration check`, and I was reading `git log` instead. **A worker
-asked which cancel contract to implement, timed out, took the weaker one, and round 15 then found
-exactly that defect.** Two more escalated the same SC-14 ownership question and both timed out.
-**Read the mailbox, not the commit log.**
+1. **The author's review.** The whole point. The Voice Lab works, the picker offers both backends,
+   and neural voices play. C7 taste defaults, D002 Q5 policy and D004's principle-III call on Intel
+   Macs are all his and only his.
+2. **Round 17**, if wanted. Rounds 14-16 each found real defects; round 16 found six and its repair
+   found four more, so the well is not dry.
+3. `PocketSynthProvider` is now registered in the plugin but **has never been exercised inside a
+   running ORCA** — only in tests, the Lab, and the bundle guard. That is the next honest gap.
 
 ### Dispatch notes
 
 `grok` launches clean on the first try. `codex` needs its update prompt dismissed before every
-worker will start (three round-trips each). The `claude` launcher is disabled in this install, and
-the Agent tool cannot spawn — stale tmux team socket.
+worker will start. The `claude` launcher is disabled and the Agent tool cannot spawn.
+
+**Two process lessons from this session.** A worker was still alive and EDITING `ui-probe.mjs`
+while I measured it, so my first two runs described a file that changed under me — check
+`orca orchestration task-list` for `dispatched` tasks before trusting a measurement. And six
+orphaned test processes were holding the machine, one hung since 02:59; a probe that shares the
+machine with another probe is not evidence (P46's cousin).
 
 ## One-paragraph status
 

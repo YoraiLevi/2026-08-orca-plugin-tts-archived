@@ -6,6 +6,33 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P49 — Every test reached the code by a path the product does not take, so the shipped artifact had none of it
+**Symptom:** `PocketSynthProvider` had 975 passing tests, a working Voice Lab, an adversarial
+review round of its own, and **zero occurrences in `dist/plugin/main.mjs`** — the file ORCA loads.
+The neural backend did not exist in the shipped plugin at all. `specs/003-pocket-voices` read as
+delivered.
+**Cause:** every Pocket test constructed the provider directly, or drove it through the Voice Lab's
+own server. Both are real paths; neither is *the plugin's*. `packages/plugin/src/main.ts` registered
+`OsSynthProvider` and nothing else, so esbuild tree-shook the provider out — correctly, because
+nothing reachable from the entry point referenced it. `createProviderRegistry()` (OS preferred,
+Pocket beside it) existed, was correct, and was called by no one. The same shape had already been
+found one layer down as R16-01, *"the delivery path had no production caller"*, and that repair
+stopped one layer short of the entry point.
+**What to do instead:** **for anything that ships, assert on the ARTIFACT, not the source.** A
+source-level import proves nothing about what survives tree-shaking — the import was never the
+question, reachability was. `scripts/build.mjs` now requires the built bundle to CONTAIN both
+providers and to NOT contain the ONNX Runtime package (R16-09, the opposite failure: 270 MB of
+`.node` binaries against a 50 MB cap). Those two are one decision and are checked together, because
+guarding only one lets a fix for either silently break the other.
+
+Two things made it invisible for so long, and both are worth naming:
+- **`dist/` is committed.** A stale artifact that still imports fine is indistinguishable from a
+  fresh one until somebody rebuilds. CI *did* run `pnpm build`, and it *was* red.
+- **The instrument was the Voice Lab**, which reaches the provider by its own path. A tuning tool
+  that exercises a component is not evidence that the product reaches that component.
+
+Ask, of any feature: *what is the outermost thing a user touches, and does a check start there?*
+
 ## P48 — A coverage floor that follows only STATIC imports is blind to the module reached by `await import()`
 **Symptom:** SC-14 ("every module the Lab loads, loads under the resolver that ships") was green on
 all nine rows, `pnpm test` was 967 passing, and the neural backend **could not load at all**. The
