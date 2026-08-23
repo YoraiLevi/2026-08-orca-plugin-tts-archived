@@ -30,8 +30,8 @@
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { SentencePieceUnigram } from './sentencepiece.js'
-import { readNpy, readWav, resample, type Npy } from './audio.js'
+import { SentencePieceUnigram } from './sentencepiece.ts'
+import { readNpy, readWav, resample, type Npy } from './audio.ts'
 import { runtimeStatus } from './runtime.ts'
 
 /* --------------------------------------------------------------------------- the ONNX surface */

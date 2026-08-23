@@ -6,6 +6,36 @@
 > **Numbering:** highest number = newest. Before adding an entry, `grep '^## P' PITFALLS.md` and
 > take the next free number — concurrent agents have collided here before (see P12).
 
+## P48 — A coverage floor that follows only STATIC imports is blind to the module reached by `await import()`
+**Symptom:** SC-14 ("every module the Lab loads, loads under the resolver that ships") was green on
+all nine rows, `pnpm test` was 967 passing, and the neural backend **could not load at all**. The
+Voice Lab reported `backend_unavailable` and blamed the optional native module -- so the error
+sentence named ONNX Runtime, which was innocent, while the real cause was a specifier three lines
+into a file the floor never opened.
+**Cause:** the floor loaded `pocket-synth/index.ts`, which resolves fine. `index.ts` reaches the
+engine through `await import('./engine.ts')` **inside a function**, so `engine.ts` was never
+imported by the check -- and `engine.ts` itself imported `./sentencepiece.js` and `./audio.js`,
+the exact P38 shape that vitest forgives and plain node does not. Measured, and the whole finding
+is these two lines:
+
+```
+import('packages/providers/src/pocket-synth/index.ts')   -> LOADS   (SC-14 green)
+import('packages/providers/src/pocket-synth/engine.ts')  -> FAILS   (Cannot find sentencepiece.js)
+```
+
+Note what makes this the *fifth* costume of one defect: the floor was itself written as the fix for
+a hand-written list going stale (R16-01), and it went stale in the one direction its author did not
+think of. A guard that has quietly stopped matching is the same failure wearing the uniform of the
+fix.
+**What to do instead:** **walk the graph, do not list the roots.** SC-14 now takes the transitive
+closure of relative specifiers from every root, following `from '...'` and `import('...')` alike,
+and requires each edge to resolve to a file that exists -- plus a plain-node load of every module
+the walk discovers beyond the hand-written rows. It also carries a control that a broken specifier
+really would be reported, because an empty list of problems is worthless when nothing was examined.
+Generally: **lazy is invisible.** Any check that reasons about "what the product loads" must
+account for what the product loads *later*, or it is describing module evaluation order rather
+than the product.
+
 ## P46 — A test harness that picks its own port walks into the stale-server trap it was written to prevent
 **Symptom:** `scripts/ui-probe.mjs`, on its very first run, reported all four UI checks failing
 against a page that did not match the source on disk. The rows it described -- an accordion, `<

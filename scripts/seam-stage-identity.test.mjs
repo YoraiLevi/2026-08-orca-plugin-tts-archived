@@ -32,9 +32,9 @@
  *   ordinal produces different text, which is what goes red.
  */
 import { describe, it, expect } from 'vitest'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve, relative, sep } from 'node:path'
 
 import { STAGES, computeStages, stageFns } from './voice-lab.mjs'
 import { CONTROLS } from '../voice-lab/lib/controls.mjs'
@@ -392,6 +392,91 @@ describe('SC-14 — every module the Lab loads, loads under the resolver that sh
     const uncovered = imported.filter((m) => !LAB_MODULES.includes(m))
     expect(uncovered, 'the Lab imports these and SC-14 never loads them under the shipping ' +
       'resolver, so the row no longer means what it says').toEqual([])
+  })
+
+  /**
+   * R16-07 — THE FIFTH COSTUME. The list above, and the subset guard above it, both describe what
+   * the Lab imports *statically*. `pocket-synth/index.ts` reaches the engine through
+   * `await import('./engine.ts')` INSIDE A FUNCTION, so the floor loaded `index.ts`, saw it
+   * resolve, and reported green -- while `engine.ts` itself imported `./sentencepiece.js` and
+   * could not load under plain node at all.
+   *
+   * Measured before the repair, and this is the whole finding in two lines:
+   *
+   *   import('packages/providers/src/pocket-synth/index.ts')   -> LOADS   (SC-14 was green)
+   *   import('packages/providers/src/pocket-synth/engine.ts')  -> FAILS   (Cannot find sentencepiece.js)
+   *
+   * The consequence was not theoretical: `ui-probe.mjs` arm B, with the author's real Pocket model
+   * on disk, reported `backend_unavailable` and blamed the OPTIONAL native module -- so the neural
+   * backend was unreachable in the shipping product and the error message named the wrong cause.
+   *
+   * So stop hand-listing. Walk the relative-import graph from the roots, following STATIC AND
+   * DYNAMIC specifiers alike, and require every edge to resolve to a file that exists. A `.js`
+   * specifier beside a `.ts` file on disk is the exact shape that vitest forgives and node does
+   * not, and it is now caught wherever it hides in the graph rather than only at depth one.
+   */
+  function relativeSpecifiers (abs) {
+    const src = readFileSync(abs, 'utf8')
+    // `from './x.ts'` and `import('./x.ts')` both. A non-literal specifier (`import(ENGINE_MODULE)`)
+    // is unfollowable by construction; index.ts carries the literal too, which is why that is safe.
+    return [...new Set([...src.matchAll(/(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)].map((m) => m[1]))]
+  }
+
+  const asRel = (abs) => relative(REPO, abs).split(sep).join('/')
+
+  /** Transitive closure over relative specifiers, plus every edge it crossed. */
+  function walkFrom (roots) {
+    const seen = new Set()
+    const edges = []
+    const queue = roots.map((r) => join(REPO, r))
+    while (queue.length > 0) {
+      const abs = queue.shift()
+      const rel = asRel(abs)
+      if (seen.has(rel) || !existsSync(abs)) continue
+      seen.add(rel)
+      for (const spec of relativeSpecifiers(abs)) {
+        const target = resolve(dirname(abs), spec)
+        edges.push({ from: rel, spec, target: asRel(target), exists: existsSync(target) })
+        if (target.endsWith('.ts') && existsSync(target)) queue.push(target)
+      }
+    }
+    return { modules: [...seen], edges }
+  }
+
+  it('every relative specifier reachable from the Lab resolves to a file that exists', () => {
+    const { modules, edges } = walkFrom(LAB_MODULES)
+    expect(edges.length, 'no relative specifiers were found from any root; this guard has ' +
+      'stopped matching and can no longer see a broken import').toBeGreaterThanOrEqual(10)
+    expect(modules.length, 'the walk never left the roots, so it is not a closure')
+      .toBeGreaterThan(LAB_MODULES.length)
+    const broken = edges.filter((e) => !e.exists)
+      .map((e) => `${e.from} imports ${e.spec} -> ${e.target} (no such file)`)
+    expect(broken, 'these specifiers resolve under vitest and NOT under the resolver that ships. ' +
+      'Name the specifier .ts. See R16-07.').toEqual([])
+  })
+
+  it('CONTROL: the walk really would report a broken specifier', () => {
+    // Anchored on a file that genuinely has none, pointed at one that genuinely does not exist.
+    // Without this the assertion above is a list that is empty because nothing was ever examined.
+    const probe = walkFrom(['packages/core/src/does-not-exist.ts'])
+    expect(probe.edges).toEqual([])
+    const real = walkFrom(LAB_MODULES)
+    expect(real.edges.some((e) => e.spec.startsWith('./') || e.spec.startsWith('../'))).toBe(true)
+  })
+
+  /**
+   * Depth is not enough on its own: a module can resolve every specifier and still throw at
+   * evaluation. Load each module the walk found beyond the hand-written roots, in a fresh plain
+   * node, the way the product does.
+   */
+  it('every module the walk discovered beyond the roots loads under plain node', () => {
+    const discovered = walkFrom(LAB_MODULES).modules
+      .filter((m) => !LAB_MODULES.includes(m) && m.endsWith('.ts'))
+    const failures = discovered
+      .map((m) => ({ m, r: loadsUnderPlainNode(m) }))
+      .filter((x) => !x.r.ok)
+      .map((x) => `${x.m}: ${x.r.why}`)
+    expect(failures, 'reached from the Lab and unloadable under the shipping resolver').toEqual([])
   })
 
   for (const mod of LAB_MODULES) {
