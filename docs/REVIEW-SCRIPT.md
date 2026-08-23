@@ -34,7 +34,8 @@ This reads `~/.buzz/models/pocket-tts`, symlinks it into
 It prints an `export ORCA_TTS_MODEL_DIR=...` line and then tells you the export is **optional**,
 because that destination is already the product default.
 
-**Expected last lines:**
+**Expected last lines** (measured 2026-08-23, staging to a temp dest; yours will name the
+product cache instead):
 
 ```
 modelStatus: Pocket TTS is ready in /Users/<you>/Library/Application Support/orca-tts/models/pocket-tts
@@ -68,25 +69,40 @@ about exactly that lie.
 
 ## 4. THE ACTUAL JOB — the four taste decisions (C7)
 
-This is the part only you can do. Everything in the sidebar is live; changing a control changes what
-is spoken. Use your own text in the example box, especially paths and code.
+Only you can do this part. Every control in the sidebar is live: change it and the spoken text
+changes. Put your own text in the example box — especially paths, code, and identifiers.
 
-**4a. Identifiers.** How should `getUserById` be said? Split into words, spelled, or read raw?
-Does the answer change for `XMLHttpRequest`, `snake_case_name`, `kIsEnabled`?
+**The controls are named on screen. These are the exact labels:**
 
-**4b. Path depth.** `packages/core/src/normalizer/index.ts` — you said before that paths "made no
-sense whatsoever", and the current fix announces the name first, the kind last, and names the
-folder. Is that right? How many folder levels before it becomes noise — all of them, the last one,
-none?
+**4a. "How an identifier is said"** (with *"Whether the identifier is repeated in parentheses"*).
+Try `getUserById`, then `XMLHttpRequest`, then `snake_case_name`, then `kIsEnabled`. Split into
+words? Spelled? Read raw? Does the right answer change between those four — and if it does, which
+one wins as the default?
 
-**4c. Announcement wording.** The sentences the plugin says on its own behalf: engine ready, a
-degraded fallback, a download starting. Are they too chatty, too terse, or wrong in tone?
+**4b. "How a path is said"** — five controls: *how deep* (`path.depthPolicy` + a depth number),
+*what the name is called*, *what the folder is called*, and *how the extension is said*.
+Try `packages/core/src/normalizer/index.ts`. You said before that paths *"made no sense
+whatsoever"*; today it announces the name first, the kind last, and names the folder. Is that
+right, and **how many folder levels before it becomes noise** — all of them, the last one, none?
 
-**4d. Overhead budget.** How much *non-content* speech per reply is acceptable before it is
-irritating? This one is a number and I have no way to guess it.
+**4c. Announcement wording.** The sentences the plugin says on its own behalf — engine ready, a
+degraded fallback, a download starting. Also *"Whether an announcement interrupts"*. Too chatty,
+too terse, or wrong in tone?
 
-For each: tell me the setting and the value. "Identifiers: split into words, but never spell."
-That is enough — I will wire the defaults and the schema.
+**4d. Overhead budget.** **There is no control for this one** — it is a number I cannot guess and
+have not built a knob for. How much *non-content* speech per reply is acceptable before it
+irritates you? Answer in words and I will wire it.
+
+**How to answer.** One line each is enough:
+
+```
+identifiers: split into words, never spell
+paths:       last folder only, extension as a word
+wording:     too chatty on fallback — say it once
+overhead:    at most one sentence per reply
+```
+
+That is all I need to set the defaults and the schema.
 
 ## 5. Two policy calls I deliberately did not make for you
 
