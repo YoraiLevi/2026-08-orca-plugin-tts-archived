@@ -13,9 +13,11 @@ import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  applyP31, auditSaySpawns, classifySayArgs, p31Rows, readSpawnLog,
+  applyP31, auditSaySpawns, classifySayArgs, leftoverSayIsOrphan, p31Rows, readSpawnLog,
+  recorderLoadedFrom,
 } from './artifact-e2e.mjs'
 import { judge, OS_RATE } from './artifact-score.mjs'
+import { parseExecArgv, unwrapSpawn } from './ci/spawn-argv.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PARENT = join(ROOT, 'scripts/artifact-e2e.mjs')
@@ -41,6 +43,7 @@ function goodAbsent (extra = {}) {
     leakedSayAfter: 0,
     spawnViolations: [],
     saySpawns: [{ cmd: 'say', args: ['-o', '/tmp/x.wav', '--data-format=LEI16@22050', '--', 'hello'] }],
+    recorderLoaded: true,
     ...extra,
   }
 }
@@ -60,6 +63,8 @@ async function recordSay (args) {
   spawnSync(process.execPath, ['--import', pathToFileURL(RECORDER).href, decoy], {
     env: { ...process.env, VOICE_LAB_SPAWN_LOG: log, PATH: `${dir}${delimiter}${process.env.PATH ?? ''}` },
     encoding: 'utf8',
+    timeout: 8_000,
+    killSignal: 'SIGKILL',
   })
   return readSpawnLog(log)
 }
@@ -142,7 +147,7 @@ describe('R18-03: applyP31 cannot hide behind exit 2', () => {
     })
     expect(inconclusive.exit).toBe(2)
     const decision = applyP31(inconclusive, [
-      { label: 'ABSENT', r: { leakedSayAfter: 99, spawnViolations: [], saySpawns: [] } },
+      { label: 'ABSENT', r: { leakedSayAfter: 99, spawnViolations: [], saySpawns: [], recorderLoaded: true } },
     ], 'linux')
     expect(decision.exit, 'the R18-03 mutant still hid behind exit 2').toBe(1)
     expect(decision.rows.join('\n')).toMatch(/leakedSayAfter=99/)
@@ -168,6 +173,71 @@ describe('R18-03: applyP31 cannot hide behind exit 2', () => {
   })
 })
 
+describe('R19-05: exec command strings and sh -c are classified as say', () => {
+  it('parseExecArgv splits `say hello there` into cmd=say', () => {
+    expect(parseExecArgv('say hello there')).toEqual({ cmd: 'say', args: ['hello', 'there'] })
+  })
+
+  it('unwraps sh -c \'say hello there\'', () => {
+    expect(parseExecArgv("sh -c 'say hello there'")).toEqual({ cmd: 'say', args: ['hello', 'there'] })
+    expect(unwrapSpawn('sh', ['-c', 'say hello there'])).toEqual({ cmd: 'say', args: ['hello', 'there'] })
+  })
+
+  it('RED: auditSaySpawns sees execSync cmd=`say hello there` args=[] as a violation', () => {
+    const audit = auditSaySpawns([
+      { api: 'execSync', cmd: 'say hello there', args: [] },
+    ])
+    expect(audit.sayCount, JSON.stringify(audit)).toBe(1)
+    expect(audit.violations).toHaveLength(1)
+    expect(audit.violations[0].violation).toBe('aloud')
+  })
+
+  it('RED: mixed spawn(-o) + exec(bare) does not hide the exec behind the sibling (R19-05)', () => {
+    const audit = auditSaySpawns([
+      { api: 'spawnSync', cmd: 'say', args: ['-o', '/tmp/r19-x.wav', '--', 'hello'] },
+      { api: 'execSync', cmd: 'say hello there', args: [] },
+    ])
+    expect(audit.sayCount).toBe(2)
+    expect(audit.violations).toHaveLength(1)
+    expect(audit.violations[0].args).toEqual(['hello', 'there'])
+  })
+
+  it('RED: omitting recorderLoaded is a failure row on linux — empty --import cannot be green', () => {
+    const { recorderLoaded: _drop, ...rest } = goodAbsent()
+    void _drop
+    const rows = p31Rows('ABSENT', rest, 'linux')
+    expect(rows.join('\n')).toMatch(/recorder did not load/)
+    const decision = applyP31(
+      { exit: 2, rows: [], summary: 'INCONCLUSIVE' },
+      [{ label: 'ABSENT', r: rest }],
+      'linux',
+    )
+    expect(decision.exit, 'empty --import hid behind exit 2 on linux').toBe(1)
+  })
+
+  it('CONTROL: recorderLoaded true + leftover 0 is silent on linux', () => {
+    expect(p31Rows('ABSENT', goodAbsent(), 'linux')).toEqual([])
+  })
+})
+
+describe('R19-06: leftover say -o is not an orphan', () => {
+  it('GREEN: `say -o file.wav` leftover argv is not an orphan', () => {
+    expect(leftoverSayIsOrphan('say -o /tmp/x.wav --data-format=LEI16@22050 -- hello')).toBe(false)
+    expect(leftoverSayIsOrphan('/usr/bin/say -o /tmp/x.wav -- hello')).toBe(false)
+    expect(leftoverSayIsOrphan("say -v '?'")).toBe(false)
+  })
+
+  it('RED: leftover bare `say hello` is an orphan', () => {
+    expect(leftoverSayIsOrphan('say hello there')).toBe(true)
+    expect(leftoverSayIsOrphan('/usr/bin/say hello there')).toBe(true)
+  })
+
+  it('p31Rows still fails leakedSayAfter=1 (that field is now the ORPHAN count)', () => {
+    const rows = p31Rows('ABSENT', goodAbsent({ leakedSayAfter: 1 }), 'darwin')
+    expect(rows.join('\n')).toMatch(/leakedSayAfter=1/)
+  })
+})
+
 describe('the parent actually uses applyP31 (P26)', () => {
   const src = readFileSync(PARENT, 'utf8')
 
@@ -181,7 +251,7 @@ describe('the parent actually uses applyP31 (P26)', () => {
 })
 
 describe('R18-03: --prove-p31 demonstrates both colours', () => {
-  it('exits 0 and names RED then GREEN', { timeout: 20_000 }, () => {
+  it('exits 0 and names RED then GREEN, including R19-05/06', { timeout: 20_000 }, () => {
     const r = spawnSync(process.execPath, [PARENT, '--prove-p31'], {
       encoding: 'utf8',
       cwd: ROOT,
@@ -191,5 +261,16 @@ describe('R18-03: --prove-p31 demonstrates both colours', () => {
     expect(out).toMatch(/RED: recorded bare/)
     expect(out).toMatch(/GREEN: recorded `say -o`/)
     expect(out).toMatch(/leakedSayAfter=99/)
+    expect(out).toMatch(/exec\('say hello there'\)/)
+    expect(out).toMatch(/empty --import cannot report P31 green/)
+    expect(out).toMatch(/grandchild spawn\(say\) is visible/)
+    expect(out).toMatch(/leftover say -o argv is not an orphan/)
+  })
+})
+
+describe('R19-05: the recorder writes a loaded marker the judge requires', () => {
+  it('a real --import records api=recorder cmd=loaded', async () => {
+    const entries = await recordSay(['-v', '?'])
+    expect(recorderLoadedFrom(entries), JSON.stringify(entries)).toBe(true)
   })
 })

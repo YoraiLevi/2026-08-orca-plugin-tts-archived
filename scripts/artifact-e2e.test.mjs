@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { judge, OS_RATE, POCKET_RATE, scoreAbsent } from './artifact-score.mjs'
+import { judge, OS_RATE, POCKET_RATE, scoreAbsent, isNamedSubstitution } from './artifact-score.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PARENT = join(ROOT, 'scripts/artifact-e2e.mjs')
@@ -102,6 +102,39 @@ describe('R18-02: ABSENT is conclusive without a model', () => {
 
   it('CONTROL: scoreAbsent is empty for a healthy OS-floor arm', () => {
     expect(scoreAbsent(goodAbsent())).toEqual([])
+  })
+
+  it('R19-04: empty-string substitution is exit 1, not exit 2 (CI maps 2 to green)', () => {
+    const decision = judge({
+      productKind: 'absent',
+      present: null,
+      absent: { ...goodAbsent(), substitution: '' },
+    })
+    expect(decision.exit, 'substitution:\'\' hid behind exit 2').toBe(1)
+    expect(decision.rows.join('\n')).toMatch(/did not NAME the substitution/)
+  })
+
+  it('R19-04: whitespace-only substitution is the same costume', () => {
+    const decision = judge({
+      productKind: 'absent',
+      present: null,
+      absent: { ...goodAbsent(), substitution: '   ' },
+    })
+    expect(decision.exit).toBe(1)
+  })
+
+  it('R19-04: a constant \'ok\' is not a named substitution', () => {
+    const decision = judge({
+      productKind: 'absent',
+      present: null,
+      absent: { ...goodAbsent(), substitution: 'ok' },
+    })
+    expect(decision.exit, 'substitution:\'ok\' hid behind exit 2').toBe(1)
+    expect(isNamedSubstitution('ok')).toBe(false)
+    expect(isNamedSubstitution('')).toBe(false)
+    expect(isNamedSubstitution('   ')).toBe(false)
+    expect(isNamedSubstitution(null)).toBe(false)
+    expect(isNamedSubstitution(namedSub)).toBe(true)
   })
 })
 

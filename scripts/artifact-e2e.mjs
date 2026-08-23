@@ -62,6 +62,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { judge, OS_RATE, POCKET_RATE } from './artifact-score.mjs'
+import { spawnBase, tokenize, unwrapSpawn } from './ci/spawn-argv.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUNDLE = join(ROOT, 'dist/plugin/main.mjs')
@@ -256,16 +257,49 @@ function substitutionFrom (logs, notifications) {
   return announced ?? null
 }
 
-export function leakedSay () {
+/**
+ * P42 dirty-machine check: ANY leftover `say`, including a healthy `say -o` still
+ * writing. Used at the START of the parent. Not a P31 leftover check (R19-06).
+ */
+export function leakedSayRaw () {
   if (process.platform !== 'darwin') return 0
   const r = spawnSync('pgrep', ['-x', 'say'], { encoding: 'utf8' })
   if (r.status !== 0) return 0
   return r.stdout.trim() === '' ? 0 : r.stdout.trim().split('\n').length
 }
 
-/** Same basename rule as `scripts/ci/voice-lab-ci.mjs` `classifySpawn`. */
-export function spawnBase (cmd) {
-  return String(cmd).replaceAll('\\', '/').split('/').pop().toLowerCase().replace(/\.exe$/, '')
+/**
+ * A leftover `say` whose argv writes a file (`-o`) or lists voices (`-v ?`) is
+ * the path P31 requires, not an orphan. Round 19: two consecutive healthy ABSENT
+ * runs reported leakedSayAfter=1 because `pgrep -x say` is red for an in-flight
+ * `say -o`. Classify leftover argv the same way as a spawn.
+ *
+ * @param {string} psArgsLine  `ps -o args=` for one PID
+ */
+export function leftoverSayIsOrphan (psArgsLine) {
+  const tokens = tokenize(psArgsLine)
+  if (tokens.length === 0) return false
+  if (spawnBase(tokens[0]) !== 'say') return false
+  return classifySayArgs(tokens.slice(1)) !== null
+}
+
+/** P31 leftover count: leftover BARE `say` only. `say -o` still writing is not this. */
+export function leakedSayOrphans () {
+  if (process.platform !== 'darwin') return 0
+  const r = spawnSync('pgrep', ['-x', 'say'], { encoding: 'utf8' })
+  if (r.status !== 0) return 0
+  const pids = r.stdout.trim() === '' ? [] : r.stdout.trim().split('\n')
+  let orphans = 0
+  for (const pid of pids) {
+    const ps = spawnSync('ps', ['-o', 'args=', '-p', pid], { encoding: 'utf8' })
+    if (leftoverSayIsOrphan((ps.stdout ?? '').trim())) orphans++
+  }
+  return orphans
+}
+
+/** @deprecated use leakedSayOrphans (P31) or leakedSayRaw (P42 start-of-run) */
+export function leakedSay () {
+  return leakedSayOrphans()
 }
 
 /**
@@ -292,8 +326,10 @@ export function auditSaySpawns (entries) {
   const says = []
   const violations = []
   for (const e of entries ?? []) {
-    if (spawnBase(e.cmd) !== 'say') continue
-    const rec = { cmd: e.cmd, args: e.args ?? [], api: e.api }
+    if (e.api === 'recorder') continue
+    const decoded = unwrapSpawn(e.cmd, e.args ?? [])
+    if (spawnBase(decoded.cmd) !== 'say') continue
+    const rec = { cmd: decoded.cmd, args: decoded.args, api: e.api }
     says.push(rec)
     const v = classifySayArgs(rec.args)
     if (v !== null) violations.push({ ...v, cmd: rec.cmd, args: rec.args })
@@ -301,33 +337,49 @@ export function auditSaySpawns (entries) {
   return { sayCount: says.length, says, violations }
 }
 
+export function recorderLoadedFrom (entries) {
+  return (entries ?? []).some((e) => e.api === 'recorder' && e.cmd === 'loaded')
+}
+
 export function spawnLogPath (arm, wavDir) {
   return join(wavDir, `${arm}-spawns.ndjson`)
 }
 
 export function spawnFields (logPath) {
-  const audit = auditSaySpawns(readSpawnLog(logPath))
+  const entries = readSpawnLog(logPath)
+  const audit = auditSaySpawns(entries)
   return {
     spawnLog: logPath ?? null,
     saySpawns: audit.says,
     spawnViolations: audit.violations,
+    recorderLoaded: recorderLoadedFrom(entries),
   }
 }
 
 /**
- * P42 leftover `say` (the field R18-03 found write-only) AND P31 argv (no bare `say`).
- * Both halves are required: `pgrep -x say` cannot see a completed bare `say`, and an
- * orphaned `say -o` is silent but still poisons later timings.
+ * P31 argv (no bare `say`) AND a leftover BARE `say` (R19-06: `say -o` still
+ * writing is not this). `pgrep -x say` is P42 at parent START (exit 3); it cannot
+ * be the P31 leftover check, because a healthy in-flight `say -o` is red for it.
+ *
+ * R19-05: if the recorder silently failed to load, these rows must NOT be able
+ * to report green. `recorderLoaded` is the load-proof; it does not depend on
+ * darwin OS-rate audio.
  */
 export function p31Rows (label, r, platform = process.platform) {
   const rows = []
   if (r == null) return rows
+  if (r.recorderLoaded !== true) {
+    rows.push(
+      `${label} P31 recorder did not load (recorderLoaded=${JSON.stringify(r.recorderLoaded)}). ` +
+      'An empty --import module that patches nothing cannot report green (R19-05).',
+    )
+  }
   if (typeof r.leakedSayAfter !== 'number') {
-    rows.push(`${label} omitted leakedSayAfter — the P42 leftover-say detector is absent`)
+    rows.push(`${label} omitted leakedSayAfter — the leftover-say detector is absent`)
   } else if (r.leakedSayAfter !== 0) {
     rows.push(
       `${label} leakedSayAfter=${r.leakedSayAfter} (want 0). ` +
-      'A leftover `say` process serialises synthesis (P42). This field is now read.',
+      'A leftover BARE `say` (not `say -o`) serialises synthesis and speaks (P31/P42).',
     )
   }
   if (!Array.isArray(r.spawnViolations)) {
@@ -579,9 +631,9 @@ export function applyP31 (decision, arms, platform = process.platform) {
   const extra = []
   for (const { label, r } of arms) extra.push(...p31Rows(label, r, platform))
   if (platform === 'darwin') {
-    const leftover = leakedSay()
+    const leftover = leakedSayOrphans()
     if (leftover > 0) {
-      extra.push(`parent re-pgrep: ${leftover} say process(es) still running (P42)`)
+      extra.push(`parent re-pgrep: ${leftover} bare say process(es) still running (P31 orphan, not say -o)`)
     }
   }
   if (extra.length === 0) return decision
@@ -604,6 +656,7 @@ function printArm (label, r) {
   console.log(`substitution: ${r.substitution ?? '(none named)'}`)
   console.log(`elapsedMs:    ${r.elapsedMs}`)
   console.log(`leakedSayAfter: ${r.leakedSayAfter}`)
+  console.log(`recorderLoaded: ${r.recorderLoaded}`)
   console.log(`say spawns:   ${(r.saySpawns ?? []).length}`)
   for (const s of r.saySpawns ?? []) console.log(`  say ${JSON.stringify(s.args)}`)
   if ((r.spawnViolations ?? []).length > 0) {
@@ -628,7 +681,7 @@ async function main () {
   console.log(`bundle: ${BUNDLE}`)
   console.log(`PocketSynthProvider in bundle (presence, not effect): ${pocketPresent ? 'yes' : 'NO — R16-10 regress'}`)
 
-  const sayBefore = leakedSay()
+  const sayBefore = leakedSayRaw()
   if (sayBefore > 0) {
     console.error(`FAIL: ${sayBefore} leaked say process(es) already running (P42). Not measuring on a dirty machine.`)
     process.exit(3)
@@ -769,16 +822,22 @@ export async function proveP31 () {
   await writeFile(stub, process.platform === 'win32' ? '@echo off\r\nexit /b 0\r\n' : '#!/bin/sh\nexit 0\n', { mode: 0o755 })
   const pathWithStub = `${dir}${delimiter}${process.env.PATH ?? ''}`
 
-  const record = async (args, name) => {
+  const recordScript = async (body, name) => {
     const log = join(dir, `${name}.ndjson`)
     const decoy = join(dir, `${name}.mjs`)
-    await writeFile(decoy, `import { spawnSync } from 'node:child_process'\nspawnSync('say', ${JSON.stringify(args)}, { stdio: 'ignore' })\n`)
+    await writeFile(decoy, body)
     spawnSync(process.execPath, ['--import', recorder, decoy], {
       env: { ...process.env, VOICE_LAB_SPAWN_LOG: log, PATH: pathWithStub },
       encoding: 'utf8',
+      timeout: 8_000,
+      killSignal: 'SIGKILL',
     })
     return readSpawnLog(log)
   }
+  const record = async (args, name) => recordScript(
+    `import { spawnSync } from 'node:child_process'\nspawnSync('say', ${JSON.stringify(args)}, { stdio: 'ignore' })\n`,
+    name,
+  )
 
   const cases = []
   const bareLog = await record(['hello there'], 'bare')
@@ -797,10 +856,97 @@ export async function proveP31 () {
     detail: fileAudit,
   })
 
+  const execLog = await recordScript(
+    `import { execSync } from 'node:child_process'\nexecSync('say hello there')\n`,
+    'exec',
+  )
+  const execAudit = auditSaySpawns(execLog)
+  cases.push({
+    name: 'RED: exec(\'say hello there\') is classified as bare say (R19-05)',
+    ok: execAudit.sayCount === 1 && execAudit.violations.length === 1,
+    detail: execAudit,
+  })
+
+  const mixedLog = await recordScript(
+    `import { spawnSync, execSync } from 'node:child_process'\n` +
+    `spawnSync('say', ['-o', ${JSON.stringify(join(dir, 'mixed.wav'))}, '--', 'hello'], { stdio: 'ignore' })\n` +
+    `execSync('say hello there')\n`,
+    'mixed',
+  )
+  const mixedAudit = auditSaySpawns(mixedLog)
+  cases.push({
+    name: 'RED: mixed spawn(-o) + exec(bare) still flags the exec (R19-05)',
+    ok: mixedAudit.sayCount === 2 && mixedAudit.violations.length === 1,
+    detail: mixedAudit,
+  })
+
+  const shLog = await recordScript(
+    `import { spawnSync } from 'node:child_process'\n` +
+    `spawnSync('sh', ['-c', 'say hello there'], { stdio: 'ignore' })\n`,
+    'shc',
+  )
+  const shAudit = auditSaySpawns(shLog)
+  cases.push({
+    name: 'RED: sh -c \'say hello\' is classified as bare say (R19-05)',
+    ok: shAudit.sayCount === 1 && shAudit.violations.length === 1,
+    detail: shAudit,
+  })
+
+  const grand = join(dir, 'grand-child.mjs')
+  await writeFile(
+    grand,
+    `import { spawnSync } from 'node:child_process'\n` +
+    `spawnSync('say', ['hello from grandchild'], { stdio: 'ignore' })\n`,
+  )
+  const grandLog = await recordScript(
+    `import { spawnSync } from 'node:child_process'\n` +
+    `spawnSync(process.execPath, [${JSON.stringify(grand)}], { stdio: 'ignore', timeout: 5000, killSignal: 'SIGKILL' })\n`,
+    'grand-parent',
+  )
+  const grandAudit = auditSaySpawns(grandLog)
+  cases.push({
+    name: 'RED: grandchild spawn(say) is visible (R19-05 --import inject on node spawn)',
+    ok: grandAudit.sayCount >= 1 && grandAudit.violations.length >= 1,
+    detail: grandAudit,
+  })
+
+  const emptyMod = join(dir, 'empty-import.mjs')
+  await writeFile(emptyMod, 'void 0\n')
+  const emptyLog = join(dir, 'empty.ndjson')
+  const emptyDecoy = join(dir, 'empty-decoy.mjs')
+  await writeFile(emptyDecoy, 'void 0\n')
+  spawnSync(process.execPath, ['--import', pathToFileURL(emptyMod).href, emptyDecoy], {
+    env: { ...process.env, VOICE_LAB_SPAWN_LOG: emptyLog, PATH: pathWithStub },
+    encoding: 'utf8',
+  })
+  const emptyEntries = readSpawnLog(emptyLog)
+  const emptyLoaded = recorderLoadedFrom(emptyEntries)
+  const emptyRows = p31Rows('ABSENT', {
+    leakedSayAfter: 0,
+    spawnViolations: [],
+    saySpawns: [],
+    recorderLoaded: emptyLoaded,
+    chunkSampleRate: OS_RATE,
+    bytes: 1000,
+  }, 'linux')
+  const emptyDecision = applyP31(
+    { exit: 2, rows: [], summary: 'INCONCLUSIVE' },
+    [{ label: 'ABSENT', r: {
+      leakedSayAfter: 0, spawnViolations: [], saySpawns: [], recorderLoaded: emptyLoaded,
+    } }],
+    'linux',
+  )
+  cases.push({
+    name: 'RED: empty --import cannot report P31 green on linux (R19-05)',
+    ok: emptyLoaded === false && emptyRows.length > 0 && emptyDecision.exit === 1,
+    detail: { emptyLoaded, emptyRows, exit: emptyDecision.exit },
+  })
+
   const leakRows = p31Rows('ABSENT', {
     leakedSayAfter: 99,
     spawnViolations: [],
     saySpawns: [{ cmd: 'say', args: ['-o', '/tmp/x.wav'] }],
+    recorderLoaded: true,
   })
   cases.push({
     name: 'RED: leakedSayAfter=99 is now read (the R18-03 mutant)',
@@ -812,24 +958,48 @@ export async function proveP31 () {
     leakedSayAfter: 0,
     spawnViolations: [],
     saySpawns: [{ cmd: 'say', args: ['-o', '/tmp/x.wav', '--', 'hello'] }],
+    recorderLoaded: true,
     chunkSampleRate: OS_RATE,
     bytes: 1000,
   }, 'darwin')
   cases.push({
-    name: 'GREEN: leftover 0 + say -o produces no P31 rows',
+    name: 'GREEN: leftover 0 + say -o + recorder loaded produces no P31 rows',
     ok: cleanRows.length === 0,
     detail: cleanRows,
   })
 
+  cases.push({
+    name: 'GREEN: leftover say -o argv is not an orphan (R19-06)',
+    ok: leftoverSayIsOrphan('say -o /tmp/x.wav -- hello') === false,
+    detail: leftoverSayIsOrphan('say -o /tmp/x.wav -- hello'),
+  })
+  cases.push({
+    name: 'RED: leftover bare say argv is an orphan (R19-06)',
+    ok: leftoverSayIsOrphan('say hello there') === true,
+    detail: leftoverSayIsOrphan('say hello there'),
+  })
+
   const leakDecision = applyP31(
     { exit: 2, rows: [], summary: 'INCONCLUSIVE' },
-    [{ label: 'ABSENT', r: { leakedSayAfter: 99, spawnViolations: [], saySpawns: [] } }],
+    [{ label: 'ABSENT', r: { leakedSayAfter: 99, spawnViolations: [], saySpawns: [], recorderLoaded: true } }],
     'linux',
   )
   cases.push({
     name: 'RED: applyP31 turns exit 2 into exit 1 when leakedSayAfter is 99',
     ok: leakDecision.exit === 1 && leakDecision.rows.some((row) => row.includes('leakedSayAfter=99')),
     detail: leakDecision,
+  })
+
+  const loadedOnLinux = p31Rows('ABSENT', {
+    leakedSayAfter: 0,
+    spawnViolations: [],
+    saySpawns: [{ cmd: 'say', args: ['-v', '?'] }],
+    recorderLoaded: true,
+  }, 'linux')
+  cases.push({
+    name: 'GREEN: recorderLoaded + say -v ? is enough on linux (no darwin OS-rate)',
+    ok: loadedOnLinux.length === 0,
+    detail: loadedOnLinux,
   })
 
   console.log('\n=== R18-03 P31 prove ===\n')

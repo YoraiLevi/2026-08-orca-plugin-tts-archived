@@ -13,11 +13,12 @@
  * tsconfig files that have no business shipping.
  */
 import { build } from 'esbuild'
-import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { consultProvesRealPocket } from './artifact-score.mjs'
+import { join, resolve as resolvePath } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { consultProvesRealPocket, REQUIRED_POCKET_FILES } from './artifact-score.mjs'
 
 const OUT = 'dist/plugin'
 
@@ -68,37 +69,46 @@ await build({
 })
 
 /**
- * R16-10 / R17-02 / R18-01 — assert what SURVIVED by EFFECT, not by substring.
+ * R16-10 / R17-02 / R18-01 / R19-01 — assert what SURVIVED by IDENTITY, not by
+ * a sentence.
  *
- * Round 16's guard was `bundle.includes('PocketSynthProvider')`. Round 17 deleted the
- * production constructor, kept the name as `host.log('PocketSynthProvider')`, and
- * watched tests 2/2 plus `pnpm build` stay green while the class was gone. Round 17's
- * repair grepped `/pocket:/` out of a log. Round 18 handed `activate()` a stub with
- * `id: 'pocket'` whose `prepare()` throws `'pocket: mutant stub'`, stopped the factory
- * default-constructing the real class, and got: `pnpm build` EXIT 0, class gone,
- * `PocketTts` gone. A log substring is not an effect. A stub can fake one.
+ * Round 16 grepped a class name. Round 17 kept the name as a log string. Round 18
+ * grepped `/pocket:/`. Round 18's repair grepped two longer substrings out of the
+ * same haystack, and round 19's stub interpolated the product's own sentence:
+ * `throw new Error(\`Pocket TTS model is not ready in ${ORCA_TTS_MODEL_DIR}:
+ * missing tokenizer.model, mimi_encoder.onnx, eve.wav\`)`. `pnpm build` EXIT 0,
+ * `PocketSynthProvider` gone, `PocketTts` gone. A sentence is a string and a stub
+ * can copy any sentence we name.
  *
- * Reuse `scripts/artifact-e2e.mjs` rather than a third instrument. Its `--child`
- * path already imports `dist/plugin/main.mjs`, constructs the production providers,
- * and drives `prepare()`. We interpret the JSON; we do not duplicate the driver.
+ * Discriminator a stub cannot forge: import `PocketModelUnavailableError` FROM
+ * THIS BUNDLE and require `err instanceof` that class. Then the STRUCTURED
+ * status (`err.status.dir` is the empty dir, `err.status.missing` enumerates
+ * the 23 required files). The named exports are pinned AFTER esbuild tree-shakes,
+ * so they do not keep a dead class alive — if production stopped constructing
+ * `PocketSynthProvider`, the export is a ReferenceError and this arm is red.
  *
- * Two arms, because one mutant each:
- *   consult  — OS floor forced down, isolated empty model dir (R061). Demand the
- *              real `PocketModelUnavailableError`: it names THIS empty directory
- *              and enumerates `mimi_encoder.onnx`. Round 18's stub cannot produce
- *              either — it never called `modelStatus()`. 24 kHz is the stronger
- *              discriminator but needs weights CI does not have; against an empty
- *              dir it would mean the provider ignored `ORCA_TTS_MODEL_DIR`. The
- *              PRESENT arm of `probe:artifact` is the 24 kHz gate.
- *   prefer   — production wiring, empty model. Default `synthesize.engine` is
- *              `auto`, which asks Pocket first. With no weights that MUST land
- *              on the OS floor at rung=fallback AND name the substitution.
- *              Calling `resolve()` with no id again makes OS preferred and
- *              silent — this arm goes red. Factory preference (R17-06) is
- *              asserted in `createProviderRegistry` tests; this arm is the
- *              production-path ABSENT half of `probe:artifact`.
+ * prefer — production wiring, empty model. Default `synthesize.engine` is `auto`,
+ * which asks Pocket first. With no weights that MUST land on the OS floor at
+ * rung=fallback AND name the substitution.
  */
-const bundle = await readFile(`${OUT}/main.mjs`, 'utf8')
+const DEFAULT_EXPORT_SHAPE = `export {
+  activate as default
+};`
+const IDENTITY_EXPORT_SHAPE = `export {
+  activate as default,
+  PocketModelUnavailableError,
+  PocketSynthProvider
+};`
+const bundleRaw = await readFile(`${OUT}/main.mjs`, 'utf8')
+if (!bundleRaw.includes(DEFAULT_EXPORT_SHAPE)) {
+  throw new Error(
+    `${OUT}/main.mjs default-export shape changed; cannot pin PocketModelUnavailableError ` +
+    `and PocketSynthProvider as named exports (R19-01). The consult arm imports those ` +
+    `classes FROM THE BUNDLE and demands instanceof.`,
+  )
+}
+const bundle = bundleRaw.replace(DEFAULT_EXPORT_SHAPE, IDENTITY_EXPORT_SHAPE)
+await writeFile(`${OUT}/main.mjs`, bundle)
 await assertShippedProvidersByEffect()
 // NOT a substring search for "onnxruntime_binding": `runtime.ts` names that file in its pinned
 // integrity table, so the string is legitimately present and a naive check fires on the fix. What
@@ -187,26 +197,66 @@ async function assertShippedProvidersByEffect () {
   const runDir = await mkdtemp(join(tmpdir(), 'orca-tts-artifact-guard-'))
   try {
     const emptyModel = await mkdtemp(join(runDir, 'empty-'))
-    const consultOut = join(runDir, 'consult.json')
-    const consultProbe = runArtifactChild([
-      '--arm', 'consult',
-      '--model-dir', emptyModel,
-      '--out', consultOut,
-      '--wav-dir', runDir,
-      '--force-os-down'
-    ])
-    const consult = await readChildResult(consultProbe, consultOut, 'consult')
-    // R18-01: `/pocket:/` in a log is the R17-02 log-string with a colon. A stub
-    // with `id: 'pocket'` whose `prepare()` throws `'pocket: mutant stub'` satisfies
-    // it. Demand the real class's `PocketModelUnavailableError` instead — it names
-    // THIS empty directory and enumerates a Pocket-only weight a stub never lists.
-    if (!consultProvesRealPocket(consult, emptyModel)) {
+    // R19-01: a sentence is a string. Import the class FROM THIS BUNDLE and demand
+    // the live throw is an instance of it, with structured status. The named
+    // exports were pinned AFTER tree-shake, so a stub that interpolates the
+    // product's sentence and drops the class is a ReferenceError here, not EXIT 0.
+    if (!bundle.includes('var PocketSynthProvider = class')) {
       throw new Error(
-        `${OUT}/main.mjs consult arm did not run the bundled PocketSynthProvider.prepare(). ` +
-        `A stub with id:'pocket' whose throw contains "pocket:" is not the real class (R18-01). ` +
-        `Want PocketModelUnavailableError naming this empty dir (${emptyModel}) and ` +
-        `enumerating mimi_encoder.onnx. ` +
-        `error=${JSON.stringify(consult.error)} logs=${JSON.stringify(consult.logs)}`
+        `${OUT}/main.mjs does not contain \`var PocketSynthProvider = class\` — the neural ` +
+        `class was tree-shaken (R16-10 / R19-01). Presence is not effect, but its absence ` +
+        `is round 19's interpolating stub.`,
+      )
+    }
+    if (!bundle.includes('new PocketSynthProvider()')) {
+      throw new Error(
+        `${OUT}/main.mjs factory no longer default-constructs PocketSynthProvider. ` +
+        `Omitting \`pocket\` must construct the class, or esbuild drops it (R19-01).`,
+      )
+    }
+    const bundleUrl = pathToFileURL(resolvePath(`${OUT}/main.mjs`)).href + `?r19=${Date.now()}`
+    let mod
+    try {
+      mod = await import(bundleUrl)
+    } catch (err) {
+      throw new Error(
+        `${OUT}/main.mjs could not be imported for the R19-01 identity consult ` +
+        `(PocketModelUnavailableError / PocketSynthProvider named exports). ${String(err)}`,
+        { cause: err },
+      )
+    }
+    const BundleError = mod.PocketModelUnavailableError
+    const BundleProvider = mod.PocketSynthProvider
+    if (typeof BundleError !== 'function' || typeof BundleProvider !== 'function') {
+      throw new Error(
+        `${OUT}/main.mjs did not export PocketModelUnavailableError and PocketSynthProvider ` +
+        `as functions. The neural class was tree-shaken (R19-01). ` +
+        `Error=${typeof BundleError} Provider=${typeof BundleProvider}`,
+      )
+    }
+    let thrown = null
+    try {
+      await new BundleProvider({ dir: emptyModel }).prepare()
+    } catch (err) {
+      thrown = err
+    }
+    if (thrown === null) {
+      throw new Error(
+        `${OUT}/main.mjs PocketSynthProvider.prepare() succeeded against an empty dir ` +
+        `(${emptyModel}). The consult arm must throw.`,
+      )
+    }
+    if (!consultProvesRealPocket(thrown, emptyModel, BundleError)) {
+      throw new Error(
+        `${OUT}/main.mjs consult arm did not throw the bundled PocketModelUnavailableError ` +
+        `with structured status for this empty dir. A stub that interpolates the product's ` +
+        `sentence is not an instance of the bundle's own class (R19-01). ` +
+        `instanceof=${thrown instanceof BundleError} ` +
+        `name=${JSON.stringify(thrown?.name)} ` +
+        `statusDir=${JSON.stringify(thrown?.status?.dir)} ` +
+        `missingCount=${Array.isArray(thrown?.status?.missing) ? thrown.status.missing.length : 'n/a'} ` +
+        `wantDir=${emptyModel} wantMissing=${REQUIRED_POCKET_FILES.length} ` +
+        `message=${JSON.stringify(String(thrown?.message ?? thrown))}`,
       )
     }
 

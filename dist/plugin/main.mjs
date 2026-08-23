@@ -320,7 +320,7 @@ var init_safe_swap = __esm({
 // packages/providers/src/pocket-synth/models.ts
 import { createHash } from "node:crypto";
 import { readFile as readFile3, writeFile as writeFile2, readdir as readdir2, mkdir as mkdir2, rm as rm3, symlink } from "node:fs/promises";
-import { existsSync as existsSync2, realpathSync } from "node:fs";
+import { existsSync as existsSync2, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename as basename2, dirname as dirname2, join as join3, resolve as resolvePath, sep } from "node:path";
 function modelDir(env = process.env) {
@@ -364,7 +364,18 @@ async function modelStatus(dir = modelDir()) {
   const required = requiredFiles();
   if (!existsSync2(dir)) return { kind: "absent", dir, missing: required };
   const names = new Set(await readdir2(dir));
-  const missing = required.filter((f) => !names.has(f) || !existsSync2(join3(dir, f)));
+  const missing = required.filter((f) => {
+    if (!names.has(f)) return true;
+    const path = join3(dir, f);
+    if (!existsSync2(path)) return true;
+    const want2 = PINNED_BYTES.get(f);
+    if (want2 === void 0) return false;
+    try {
+      return statSync(path).size !== want2;
+    } catch {
+      return true;
+    }
+  });
   const present = required.length - missing.length;
   if (missing.length > 0) {
     if (present === 0) return { kind: "absent", dir, missing };
@@ -382,7 +393,7 @@ async function modelStatus(dir = modelDir()) {
   if (found !== want) return { kind: "stale", dir, found, want };
   return { kind: "ready", dir };
 }
-var MODEL_REPO, MODEL_REVISION, BUNDLE_ID, MANIFEST_VERSION, MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, MANIFEST_FILE, LICENSE_FILE, UPSTREAM_LICENSE_FILE, LICENSE_TEXT, VOICE_ARTIFACTS, VOICES_TOTAL_BYTES, INSTALL_TOTAL_BYTES;
+var MODEL_REPO, MODEL_REVISION, BUNDLE_ID, MANIFEST_VERSION, MODEL_ARTIFACTS, MODEL_TOTAL_BYTES, MANIFEST_FILE, LICENSE_FILE, UPSTREAM_LICENSE_FILE, LICENSE_TEXT, VOICE_ARTIFACTS, VOICES_TOTAL_BYTES, PINNED_BYTES, INSTALL_TOTAL_BYTES;
 var init_models = __esm({
   "packages/providers/src/pocket-synth/models.ts"() {
     "use strict";
@@ -426,6 +437,9 @@ distribution. Provided AS IS, without warranty of any kind.
       bytes: v.bytes
     }));
     VOICES_TOTAL_BYTES = VOICE_ARTIFACTS.reduce((n, a) => n + a.bytes, 0);
+    PINNED_BYTES = new Map(
+      [...MODEL_ARTIFACTS, ...VOICE_ARTIFACTS].map((a) => [a.file, a.bytes])
+    );
     INSTALL_TOTAL_BYTES = MODEL_TOTAL_BYTES + VOICES_TOTAL_BYTES;
   }
 });
@@ -6637,5 +6651,7 @@ function activate(orca, options = {}) {
   host.log(`read-aloud: ready (${n} commands)`);
 }
 export {
-  activate as default
+  activate as default,
+  PocketModelUnavailableError,
+  PocketSynthProvider
 };
