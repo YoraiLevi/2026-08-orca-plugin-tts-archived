@@ -52,7 +52,7 @@ not refined**, which is the author's own summary after one day of listening.
 
 | | |
 |---|---|
-| Repo | https://github.com/YoraiLevi/orca-plugin-tts (public) |
+| Repo | https://github.com/YoraiLevi/2026-08-orca-plugin-tts-archived (public) |
 | CI | **Green, and the citation gate is green for a reason rather than by amnesty.** The gate now ratchets on **LOST** (anchor nowhere in the file — 0 today) and merely *reports* **DRIFTED** (85) and **QUOTE-GONE** (2). The old `--max-stale=34` bounded the total, which measured code churn: `4ccfa20`, a one-file bug fix with no documentation changing, moved the total 85 → 130 in a single commit. A gate whose only exits are "lie" and "make it worse" is a broken gate. **A manufactured LOST fails at `--max-lost=0` and passes at `--max-lost=1`**, so the red is provably the gate's. |
 | Tests | **784 / 784** at `ba3fccf` `[measured-here]`, clean detached worktree, **load 10.86**, **zero leaked `say`** (P42). A count needs all three: a SHA because the tree moves under you; a load average because the same suite gave 657 and 653 minutes apart; and the leak check because an orphaned `say` made `cancel() within 50 ms` report **33,823 ms**, indistinguishable from a real barge-in regression. |
 | Gate M11 | **MET** `[measured-here]`, `e9162f0`, load 5.27, headless and muted. Cold `short.md` **p95 1,690 ms** (n=20) · cold longest **1,327 ms** (n=5) · arrow speak-on-change **1,466 ms** (n=20) · warm replay **41 ms** (n=20) against a 2,000 ms budget, from a previous **3,401 ms**. The warm arm carries its own control: **0 `POST /speak` across 20 warm trials**. |

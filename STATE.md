@@ -1,7 +1,7 @@
 # STATE — orca-plugin-tts
 
 **Updated:** 2026-08-23 (later) · **Phase:** Pocket TTS usable end to end; awaiting the author's ear · **Branch:** `main` ·
-**Repo:** https://github.com/YoraiLevi/orca-plugin-tts
+**Repo:** https://github.com/YoraiLevi/2026-08-orca-plugin-tts-archived
 
 > **Amended 2026-08-21 — forced by the latency measurement pass** (`docs/.research/latency-measurements.md`).
 > The `927 ms` first-audio figure previously printed in the audit table below was **unsupported and

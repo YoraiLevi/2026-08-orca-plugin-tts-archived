@@ -5,7 +5,7 @@ Paste this to resume with no prior context.
 ## What this is
 
 **Read Aloud**, a text-to-speech plugin for ORCA. Public, shipped, working:
-https://github.com/YoraiLevi/orca-plugin-tts · CI green on macOS/Linux/Windows · 145 tests.
+https://github.com/YoraiLevi/2026-08-orca-plugin-tts-archived · CI green on macOS/Linux/Windows · 145 tests.
 
 **It is assistive technology.** The user is dyslexic and voice-first. Latency, reliability and
 never-failing-silently are accessibility properties, not polish. They had already specified this

@@ -5,7 +5,7 @@
   "name": "Read Aloud",
   "version": "0.1.0",
   "description": "Speaks agent replies and your clipboard aloud. Local, cross-platform, no account or API key.",
-  "repository": "https://github.com/YoraiLevi/orca-plugin-tts",
+  "repository": "https://github.com/YoraiLevi/2026-08-orca-plugin-tts-archived",
   "engines": {
     "orca": ">=1.4.0"
   },
