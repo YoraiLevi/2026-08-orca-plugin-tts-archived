@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "AVAudioEngine swift helper CoreAudio pipe stdin PCM instant stop macOS Node",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:32:48.764407+0300",
+  "status": "ok",
+  "message": null,
+  "count": 10,
+  "payload": [
+    {
+      "title": "AVAudioEngine | Apple Developer Documentation",
+      "url": "https://developer.apple.com/documentation/avfaudio/avaudioengine",
+      "snippet": "An object that manages a graph of audio nodes, controls playback, and configures real-time rendering constraints."
+    },
+    {
+      "title": "GitHub - bitgapp/eqMac: macOS System-wide Audio Equalizer...",
+      "url": "https://github.com/bitgapp/eqMac",
+      "snippet": "Idea is to become the ultimate Audio toolbox for macOS. Input Audio Source - Apply effects to any device: guitar, microphone etc. Virtual Output - Export the Adjusted audio to any application.File playback and rendering - Apply effects to audio files and instantly render them."
+    },
+    {
+      "title": "ios - AVAudioEngine inputNode installTap crash... - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/41805381/avaudioengine-inputnode-installtap-crash-when-restarting-recording",
+      "snippet": "Explore Stack Internal. AVAudioEngine inputNode installTap crash when restarting recording. Ask Question.2. Swift AVAudioEngine: Changing the Audio Input Device for MacOS."
+    },
+    {
+      "title": "AVAudioEngine Tutorial for iOS: Getting Started | Kodeco",
+      "url": "https://www.kodeco.com/21672160-avaudioengine-tutorial-for-ios-getting-started",
+      "snippet": "May 12 2021 , Swift 5, iOS 14, Xcode 12 Swift 5, iOS 14, Xcode 12. Learn how to use AVAudioEngine to build the next greatest podcasting app! Implement audio features to pause, skip, speed up, slow down and change the pitch of audio in your app."
+    },
+    {
+      "title": "Swift AVAudioEngine: Changing the Audio Input Device for MacOS",
+      "url": "https://stackguides.com/questions/52818705/swift-avaudioengine-changing-the-audio-input-device-for-macos",
+      "snippet": "1 swift AVAudioEngine convert multichannel non interleaved signal to single channel. 4 How to set AVAudioEngine input and output devices (swift/macos). 2 AVAudioEngine audio stops when switching the audio output device."
+    },
+    {
+      "title": "swift-macos — Agent Skill | ottermind",
+      "url": "https://ottermind.ai/skills/swift-macos",
+      "snippet": "Covers macOS app development with Swift 6.3, SwiftUI, SwiftData, Swift Concurrency, Foundation Models, Swift Testing, ScreenCaptureKit, and app distribution."
+    },
+    {
+      "title": "[SOLVED] Tap Mic Input Using AVAudioEngine in Swift",
+      "url": "https://www.developerload.com/tap-mic-input-using-avaudioengine-in-swift",
+      "snippet": "DeveloperLoad helps developers to find solutions to technical problems.All I'm looking for is the raw pcm buffer for analysis. I don't need any effects or output. According to the WWDC talk \"502 Audio Engine in Practice\", this setup should work."
+    },
+    {
+      "title": "HELPER • Discord Bot",
+      "url": "https://helper-ds.ru/",
+      "snippet": "Helper bot центр управления. Премиальная система управления Discord-сервером: 22 рабочих модуля, Web-Dashboard, авто-настройка через /setup, тикеты, заявки, магазин, роли за реакции, статистика и безопасное отключение модулей без сломанных панелей."
+    },
+    {
+      "title": "How to control the pitch and speed of audio using AVAudioEngine...",
+      "url": "https://www.hackingwithswift.com/example-code/media/how-to-control-the-pitch-and-speed-of-audio-using-avaudioengine",
+      "snippet": "Its job is to connect audio processing objects in a chain so that the output of one object is the input for another. You can feed audio into the start, apply processing in the middle, then play the audio as the output, giving you real-time audio manipulation without much effort."
+    },
+    {
+      "title": "Static Audio Output from Gemini Live API (google-genai SDK) on iOS...",
+      "url": "https://discuss.ai.google.dev/t/static-audio-output-from-gemini-live-api-google-genai-sdk-on-ios-with-avaudioengine/81881",
+      "snippet": "Problem: When the backend receives response.data from the Gemini API stream and forwards these bytes to the iOS app, playing these bytes using AVAudioEngine / AVAudioPlayerNode results in loud static noise, not clear speech."
+    }
+  ]
+}

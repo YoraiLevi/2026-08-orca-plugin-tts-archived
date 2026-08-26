@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "skill": "duckduckgo-search",
+  "kind": "list",
+  "query": "mpv --idle audio player pipe raw PCM stop instantly IPC",
+  "args": {
+    "region": "wt-wt",
+    "time": null,
+    "min_results": 25
+  },
+  "generated_at": "2026-08-20T18:32:48.178286+0300",
+  "status": "ok",
+  "message": null,
+  "count": 10,
+  "payload": [
+    {
+      "title": "mpv.io | a free, open source, and cross-platform media player",
+      "url": "https://mpv.io/manual/master/",
+      "snippet": "(Which makes it suitable for playing data piped to stdin.) The special argument -- can be used to stop mpv from interpreting the following arguments as options.Raw PCM/WAVE file writer audio output. The following global options are supported by this audio output"
+    },
+    {
+      "title": "mpv_event_id_MPV_EVENT_IDLE in libmpv_sys - Rust",
+      "url": "https://docs.rs/libmpv-sys/latest/libmpv_sys/constant.mpv_event_id_MPV_EVENT_IDLE.html",
+      "snippet": "pub const mpv_event_id_MPV_EVENT_IDLE: mpv_event_id = 11; Expand description.(The command line player normally quits instead of entering idle mode, unless –idle was specified. If mpv was started with mpv_create(), idle mode is enabled by default.)"
+    },
+    {
+      "title": "mpv/DOCS/man/input.rst at master · mpv-player/mpv · GitHub",
+      "url": "https://github.com/mpv-player/mpv/blob/master/DOCS/man/input.rst",
+      "snippet": "Contribute to mpv-player/mpv development by creating an account on GitHub.mpv --input-test --force-window --idle. (Only closing the window will make mpv exit, pressing normal keys will merely display the binding, even if mapped to quit.) Also see Key names."
+    },
+    {
+      "title": "Скачать Lamar - Idle Vlogger 238.3.2 APK (Мод: много денег) на...",
+      "url": "https://5play.org/22022-lamar-idle-vlogger.html",
+      "snippet": "У нас на сайте можно скачать игру Lamar - Idle Vlogger для Android с модом на деньги. Взломанная версия APK на телефон и планшет."
+    },
+    {
+      "title": "Best AI Text To Speech & Free Voice Cloning | Fish Audio",
+      "url": "https://fish.audio/",
+      "snippet": "From real-time streaming to instant voice cloning. Fish Audio gives you every tool to build production-ready voice agents. Text To Speech."
+    },
+    {
+      "title": "MP3 to WAV Converter Online Free — 44.1kHz 16-bit | XConvert",
+      "url": "https://www.xconvert.com/convert-mp3-to-wav",
+      "snippet": "Convert MP3 to WAV audio with optional codec, quality preset, sample rate, channel, and trim settings for clean, compatible WAV output."
+    },
+    {
+      "title": "DeepSeek Harness Plugins & Clients | DSH Hub",
+      "url": "https://dsh-hub.org/",
+      "snippet": "Theme studio for the DSH Web GUI: five built-in presets plus fully customizable light/dark palettes (accent, background, foreground, UI and code fonts, translucent sidebar, contrast), hot-swapped instantly and persisted in localStorage."
+    },
+    {
+      "title": "Бесплатный онлайн конвертер аудио из WAV в MP3",
+      "url": "https://fconvert.ru/audio/wav-to-mp3/",
+      "snippet": "Though a WAV file can contain compressed audio, the most common WAV audio format is uncompressed audio in the linear pulse code modulation (LPCM) format. Audio in WAV files can be encoded in a variety of audio coding formats, such as GSM or MP3, to reduce the file size."
+    },
+    {
+      "title": "All Blox Strike Scripts 2026 – NO KEY (Aim Assit, ESP)",
+      "url": "https://robxscript.com/multi-script/all-blox-strike-scripts",
+      "snippet": "Some Blox Strike scripts are available as no-key options, allowing players to execute them instantly without completing a key system. Other hubs may require keys in exchange for additional features or more frequent updates."
+    },
+    {
+      "title": "Multi Timer Online - Run Multiple Countdown Timers at Once | ToolAct",
+      "url": "https://toolact.com/en/multi-timer",
+      "snippet": "Free online multi timer to run several countdown timers at once. Start, pause, and reset each timer independently - perfect for cooking multiple dishes, HIIT intervals, and exam invigilation."
+    }
+  ]
+}
